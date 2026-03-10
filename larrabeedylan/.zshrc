@@ -24,7 +24,7 @@ alias hsit='hist '
 alias h='hist -5'
 alias clean='git clean -i'
 
-alias profile='nano ~/.bash_profile'
+alias profile='nano ~/.zshrc'
 
 ### DIRECTORY ALIASES
 
@@ -34,7 +34,7 @@ alias lla='ls -la'
 alias D='cd ~/Desktop'
 alias cl='clear'
 
-alias x='exit'
+alias x=''
 
 # continually display gpu stats, kinda like htop
 alias gtop="watch -n 1 nvidia-smi"
