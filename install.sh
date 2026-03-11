@@ -100,13 +100,15 @@ link_file() {
   if [[ -L "$dst" ]]; then
     local current_target
     current_target="$(readlink "$dst")"
-    if [[ "$current_target" == "$src" ]]; then
+    # Normalize trailing slashes before comparing
+    if [[ "${current_target%/}" == "${src%/}" ]]; then
       success "Already linked: $dst"
       return
     fi
     warn "Symlink exists but points elsewhere: $dst -> $current_target"
     if ask "  Replace?"; then
-      ln -sf "$src" "$dst"
+      rm -f "$dst"
+      ln -s "$src" "$dst"
       success "Relinked: $dst -> $src"
     fi
   elif [[ -e "$dst" ]]; then
@@ -130,7 +132,7 @@ link_directory_contents() {
   local src_dir="$1" dst_dir="$2" machine="$3"
   # For directories (like .claude/skills), link each item inside individually
   mkdir -p "$dst_dir"
-  for item in "$src_dir"/*/; do
+  for item in "$src_dir"/*; do
     [[ -e "$item" ]] || continue
     local name
     name="$(basename "$item")"
