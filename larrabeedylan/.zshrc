@@ -1,4 +1,6 @@
 
+alias profile='nano ~/.zshrc'
+
 ### GIT HELPERS
 
 alias gs='git status '
@@ -24,7 +26,30 @@ alias hsit='hist '
 alias h='hist -5'
 alias clean='git clean -i'
 
-alias profile='nano ~/.zshrc'
+alias update='CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD) && git prune && git fetch origin --prune && git pull origin $CURRENT_BRANCH --rebase && git status'
+alias freshen='update && git merge origin main -m "Merge main branch into working branch" && git status'
+
+# Git branch helper
+git_branch() {
+    git rev-parse --is-inside-work-tree &>/dev/null || return
+    local branch=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null)
+    echo "($branch)"
+}
+
+# Colored prompt (zsh on macOS always supports color)
+setopt PROMPT_SUBST
+PROMPT="%F{green}%n@%m%f:%F{blue}%~%f \$(git_branch) %# "
+
+# Set terminal window title
+case "$TERM" in
+xterm*|rxvt*)
+    precmd() { print -Pn "\e]0;%n@%m: %~\a" }
+    ;;
+esac
+
+# Enable color for ls on macOS
+export CLICOLOR=1
+export LSCOLORS=ExFxCxDxBxegedabagacad
 
 ### DIRECTORY ALIASES
 
