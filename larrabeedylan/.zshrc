@@ -1,6 +1,9 @@
 
 alias profile='nano ~/.zshrc'
 
+alias pip='pip3'
+alias python='python3'
+
 ### GIT HELPERS
 
 alias gs='git status '
