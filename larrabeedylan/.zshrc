@@ -69,3 +69,5 @@ alias gtop="watch -n 1 nvidia-smi"
 
 # like top but for showing network activity/bandwidth
 alias iftop="sudo iftop"
+
+source ~/.secrets
