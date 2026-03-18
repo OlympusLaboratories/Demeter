@@ -31,6 +31,7 @@ alias clean='git clean -i'
 
 alias update='CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD) && git prune && git fetch origin --prune && git pull origin $CURRENT_BRANCH --rebase && git status'
 alias freshen='update && git merge origin main -m "Merge main branch into working branch" && git status'
+alias f='freshen'
 
 # Terraform helpers
 alias tf='terraform '
