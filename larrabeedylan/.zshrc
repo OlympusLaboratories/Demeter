@@ -75,3 +75,9 @@ alias gtop="watch -n 1 nvidia-smi"
 alias iftop="sudo iftop"
 
 source ~/.secrets
+
+# direnv
+eval "$(direnv hook zsh)"
+
+# a-cli tab completion
+eval "$(_A_COMPLETE=zsh_source a)"
