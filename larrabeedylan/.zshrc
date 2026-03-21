@@ -80,4 +80,5 @@ source ~/.secrets
 eval "$(direnv hook zsh)"
 
 # a-cli tab completion
+autoload -Uz compinit && compinit
 eval "$(_A_COMPLETE=zsh_source a)"
