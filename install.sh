@@ -162,6 +162,11 @@ main() {
   fi
   echo ""
 
+  # ── init submodules if needed ───────────────────────────────────────────────
+  if [[ -f "$REPO_DIR/.gitmodules" ]]; then
+    git -C "$REPO_DIR" submodule update --init --recursive 2>/dev/null
+  fi
+
   local user_dir="$REPO_DIR/$username"
   local home="$HOME"
 
@@ -213,6 +218,19 @@ main() {
       name="$(basename "$src")"
       [[ "$name" == "." || "$name" == ".." ]] && continue
       link_file "$src" "$claude_dst/$name"
+    done
+  fi
+
+  # ── vendor skills (e.g. impeccable) ────────────────────────────────────────
+  local vendor_dir="$REPO_DIR/_vendor"
+  if [[ -d "$vendor_dir" ]]; then
+    for vendor in "$vendor_dir"/*/; do
+      local vendor_skills="$vendor.claude/skills"
+      [[ -d "$vendor_skills" ]] || continue
+      local vendor_name
+      vendor_name="$(basename "$vendor")"
+      bold "Linking vendor skills from $vendor_name ..."
+      link_directory_contents "$vendor_skills" "$claude_dst/skills" "$machine"
     done
   fi
 
