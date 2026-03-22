@@ -9,11 +9,13 @@ Demeter/
 ├── install.sh          # interactive symlink installer
 ├── _starter/           # copy this to get started
 │   └── .bash_profile
+├── _vendor/            # vendor skill sets (git submodules)
 └── <username>/         # your directory — named after your system username
     ├── .bash_profile
     ├── .zshrc
     └── .claude/
-        └── skills/     # Claude Code skills, synced to ~/.claude/skills/
+        ├── skills/     # Claude Code skills, synced to ~/.claude/skills/
+        └── scripts/    # helper scripts used by skills
 ```
 
 ## Setup
@@ -31,6 +33,7 @@ The script will:
 - Detect whether you're on macOS or Linux
 - Symlink each dotfile to `~/`
 - Symlink `.claude/` contents (including skills) to `~/.claude/`
+- Symlink vendor skills from `_vendor/` into `~/.claude/skills/`
 - Back up any existing real files before replacing them
 - Skip already-correct symlinks
 
