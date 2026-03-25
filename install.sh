@@ -147,74 +147,6 @@ link_directory_contents() {
   done
 }
 
-# ── hook configuration ────────────────────────────────────────────────────────
-
-configure_dippy_hook() {
-  local vendor_dir="$REPO_DIR/_vendor"
-  local dippy_hook_bin="$vendor_dir/dippy/bin/dippy-hook"
-  local settings_file="$HOME/.claude/settings.json"
-
-  if [[ ! -x "$dippy_hook_bin" ]]; then
-    warn "Dippy hook script not found at $dippy_hook_bin — skipping hook config"
-    return
-  fi
-
-  bold "Configuring Dippy hook in settings.json..."
-
-  mkdir -p "$HOME/.claude"
-
-  python3 - "$settings_file" "$dippy_hook_bin" <<'PYEOF'
-import json, sys, os
-
-settings_path = sys.argv[1]
-hook_command = sys.argv[2]
-
-if os.path.exists(settings_path):
-    with open(settings_path, "r") as f:
-        settings = json.load(f)
-else:
-    settings = {}
-
-dippy_hook = {"type": "command", "command": hook_command}
-dippy_matcher = "Bash"
-
-hooks = settings.setdefault("hooks", {})
-pre_tool_use = hooks.setdefault("PreToolUse", [])
-
-already_configured = False
-for entry in pre_tool_use:
-    if entry.get("matcher") == dippy_matcher:
-        entry_hooks = entry.get("hooks", [])
-        if any("dippy" in h.get("command", "") for h in entry_hooks):
-            # Update existing dippy hook to current path
-            entry["hooks"] = [
-                {**h, "command": hook_command} if "dippy" in h.get("command", "") else h
-                for h in entry_hooks
-            ]
-            already_configured = True
-        else:
-            entry["hooks"] = entry_hooks + [dippy_hook]
-            already_configured = True
-        break
-
-if not already_configured:
-    pre_tool_use.append({
-        "matcher": dippy_matcher,
-        "hooks": [dippy_hook]
-    })
-
-with open(settings_path, "w") as f:
-    json.dump(settings, f, indent=2)
-    f.write("\n")
-PYEOF
-
-  if [[ $? -eq 0 ]]; then
-    success "Dippy hook configured in $settings_file"
-  else
-    error "Failed to configure Dippy hook. Check python3 availability."
-  fi
-}
-
 # ── main ──────────────────────────────────────────────────────────────────────
 
 main() {
@@ -281,6 +213,11 @@ main() {
         # For subdirectories (e.g. skills/), link each item inside
         bold "  Linking $name/ entries..."
         link_directory_contents "$src" "$claude_dst/$name" "$machine"
+      elif [[ "$name" == "settings.json" ]]; then
+        # settings.json is copied (not symlinked) so we can template paths
+        bold "  Installing $name (with path templating)..."
+        sed "s|__DEMETER_REPO__|$REPO_DIR|g" "$src" > "$claude_dst/$name"
+        success "Installed: $claude_dst/$name"
       else
         link_file "$src" "$claude_dst/$name"
       fi
@@ -318,10 +255,6 @@ main() {
       link_directory_contents "$vendor_skills" "$claude_dst/skills" "$machine"
     done
   fi
-
-  # ── vendor tool hooks (e.g. dippy) ──────────────────────────────────────
-  echo ""
-  configure_dippy_hook
 
   echo ""
   success "Done! You may need to restart your shell for changes to take effect."
