@@ -52,18 +52,16 @@ Analyze the diff and produce a commit message following these rules:
 
 ### Format
 
+Always a **single line** — no body, no blank lines, no multi-line messages.
+
 If `TICKET_ID` exists:
 ```
 TICKET_ID: <subject>
-
-<body (optional)>
 ```
 
 If no ticket ID:
 ```
 <type>: <subject>
-
-<body (optional)>
 ```
 
 ### Prefix
@@ -87,38 +85,18 @@ When there is no ticket ID, use a conventional commit type as the prefix:
 - Specific — name the actual thing changed (function, file, service, config key)
 - Must read well as a PR title — a reviewer scanning a list of PRs should understand the change from the subject alone
 
-### Body
-
-- Only include if the subject line alone doesn't adequately explain the change
-- Explain **why**, not **what** (the diff shows what)
-- Keep to 1-3 short lines
-- Wrap at 72 characters
-
 ### Examples
 
-Simple change with ticket (no body):
 ```
 ENG-123: handle nil pointer in retry logic
 ```
 
-Multi-file change with ticket (with body):
-```
-PLAT-456: add prometheus metrics for batch processor
-
-Expose request count, duration, and error rate counters.
-Follows the same pattern as the existing API metrics.
-```
-
-Simple change without ticket (no body):
 ```
 chore: bump helm chart to 3.2.1
 ```
 
-Multi-file change without ticket (with body):
 ```
 feat: add request deduplication to ingestion pipeline
-
-Uses a bloom filter to skip already-processed messages.
 ```
 
 ## Step 3: Present the Message
@@ -129,7 +107,7 @@ Print the suggested commit message inside a code block so the user can copy it. 
 
 ## Guidelines
 
-- **Be concise.** Most commits need only a subject line. Don't add a body just to fill space.
+- **Single line only.** Never include a body — the subject line must stand alone.
 - **Be precise.** Use actual names from the diff — functions, files, config keys. Don't paraphrase loosely.
 - **One concern per message.** If the diff contains unrelated changes, note this to the user and suggest splitting into separate commits.
 - **Don't editorialize.** No "improve", "clean up", "better" — state the concrete change.

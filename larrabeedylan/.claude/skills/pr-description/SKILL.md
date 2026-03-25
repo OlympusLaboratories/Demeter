@@ -19,19 +19,70 @@ If the URL doesn't look like a GitHub PR URL, warn the user and stop.
 
 ## Step 2: Load the PR Context
 
-Make all three script calls **in parallel in a single message**:
+Use the `gh` CLI to fetch all data. Make all three calls **in parallel in a single message**:
 
+**PR metadata:**
 ```bash
-~/.claude/scripts/github_api.py pr-info <owner> <repo> <pr_number>
-~/.claude/scripts/github_api.py pr-reviews <owner> <repo> <pr_number>
-~/.claude/scripts/github_api.py pr-changes <owner> <repo> <pr_number>
+gh pr view <pr_number> -R <owner>/<repo> --json title,body,state,author,headRefName,baseRefName,number,isDraft
 ```
 
-Each command outputs one JSON object per line. Parse accordingly.
+**PR reviews (GraphQL):**
+```bash
+gh api graphql -f query='
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100) {
+        nodes {
+          id
+          isResolved
+          isOutdated
+          path
+          line
+          originalLine
+          comments(first: 50) {
+            nodes {
+              id
+              author { login }
+              body
+              createdAt
+              replyTo { id }
+            }
+          }
+        }
+      }
+      reviews(first: 50) {
+        nodes {
+          id
+          author { login }
+          body
+          state
+          submittedAt
+        }
+      }
+      comments(first: 100) {
+        nodes {
+          id
+          author { login }
+          body
+          createdAt
+        }
+      }
+    }
+  }
+}' -F owner='<owner>' -F repo='<repo>' -F number=<pr_number>
+```
+
+**PR file changes:**
+```bash
+gh api repos/<owner>/<repo>/pulls/<pr_number>/files --paginate
+```
+
+Parse each response as JSON.
 
 ## Step 2c: Check Out the PR Branch
 
-From the PR metadata (fetched in Step 2), extract the **source branch name** (`source_branch` field).
+From the PR metadata (fetched in Step 2), extract the **source branch name** (`headRefName` field).
 
 1. **Check the current branch** — run `git branch --show-current` to see what branch is currently checked out.
 2. **If already on the correct branch**, skip ahead to Step 3.
@@ -47,11 +98,11 @@ This ensures the local codebase matches the PR so that file reads and edits targ
 
 From the raw reviews response, filter to only **unresolved** threads that contain review feedback.
 
-Exclude threads where `resolved: true` (the `pr-reviews` command returns this directly from the GitHub GraphQL API).
+Exclude inline threads where `isResolved: true` (returned directly from the GitHub GraphQL API).
 
 Exclude also:
 - Bot comments that are purely operational (CI status, auto-generated reports). Do NOT exclude AI code-review bots — their feedback is real review feedback.
-- Review summary comments with `review_state: "APPROVED"` and no actionable body text.
+- Review entries with `state: "APPROVED"` and no actionable body text.
 - Threads where the author is the PR author and there are no replies (self-notes).
 
 For each remaining thread, extract:

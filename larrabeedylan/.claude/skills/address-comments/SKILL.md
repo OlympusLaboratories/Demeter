@@ -21,25 +21,76 @@ If the URL doesn't look like a GitHub PR URL, warn the user and stop.
 
 ### 2a. Fetch PR metadata, reviews, and diff in parallel
 
-Use `~/.claude/scripts/github_api.py` to fetch all data. Make all three calls **in parallel in a single message**:
+Use the `gh` CLI to fetch all data. Make all three calls **in parallel in a single message**:
 
+**PR metadata:**
 ```bash
-source ~/.secrets && python3 ~/.claude/scripts/github_api.py pr-info <owner> <repo> <pr_number>
-source ~/.secrets && python3 ~/.claude/scripts/github_api.py pr-reviews <owner> <repo> <pr_number>
-source ~/.secrets && python3 ~/.claude/scripts/github_api.py pr-changes <owner> <repo> <pr_number>
+gh pr view <pr_number> -R <owner>/<repo> --json title,body,state,author,headRefName,baseRefName,number,isDraft
 ```
 
-Each command outputs one JSON object per line. The script reads the token from the `GITHUB_PERSONAL_ACCESS_TOKEN` environment variable, which is set by sourcing `~/.secrets`.
+**PR reviews (GraphQL):**
+```bash
+gh api graphql -f query='
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100) {
+        nodes {
+          id
+          isResolved
+          isOutdated
+          path
+          line
+          originalLine
+          comments(first: 50) {
+            nodes {
+              id
+              author { login }
+              body
+              createdAt
+              replyTo { id }
+            }
+          }
+        }
+      }
+      reviews(first: 50) {
+        nodes {
+          id
+          author { login }
+          body
+          state
+          submittedAt
+        }
+      }
+      comments(first: 100) {
+        nodes {
+          id
+          author { login }
+          body
+          createdAt
+        }
+      }
+    }
+  }
+}' -F owner='<owner>' -F repo='<repo>' -F number=<pr_number>
+```
 
-- `pr-info` — PR title, description, author, source/target branch
-- `pr-reviews` — all inline review threads, review-level comments, and general PR comments
-- `pr-changes` — file diffs (patch hunks per file)
+**PR file changes:**
+```bash
+gh api repos/<owner>/<repo>/pulls/<pr_number>/files --paginate
+```
+
+Parse each response as JSON.
+
+- **pr-info fields:** `title`, `body` (description), `state`, `author.login`, `headRefName` (source branch), `baseRefName` (target branch), `number`, `isDraft`
+- **pr-reviews fields:** The GraphQL response is under `data.repository.pullRequest`. Contains `reviewThreads` (inline comments with `isResolved`, `path`, `line`, and nested `comments`), `reviews` (top-level review bodies with `state`), and `comments` (general PR comments).
+- **pr-changes fields:** Array of file objects with `filename`, `previous_filename`, `patch` (diff hunk), and `status`.
 
 Do NOT serialize these calls — run them in parallel.
 
 ## Step 2b: Check Out the PR Branch
 
-From the `pr-info` output, extract the **source branch name** (`source_branch` field).
+From the PR metadata output, extract the **source branch name** (`headRefName` field).
 
 1. **Check the current branch** — run `git branch --show-current`.
 2. **If already on the correct branch**, skip ahead to Step 3.
@@ -53,25 +104,25 @@ This ensures the local codebase matches the PR so that file reads and edits targ
 
 ## Step 3: Filter and Enumerate Threads
 
-The `pr-reviews` output contains three types of objects:
-- `type: "inline"` — diff comments attached to a specific file and line; have an `isResolved` field
-- `type: "review"` — top-level review body (approval/request-changes summary); `resolved: null`
-- `type: "general"` — general PR comments not attached to a line; `resolved: null`
+The GraphQL reviews response contains three collections under `data.repository.pullRequest`:
+- `reviewThreads.nodes` — inline diff comments attached to a file and line; have `isResolved`, `path`, `line` fields, with nested `comments.nodes` (first comment is root, rest are replies)
+- `reviews.nodes` — top-level review bodies (approval/request-changes summary); have `state` and `body`
+- `comments.nodes` — general PR comments not attached to a line
 
 **Filter out:**
-- Inline threads where `resolved: true`
+- Inline threads where `isResolved: true`
 - Empty bodies (body is blank or whitespace only)
 - Bot/automation comments (e.g., from `github-actions`, `dependabot`, `atlantis`). Do NOT exclude AI code-review bots — their feedback is real review feedback.
-- `type: "review"` entries with `review_state: "APPROVED"` and no substantive body
+- Review entries with `state: "APPROVED"` and no substantive body
 
 For each remaining thread, extract:
 - **Thread number** (sequential, starting at 1)
 - **Type** (`inline`, `review`, or `general`)
-- **Author** of the initial comment
-- **File path and line** if inline (from `position.new_path` and `position.new_line`)
+- **Author** of the initial comment (from `author.login`)
+- **File path and line** if inline (from `path` and `line` on the thread node)
 - **Initial comment body** (full text)
-- **Replies** (from the `replies` array, each with `author` and `body`)
-- **Resolved status**
+- **Replies** (subsequent entries in `comments.nodes` after the first, each with `author.login` and `body`)
+- **Resolved status** (`isResolved` for inline threads)
 
 ## Step 4: Display the Threads
 
@@ -205,13 +256,13 @@ After drafting a reply (for reject or modify decisions), ask the user:
 
 If the user says yes:
 
-1. Use the **thread ID** from the `pr-reviews` data for the selected thread (the `id` field on inline threads).
+1. Use the **thread ID** from the reviews GraphQL data for the selected thread (the `id` field on `reviewThreads.nodes`).
 2. Post the reply using:
    ```bash
-   source ~/.secrets && python3 ~/.claude/scripts/github_api.py reply-to-thread <thread_id> '<body>'
+   gh api graphql -f query='mutation($threadId: ID!, $body: String!) { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $threadId, body: $body}) { comment { id body createdAt } } }' -f threadId='<thread_id>' -f body='<body>'
    ```
    - The `<thread_id>` is the GraphQL node ID from the thread data.
-   - The `<body>` is the drafted reply text. Properly escape quotes and special characters for shell.
+   - The `<body>` is the drafted reply text.
 3. Confirm to the user that the reply was posted successfully, or report any errors.
 
 If the user says no, continue to Step 8 as normal.

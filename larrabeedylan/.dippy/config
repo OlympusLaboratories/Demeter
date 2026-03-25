@@ -1,5 +1,1 @@
 # Global Dippy config
-
-#---- Claude skills ----#
-allow source ~/.secrets
-allow python3 ~/.claude/scripts/github_api.py

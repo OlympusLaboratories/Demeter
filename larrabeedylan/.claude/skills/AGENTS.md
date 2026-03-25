@@ -15,9 +15,9 @@ Each skill is a subdirectory containing a `SKILL.md` file that defines the skill
 | `fix` | Linear ticket implementation |
 | `pr-description` | Generate PR descriptions |
 
-## Helper Scripts
+## GitHub Data
 
-`../scripts/github_api.py` — GitHub API helper used by PR-related skills (e.g., `explain`, `pr-description`, `address-comments`).
+PR-related skills (`explain`, `pr-description`, `address-comments`) use the `gh` CLI for all GitHub API access — both REST (`gh api`, `gh pr view --json`) and GraphQL (`gh api graphql`). Authentication is managed by `gh auth login`.
 
 ## Adding a New Skill
 

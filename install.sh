@@ -81,9 +81,9 @@ SKIP_LIST=(
   # ".bash_profile:linux"   # example: skip bash_profile on linux
 )
 
-# Vendor packages whose skills should be prefixed with "<vendor>-" to avoid
-# collisions with other skill sets that use generic names.
-PREFIX_VENDORS=(
+# Vendor packages whose skills should NOT be linked.
+# Use this for vendors that provide dev-only skills not relevant to your workflow.
+SKIP_VENDOR_SKILLS=(
   "dippy"
 )
 
@@ -295,7 +295,7 @@ main() {
     done
   fi
 
-  # ── vendor skills (e.g. impeccable, dippy) ─────────────────────────────────
+  # ── vendor skills (e.g. impeccable) ────────────────────────────────────────
   local vendor_dir="$REPO_DIR/_vendor"
   if [[ -d "$vendor_dir" ]]; then
     for vendor in "$vendor_dir"/*/; do
@@ -303,26 +303,19 @@ main() {
       [[ -d "$vendor_skills" ]] || continue
       local vendor_name
       vendor_name="$(basename "$vendor")"
-      bold "Linking vendor skills from $vendor_name ..."
 
-      # Check if this vendor's skills should be prefixed
-      local should_prefix=false
-      for pv in "${PREFIX_VENDORS[@]+"${PREFIX_VENDORS[@]}"}"; do
-        [[ "$pv" == "$vendor_name" ]] && { should_prefix=true; break; }
+      # Check if this vendor's skills should be skipped
+      local skip_skills=false
+      for sv in "${SKIP_VENDOR_SKILLS[@]+"${SKIP_VENDOR_SKILLS[@]}"}"; do
+        [[ "$sv" == "$vendor_name" ]] && { skip_skills=true; break; }
       done
-
-      if [[ "$should_prefix" == true ]]; then
-        mkdir -p "$claude_dst/skills"
-        for item in "$vendor_skills"/*/; do
-          [[ -d "$item" ]] || continue
-          local skill_name
-          skill_name="$(basename "$item")"
-          should_skip "$skill_name" "$machine" && { warn "Skipping $skill_name (machine=$machine)"; continue; }
-          link_file "$item" "$claude_dst/skills/${vendor_name}-${skill_name}"
-        done
-      else
-        link_directory_contents "$vendor_skills" "$claude_dst/skills" "$machine"
+      if [[ "$skip_skills" == true ]]; then
+        info "Skipping skills for $vendor_name (in SKIP_VENDOR_SKILLS)"
+        continue
       fi
+
+      bold "Linking vendor skills from $vendor_name ..."
+      link_directory_contents "$vendor_skills" "$claude_dst/skills" "$machine"
     done
   fi
 

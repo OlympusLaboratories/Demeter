@@ -19,16 +19,71 @@ If the URL doesn't look like a GitHub PR URL, warn the user and stop.
 
 ## Step 2: Load the PR Context
 
-Make all four script calls **in parallel in a single message**:
+Use the `gh` CLI to fetch all data. Make all four calls **in parallel in a single message**:
 
+**PR metadata:**
 ```bash
-~/.claude/scripts/github_api.py pr-info <owner> <repo> <pr_number>
-~/.claude/scripts/github_api.py pr-reviews <owner> <repo> <pr_number>
-~/.claude/scripts/github_api.py pr-changes <owner> <repo> <pr_number>
-~/.claude/scripts/github_api.py pr-commits <owner> <repo> <pr_number>
+gh pr view <pr_number> -R <owner>/<repo> --json title,body,state,author,headRefName,baseRefName,number,isDraft
 ```
 
-Each command outputs one JSON object per line. Parse accordingly.
+**PR reviews (GraphQL):**
+```bash
+gh api graphql -f query='
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100) {
+        nodes {
+          id
+          isResolved
+          isOutdated
+          path
+          line
+          originalLine
+          comments(first: 50) {
+            nodes {
+              id
+              author { login }
+              body
+              createdAt
+              replyTo { id }
+            }
+          }
+        }
+      }
+      reviews(first: 50) {
+        nodes {
+          id
+          author { login }
+          body
+          state
+          submittedAt
+        }
+      }
+      comments(first: 100) {
+        nodes {
+          id
+          author { login }
+          body
+          createdAt
+        }
+      }
+    }
+  }
+}' -F owner='<owner>' -F repo='<repo>' -F number=<pr_number>
+```
+
+**PR file changes:**
+```bash
+gh api repos/<owner>/<repo>/pulls/<pr_number>/files --paginate
+```
+
+**PR commits:**
+```bash
+gh pr view <pr_number> -R <owner>/<repo> --json commits
+```
+
+Parse each response as JSON.
 
 ## Step 3: Build a Mental Model
 
