@@ -3,7 +3,7 @@
 Token read from GITHUB_PERSONAL_ACCESS_TOKEN environment variable.
 
 Usage: github_api.py <command> [args...]
-Commands: current-user | open-prs | merged-prs | pr-info | pr-reviews | pr-changes | pr-commits
+Commands: current-user | open-prs | merged-prs | pr-info | pr-reviews | pr-changes | pr-commits | reply-to-thread
 """
 
 import json
@@ -259,14 +259,44 @@ def cmd_pr_commits(token, args):
         })
 
 
+_REPLY_TO_THREAD_MUTATION = """
+mutation($threadId: ID!, $body: String!) {
+  addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $threadId, body: $body}) {
+    comment {
+      id
+      body
+      createdAt
+    }
+  }
+}
+"""
+
+
+def cmd_reply_to_thread(token, args):
+    if len(args) < 2:
+        sys.exit('Usage: github_api.py reply-to-thread <thread_id> <body>')
+    thread_id, body = args[0], args[1]
+    data = graphql_post(token, _REPLY_TO_THREAD_MUTATION, {
+        'threadId': thread_id,
+        'body': body,
+    })
+    comment = data['addPullRequestReviewThreadReply']['comment']
+    emit({
+        'id': comment['id'],
+        'body': comment['body'],
+        'created_at': comment['createdAt'],
+    })
+
+
 COMMANDS = {
-    'current-user': cmd_current_user,
-    'open-prs':     cmd_open_prs,
-    'merged-prs':   cmd_merged_prs,
-    'pr-info':      cmd_pr_info,
-    'pr-reviews':   cmd_pr_reviews,
-    'pr-changes':   cmd_pr_changes,
-    'pr-commits':   cmd_pr_commits,
+    'current-user':    cmd_current_user,
+    'open-prs':        cmd_open_prs,
+    'merged-prs':      cmd_merged_prs,
+    'pr-info':         cmd_pr_info,
+    'pr-reviews':      cmd_pr_reviews,
+    'pr-changes':      cmd_pr_changes,
+    'pr-commits':      cmd_pr_commits,
+    'reply-to-thread': cmd_reply_to_thread,
 }
 
 if __name__ == '__main__':

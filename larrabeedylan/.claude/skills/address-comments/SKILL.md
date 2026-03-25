@@ -179,6 +179,8 @@ Suggested reply for Thread N:
 ---
 ```
 
+Then proceed to **Step 7b** to offer posting the reply.
+
 ### If applying with modifications:
 
 Both make the code changes AND draft a reply explaining the partial application:
@@ -192,6 +194,29 @@ Good catch on [aspect]. I've [describe what was changed].
 Regarding [the part not applied] — I opted to keep [current approach] because [reasoning]. [Optional: suggest follow-up or alternative].
 ---
 ```
+
+Then proceed to **Step 7b** to offer posting the reply.
+
+### Step 7b: Offer to Post the Reply
+
+After drafting a reply (for reject or modify decisions), ask the user:
+
+> Would you like me to post this reply to the thread on GitHub? (yes/no)
+
+If the user says yes:
+
+1. Use the **thread ID** from the `pr-reviews` data for the selected thread (the `id` field on inline threads).
+2. Post the reply using:
+   ```bash
+   source ~/.secrets && python3 ~/.claude/scripts/github_api.py reply-to-thread <thread_id> '<body>'
+   ```
+   - The `<thread_id>` is the GraphQL node ID from the thread data.
+   - The `<body>` is the drafted reply text. Properly escape quotes and special characters for shell.
+3. Confirm to the user that the reply was posted successfully, or report any errors.
+
+If the user says no, continue to Step 8 as normal.
+
+**Note:** This only applies to **inline** threads (which have a thread ID). For `general` or `review` type comments, the `reply-to-thread` command won't work — in those cases, skip this step and just present the drafted reply for the user to copy.
 
 ## Step 8: Offer to Continue
 
