@@ -9,7 +9,7 @@ Demeter/
 ├── install.sh          # interactive symlink installer
 ├── _starter/           # copy this to get started
 │   └── .bash_profile
-├── _vendor/            # vendor skill sets (git submodules)
+├── _vendor/            # vendor packages — skills + tools (git submodules)
 └── <username>/         # your directory — named after your system username
     ├── .bash_profile
     ├── .zshrc
@@ -34,6 +34,8 @@ The script will:
 - Symlink each dotfile to `~/`
 - Symlink `.claude/` contents (including skills) to `~/.claude/`
 - Symlink vendor skills from `_vendor/` into `~/.claude/skills/`
+- Install vendor tools (e.g. [Dippy](https://github.com/OlympusLabs-Forks/Dippy) — a PreToolUse hook that auto-approves safe bash commands)
+- Configure Claude Code hooks in `~/.claude/settings.json`
 - Back up any existing real files before replacing them
 - Skip already-correct symlinks
 

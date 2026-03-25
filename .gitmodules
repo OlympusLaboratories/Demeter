@@ -1,3 +1,6 @@
 [submodule "_vendor/impeccable"]
 	path = _vendor/impeccable
 	url = https://github.com/OlympusLabs-Forks/impeccable.git
+[submodule "_vendor/dippy"]
+	path = _vendor/dippy
+	url = https://github.com/OlympusLabs-Forks/Dippy.git

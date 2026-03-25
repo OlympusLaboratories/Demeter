@@ -11,7 +11,7 @@ Demeter/
   install.sh              # Interactive symlink installer (idempotent)
   _starter/               # Template for new contributors — copy to get started
     .bash_profile
-  _vendor/                # Vendor skills (e.g. impeccable) — linked by installer
+  _vendor/                # Vendor packages (skills + tools) — linked/installed by installer
   <username>/             # Per-user dotfile directory
     .zshrc
     .bash_profile
@@ -36,6 +36,7 @@ The installer does the following in order:
 4. Symlinks dotfiles from `<username>/` to `~/` (skipping `.claude/`)
 5. Symlinks `.claude/` contents individually (skills linked per-directory into `~/.claude/skills/`)
 6. Symlinks vendor skills from `_vendor/*/` into `~/.claude/skills/`
+7. Configures Claude Code hooks in `~/.claude/settings.json` for vendor tools (e.g. Dippy)
 
 Key behaviors:
 - Backs up existing real files before replacing
@@ -58,4 +59,5 @@ Key behaviors:
 - **No secrets in repo**: Sensitive values (API keys, tokens) belong in `~/.secrets` or similar, sourced from shell config — never committed
 - **Machine-specific skipping**: Use the `SKIP_LIST` array in `install.sh` to control per-platform linking
 - **Skills**: Each skill gets its own directory under `.claude/skills/` with a `SKILL.md` file
-- **Vendor skills**: Third-party skill sets go in `_vendor/<name>/` as git submodules
+- **Vendor packages**: Third-party skill sets and tools go in `_vendor/<name>/` as git submodules
+- **Vendor tools**: Packages in `_vendor/` that need CLI installation (e.g. Dippy) are handled by `install_vendor_tools()` in `install.sh`

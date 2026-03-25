@@ -81,6 +81,12 @@ SKIP_LIST=(
   # ".bash_profile:linux"   # example: skip bash_profile on linux
 )
 
+# Vendor packages whose skills should be prefixed with "<vendor>-" to avoid
+# collisions with other skill sets that use generic names.
+PREFIX_VENDORS=(
+  "dippy"
+)
+
 should_skip() {
   local file="$1" machine="$2"
   for entry in "${SKIP_LIST[@]+"${SKIP_LIST[@]}"}"; do
@@ -139,6 +145,74 @@ link_directory_contents() {
     should_skip "$name" "$machine" && { warn "Skipping $name (machine=$machine)"; continue; }
     link_file "$item" "$dst_dir/$name"
   done
+}
+
+# ── hook configuration ────────────────────────────────────────────────────────
+
+configure_dippy_hook() {
+  local vendor_dir="$REPO_DIR/_vendor"
+  local dippy_hook_bin="$vendor_dir/dippy/bin/dippy-hook"
+  local settings_file="$HOME/.claude/settings.json"
+
+  if [[ ! -x "$dippy_hook_bin" ]]; then
+    warn "Dippy hook script not found at $dippy_hook_bin — skipping hook config"
+    return
+  fi
+
+  bold "Configuring Dippy hook in settings.json..."
+
+  mkdir -p "$HOME/.claude"
+
+  python3 - "$settings_file" "$dippy_hook_bin" <<'PYEOF'
+import json, sys, os
+
+settings_path = sys.argv[1]
+hook_command = sys.argv[2]
+
+if os.path.exists(settings_path):
+    with open(settings_path, "r") as f:
+        settings = json.load(f)
+else:
+    settings = {}
+
+dippy_hook = {"type": "command", "command": hook_command}
+dippy_matcher = "Bash"
+
+hooks = settings.setdefault("hooks", {})
+pre_tool_use = hooks.setdefault("PreToolUse", [])
+
+already_configured = False
+for entry in pre_tool_use:
+    if entry.get("matcher") == dippy_matcher:
+        entry_hooks = entry.get("hooks", [])
+        if any("dippy" in h.get("command", "") for h in entry_hooks):
+            # Update existing dippy hook to current path
+            entry["hooks"] = [
+                {**h, "command": hook_command} if "dippy" in h.get("command", "") else h
+                for h in entry_hooks
+            ]
+            already_configured = True
+        else:
+            entry["hooks"] = entry_hooks + [dippy_hook]
+            already_configured = True
+        break
+
+if not already_configured:
+    pre_tool_use.append({
+        "matcher": dippy_matcher,
+        "hooks": [dippy_hook]
+    })
+
+with open(settings_path, "w") as f:
+    json.dump(settings, f, indent=2)
+    f.write("\n")
+PYEOF
+
+  if [[ $? -eq 0 ]]; then
+    success "Dippy hook configured in $settings_file"
+  else
+    error "Failed to configure Dippy hook. Check python3 availability."
+  fi
 }
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -221,7 +295,7 @@ main() {
     done
   fi
 
-  # ── vendor skills (e.g. impeccable) ────────────────────────────────────────
+  # ── vendor skills (e.g. impeccable, dippy) ─────────────────────────────────
   local vendor_dir="$REPO_DIR/_vendor"
   if [[ -d "$vendor_dir" ]]; then
     for vendor in "$vendor_dir"/*/; do
@@ -230,9 +304,31 @@ main() {
       local vendor_name
       vendor_name="$(basename "$vendor")"
       bold "Linking vendor skills from $vendor_name ..."
-      link_directory_contents "$vendor_skills" "$claude_dst/skills" "$machine"
+
+      # Check if this vendor's skills should be prefixed
+      local should_prefix=false
+      for pv in "${PREFIX_VENDORS[@]+"${PREFIX_VENDORS[@]}"}"; do
+        [[ "$pv" == "$vendor_name" ]] && { should_prefix=true; break; }
+      done
+
+      if [[ "$should_prefix" == true ]]; then
+        mkdir -p "$claude_dst/skills"
+        for item in "$vendor_skills"/*/; do
+          [[ -d "$item" ]] || continue
+          local skill_name
+          skill_name="$(basename "$item")"
+          should_skip "$skill_name" "$machine" && { warn "Skipping $skill_name (machine=$machine)"; continue; }
+          link_file "$item" "$claude_dst/skills/${vendor_name}-${skill_name}"
+        done
+      else
+        link_directory_contents "$vendor_skills" "$claude_dst/skills" "$machine"
+      fi
     done
   fi
+
+  # ── vendor tool hooks (e.g. dippy) ──────────────────────────────────────
+  echo ""
+  configure_dippy_hook
 
   echo ""
   success "Done! You may need to restart your shell for changes to take effect."
