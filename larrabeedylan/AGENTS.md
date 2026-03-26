@@ -6,7 +6,7 @@ This is Dylan's dotfile directory. Files here get symlinked to `~/` by `install.
 
 | File | Purpose | Symlink target |
 |---|---|---|
-| `.zshrc` | Zsh config — aliases, prompt, completions, env setup | `~/.zshrc` |
+| `.bashrc` | Bash config — aliases, prompt, completions, env setup | `~/.bashrc` |
 | `.claude/skills/` | Claude Code skills (each skill is a subdirectory with `SKILL.md`) | `~/.claude/skills/<name>/` |
 | `.claude/scripts/` | Helper scripts — `gitlab-api.sh` for GitLab API access | `~/.claude/scripts/` |
 | `.claude/settings.json` | Claude Code permissions and hooks (copied with path templating) | `~/.claude/settings.json` |
@@ -16,7 +16,7 @@ This is Dylan's dotfile directory. Files here get symlinked to `~/` by `install.
 
 - Secrets are sourced from `~/.secrets` (not committed) — includes DB credentials, API keys, tokens
 - `direnv` is used for per-project environment setup
-- `a-cli` (Apollo) tab completion is loaded via `eval "$(_A_COMPLETE=zsh_source a)"`
+- `a-cli` (Apollo) tab completion is loaded via `eval "$(_A_COMPLETE=bash_source a)"`
 - Git aliases are short mnemonics (`gs`, `ga`, `gc`, `gpsh`, etc.)
 - `go` is aliased to `git checkout`; use `gol` for the Go language binary
 - `update` and `freshen` aliases handle branch sync workflows (auto-detects default branch)

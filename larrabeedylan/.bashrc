@@ -1,5 +1,5 @@
-alias profile='nano ~/.zshrc'
-alias src='source ~/.zshrc'
+alias profile='nano ~/.bashrc'
+alias src='source ~/.bashrc'
 
 alias pip='pip3'
 alias python='python3'
@@ -69,19 +69,20 @@ alias kcontexts="kubectl config get-contexts"
 
 # Git branch helper function
 git_branch() {
-    git rev-parse --is-inside-work-tree &>/dev/null || return
-    local branch=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null)
-    echo "($branch)"
+  git branch 2>/dev/null | sed -e '/^[^*]/d' -e 's/* \(.*\)/(\1)/'
 }
 
-# Colored prompt (zsh with git branch)
-setopt PROMPT_SUBST
-PROMPT="%F{green}%n@%m%f:%F{blue}%~%f \$(git_branch) %# "
+# Colored prompt with git branch
+if [ -x /usr/bin/tput ] && tput setaf 1 >&/dev/null; then
+  PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\] $(git_branch) \$ '
+else
+  PS1='\u@\h:\w $(git_branch) \$ '
+fi
 
 # Terminal window title
 case "$TERM" in
 xterm*|rxvt*)
-    precmd() { print -Pn "\e]0;%n@%m: %~\a" }
+    PS1="\[\e]0;\u@\h: \w\a\]$PS1"
     ;;
 esac
 
@@ -129,15 +130,14 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
 
 # Google Cloud SDK
-if [ -f "$HOME/google-cloud-sdk/path.zsh.inc" ]; then . "$HOME/google-cloud-sdk/path.zsh.inc"; fi
-if [ -f "$HOME/google-cloud-sdk/completion.zsh.inc" ]; then . "$HOME/google-cloud-sdk/completion.zsh.inc"; fi
+if [ -f "$HOME/google-cloud-sdk/path.bash.inc" ]; then . "$HOME/google-cloud-sdk/path.bash.inc"; fi
+if [ -f "$HOME/google-cloud-sdk/completion.bash.inc" ]; then . "$HOME/google-cloud-sdk/completion.bash.inc"; fi
 
 # Source secrets (not committed)
 [ -f ~/.secrets ] && source ~/.secrets
 
 # direnv integration
-eval "$(direnv hook zsh)"
+eval "$(direnv hook bash)"
 
 # a-cli (Apollo) tab completion
-autoload -Uz compinit && compinit
-eval "$(_A_COMPLETE=zsh_source a)"
+eval "$(_A_COMPLETE=bash_source a)"
