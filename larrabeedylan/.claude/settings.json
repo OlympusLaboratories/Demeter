@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "WebSearch",
-      "WebFetch"
+      "WebFetch",
+      "Glob",
+      "Read"
     ]
   },
   "hooks": {

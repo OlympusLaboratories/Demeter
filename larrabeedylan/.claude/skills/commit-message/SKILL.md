@@ -81,7 +81,7 @@ When there is no ticket ID, use a conventional commit type as the prefix:
 
 - Imperative mood ("add", "fix", "update" — not "added", "fixes", "updated")
 - Lowercase after the prefix, no period at the end
-- The full line (prefix + subject) must be under 72 characters
+- The full line (prefix + subject) must be **at most 70 characters** (GitHub truncates PR titles beyond this — count carefully)
 - Specific — name the actual thing changed (function, file, service, config key)
 - Must read well as a PR title — a reviewer scanning a list of PRs should understand the change from the subject alone
 
