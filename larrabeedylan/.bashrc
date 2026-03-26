@@ -139,5 +139,3 @@ if [ -f "$HOME/google-cloud-sdk/completion.bash.inc" ]; then . "$HOME/google-clo
 # direnv integration
 eval "$(direnv hook bash)"
 
-# a-cli (Apollo) tab completion
-eval "$(_A_COMPLETE=bash_source a)"
