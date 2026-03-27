@@ -257,19 +257,14 @@ After drafting a reply (for reject or modify decisions), ask the user:
 If the user says yes:
 
 1. Use the **thread ID** from the reviews GraphQL data for the selected thread (the `id` field on `reviewThreads.nodes`).
-2. Write the reply body to a temporary file, then post using `-F body=@<file>` to avoid shell encoding issues (em-dashes, quotes, backticks, etc. break `-f body='...'`):
+2. Post the reply using the `github_api.py` script, piping the body via heredoc to stdin to avoid shell encoding issues:
    ```bash
-   cat > /tmp/pr-reply-body.txt << 'ENDOFBODY'
+   python3 ~/.claude/scripts/github_api.py reply-to-thread '<thread_id>' << 'ENDOFBODY'
    <reply text here>
    ENDOFBODY
-
-   gh api graphql \
-     --field query='mutation($threadId: ID!, $body: String!) { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $threadId, body: $body}) { comment { id body createdAt } } }' \
-     --field threadId='<thread_id>' \
-     -F body=@/tmp/pr-reply-body.txt
    ```
    - The `<thread_id>` is the GraphQL node ID from the thread data.
-   - **Never** pass the body inline with `-f body='...'` — special characters will cause GraphQL parse errors.
+   - **Always** use a heredoc piped to stdin for the body — never pass it as a CLI argument or use temp files with redirects.
 3. Confirm to the user that the reply was posted successfully, or report any errors.
 
 If the user says no, continue to Step 8 as normal.

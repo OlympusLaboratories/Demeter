@@ -273,9 +273,13 @@ mutation($threadId: ID!, $body: String!) {
 
 
 def cmd_reply_to_thread(token, args):
-    if len(args) < 2:
-        sys.exit('Usage: github_api.py reply-to-thread <thread_id> <body>')
-    thread_id, body = args[0], args[1]
+    if len(args) < 1:
+        sys.exit('Usage: github_api.py reply-to-thread <thread_id> [body]\n'
+                 '       If body is omitted, reads from stdin.')
+    thread_id = args[0]
+    body = args[1] if len(args) >= 2 else sys.stdin.read().strip()
+    if not body:
+        sys.exit('Error: empty reply body')
     data = graphql_post(token, _REPLY_TO_THREAD_MUTATION, {
         'threadId': thread_id,
         'body': body,
