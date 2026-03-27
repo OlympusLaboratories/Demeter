@@ -8,3 +8,4 @@ allow python -m pytest *
 allow python3 ~/.claude/scripts/github_api.py *
 allow python ~/.claude/scripts/github_api.py *
 allow git checkout *
+allow mkdir *
