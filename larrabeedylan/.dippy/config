@@ -5,3 +5,4 @@ allow ruff format *
 allow gcloud storage ls *
 allow python3 -m pytest *
 allow python -m pytest *
+allow git checkout *
