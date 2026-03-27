@@ -4,7 +4,13 @@
       "WebSearch",
       "WebFetch",
       "Glob",
-      "Read"
+      "Read",
+      "Bash(~/.claude/scripts/gitlab-api.sh:*)",
+      "mcp__claude_ai_Linear__list_issues",
+      "mcp__claude_ai_Linear__get_issue",
+      "mcp__claude_ai_Linear__list_comments",
+      "mcp__claude_ai_Notion__notion-fetch",
+      "mcp__claude_ai_Notion__notion-search"
     ]
   },
   "hooks": {

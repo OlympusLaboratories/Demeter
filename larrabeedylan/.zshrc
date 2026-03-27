@@ -34,6 +34,9 @@ alias update='CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD) && git prune && 
 alias freshen='update && git merge origin main -m "Merge main branch into working branch" && git status'
 alias f='freshen'
 
+# Go (alias 'go' is git checkout, use 'gol' for Go lang)
+alias gol='command go'
+
 # Terraform helpers
 alias tf='terraform '
 
@@ -75,7 +78,7 @@ alias gtop="watch -n 1 nvidia-smi"
 # like top but for showing network activity/bandwidth
 alias iftop="sudo iftop"
 
-source ~/.secrets
+[ -f ~/.secrets ] && source ~/.secrets
 
 # direnv
 eval "$(direnv hook zsh)"

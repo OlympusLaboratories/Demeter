@@ -1,1 +1,5 @@
 # Global Dippy config
+allow terraform *
+allow ruff check *
+allow ruff format *
+allow gcloud storage ls *
