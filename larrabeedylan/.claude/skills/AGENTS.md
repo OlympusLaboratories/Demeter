@@ -11,6 +11,7 @@ Each skill is a subdirectory containing a `SKILL.md` file that defines the skill
 | `address-comments` | Handle PR review feedback |
 | `branch-context` | Load branch context |
 | `commit-message` | Generate commit messages |
+| `document` | Audit and update README.md and AGENTS.md to reflect current repo state |
 | `explain` | PR change breakdown |
 | `fix` | Linear ticket implementation |
 | `pr-description` | Generate PR descriptions |
