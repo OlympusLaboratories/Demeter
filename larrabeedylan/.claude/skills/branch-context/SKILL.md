@@ -78,4 +78,3 @@ After completing the above steps, reflect on how the execution went. Consider:
 - Were there any edge cases (uncommitted changes, merge conflicts, shallow clones)?
 
 If any issues were encountered, **edit this skill file** (`~/.claude/skills/branch-context/SKILL.md`) to add instructions, warnings, or tips that would prevent the same issue next time. Keep edits surgical — add a note near the relevant step rather than rewriting sections. Briefly tell the user what was updated and why.
-

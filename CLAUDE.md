@@ -34,14 +34,22 @@ The installer does the following in order:
 2. Detects machine type (macOS = `mac`, Linux = `linux`)
 3. Initializes git submodules if `.gitmodules` exists
 4. Symlinks dotfiles from `<username>/` to `~/` (skipping `.claude/`)
-5. Symlinks `.claude/` contents individually (skills linked per-directory into `~/.claude/skills/`)
-6. Symlinks vendor skills from `_vendor/*/` into `~/.claude/skills/`
-7. Configures Claude Code hooks in `~/.claude/settings.json` for vendor tools (e.g. Dippy)
+5. Backs up existing `~/.claude` directory (timestamped copy)
+6. Symlinks `.claude/` contents individually (skills linked per-directory into `~/.claude/skills/`)
+7. Symlinks vendor skills from `_vendor/*/` into `~/.claude/skills/`
+8. Cleans stale skill symlinks (removes symlinks pointing to deleted repo paths)
+9. Creates data directories for skills that accumulate context
+10. Configures Claude Code hooks in `~/.claude/settings.json` for vendor tools (e.g. Dippy)
 
 Key behaviors:
+- Creates a full backup of `~/.claude` before modifying it
 - Backs up existing real files before replacing
 - Skips already-correct symlinks
+- Removes stale skill symlinks that point into the repo but whose target no longer exists
 - Respects `SKIP_LIST` for machine-specific files (format: `"filename:machine"`)
+- `settings.json` is copied (not symlinked) with `__DEMETER_REPO__` path templating
+- `settings.local.json` lives at `.claude/.claude/` and is symlinked normally
+- `.mcp.json` is NOT managed by the repo (contains tokens) — configure manually
 - Idempotent — safe to re-run after pulling changes
 
 ## When Making Changes

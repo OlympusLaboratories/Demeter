@@ -1,5 +1,5 @@
-
 alias profile='nano ~/.zshrc'
+alias src='source ~/.zshrc'
 
 alias pip='pip3'
 alias python='python3'
@@ -16,76 +16,128 @@ alias gpsh='git push'
 alias gpu='git push -u origin HEAD'
 alias gpl='git pull'
 alias go='git checkout '
+alias gco.='git checkout .'
 alias gri='git rebase -i'
-alias got='git '
-alias get='git '
-alias gti='git '
-alias igt='git '
+alias got='git '      # typo recovery
+alias get='git '      # typo recovery
+alias gti='git '      # typo recovery
+alias igt='git '      # typo recovery
 alias ob='git branch --sort=committerdate '
 alias gsd='git status; git diff'
 alias gm='git merge'
 alias log='git log'
 alias hist="log --pretty=format:'%h %ad | %s%d [%an]' --graph --date=short"
-alias hsit='hist '
+alias hsit='hist '    # typo recovery
 alias h='hist -5'
 alias clean='git clean -i'
 
-alias update='CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD) && git prune && git fetch origin --prune && git pull origin $CURRENT_BRANCH --rebase && git status'
-alias freshen='update && git merge origin main -m "Merge main branch into working branch" && git status'
+# Detects main/master (or whatever the remote default is)
+_git_default_branch() {
+  git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null \
+    | sed 's@^refs/remotes/origin/@@' \
+    || git remote show origin 2>/dev/null \
+    | awk '/HEAD branch/ { print $NF }'
+}
+
+alias update='CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD) && git prune && git fetch origin --prune && git pull origin "$CURRENT_BRANCH" --rebase && git status'
+alias freshen='DEFAULT_BRANCH=$(_git_default_branch) && update && git merge "origin/$DEFAULT_BRANCH" -m "Merge $DEFAULT_BRANCH into working branch" && git status'
 alias f='freshen'
 
 # Go (alias 'go' is git checkout, use 'gol' for Go lang)
 alias gol='command go'
 
-# Terraform helpers
+# Terraform
 alias tf='terraform '
 alias tfi='terraform init '
 alias tfp='terraform plan '
 alias tfa='terraform apply '
 
-# Git branch helper
+### KUBERNETES
+
+alias k="kubectl"
+alias kpods="kubectl get pods -n production"
+alias klogs="kubectl logs -n production -f"
+alias krestart="kubectl rollout restart -n production "
+alias kdescribe="kubectl describe pod -n production "
+alias kwest="kubectl config use-context gke_tlal-1210_us-west1-b_tlaloc"
+alias kwestprod="kubectl config use-context gke_tlal-1210_us-west1_production"
+alias kcent="kubectl config use-context gke_tlal-1210_us-central1-c_tlaloc"
+alias kcentjobs="kubectl config use-context gke_tlal-1210_us-central1-c_tlaloc-jobs"
+alias kbuild="kubectl config use-context gke_gridmatic-build_us-central1_build-us-central1"
+alias kcontext="kubectl config current-context"
+alias kcontexts="kubectl config get-contexts"
+
+# Git branch helper function
 git_branch() {
     git rev-parse --is-inside-work-tree &>/dev/null || return
     local branch=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null)
     echo "($branch)"
 }
 
-# Colored prompt (zsh on macOS always supports color)
+# Colored prompt (zsh with git branch)
 setopt PROMPT_SUBST
 PROMPT="%F{green}%n@%m%f:%F{blue}%~%f \$(git_branch) %# "
 
-# Set terminal window title
+# Terminal window title
 case "$TERM" in
 xterm*|rxvt*)
     precmd() { print -Pn "\e]0;%n@%m: %~\a" }
     ;;
 esac
 
-# Enable color for ls on macOS
-export CLICOLOR=1
-export LSCOLORS=ExFxCxDxBxegedabagacad
+# Color support for ls (platform-aware)
+if [[ "$(uname)" == "Darwin" ]]; then
+  export CLICOLOR=1
+  export LSCOLORS=ExFxCxDxBxegedabagacad
+else
+  if [[ -x /usr/bin/dircolors ]]; then
+    test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
+    alias ls='ls --color=auto'
+    alias grep='grep --color=auto'
+  fi
+fi
 
 ### DIRECTORY ALIASES
 
 alias lsa='ls -a'
-alias ll='ls -l'
+alias ll='ls -la'
 alias lla='ls -la'
-alias D='cd ~/Desktop'
 alias cl='clear'
 
-alias x=''
+alias x='exit'
+alias pids="sudo netstat -tulp"
 
-# continually display gpu stats, kinda like htop
+# GPU and network monitoring
 alias gtop="watch -n 1 nvidia-smi"
-
-# like top but for showing network activity/bandwidth
 alias iftop="sudo iftop"
 
+### ENVIRONMENT
+
+# PATH
+export PATH="$HOME/.local/bin:$PATH"
+export PATH="/usr/local/go/bin:$HOME/go/bin:$PATH"
+export PATH="$HOME/.tfenv/bin:$PATH"
+export PYTHONPATH=$HOME/tlaloc/python
+
+# GCP
+export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+export GOOGLE_APPLICATION_CREDENTIALS=$HOME/.config/gcloud/application_default_credentials.json
+
+# NVM
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+
+# Google Cloud SDK
+if [ -f "$HOME/google-cloud-sdk/path.zsh.inc" ]; then . "$HOME/google-cloud-sdk/path.zsh.inc"; fi
+if [ -f "$HOME/google-cloud-sdk/completion.zsh.inc" ]; then . "$HOME/google-cloud-sdk/completion.zsh.inc"; fi
+
+# Source secrets (not committed)
 [ -f ~/.secrets ] && source ~/.secrets
 
-# direnv
+# direnv integration
 eval "$(direnv hook zsh)"
 
-# a-cli tab completion
+# a-cli (Apollo) tab completion
 autoload -Uz compinit && compinit
 eval "$(_A_COMPLETE=zsh_source a)"

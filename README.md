@@ -32,8 +32,11 @@ The script will:
 - Detect your username directory automatically
 - Detect whether you're on macOS or Linux
 - Symlink each dotfile to `~/`
+- Back up `~/.claude` before modifying (timestamped copy)
 - Symlink `.claude/` contents (including skills) to `~/.claude/`
 - Symlink vendor skills from `_vendor/` into `~/.claude/skills/`
+- Clean stale skill symlinks (e.g. after a skill is renamed or removed from the repo)
+- Create data directories for skills that accumulate context
 - Install vendor tools (e.g. [Dippy](https://github.com/OlympusLabs-Forks/Dippy) — a PreToolUse hook that auto-approves safe bash commands)
 - Configure Claude Code hooks in `~/.claude/settings.json`
 - Back up any existing real files before replacing them
@@ -62,4 +65,6 @@ SKIP_LIST=(
 
 ## Claude Skills
 
-Any directory under `.claude/skills/` is linked individually into `~/.claude/skills/`. This means your remote dev machine and MacBook both get the same skills after running `./install.sh` on each, and neither machine's existing skills are clobbered.
+Any directory under `.claude/skills/` is linked individually into `~/.claude/skills/`. Skills use `~/.claude/scripts/gitlab-api.sh` for GitLab API access (token read from `~/.claude/.mcp.json`, never exposed in conversation context).
+
+Some skills accumulate user data (weekly reports, Slack context) that is gitignored and lives in the repo directory but is not tracked. The install script creates necessary data directories automatically.

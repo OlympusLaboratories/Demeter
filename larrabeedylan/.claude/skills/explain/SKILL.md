@@ -1,105 +1,52 @@
-# Explain — PR Change Breakdown
+# Explain — MR Change Breakdown
 
-Read a GitHub pull request and produce a clear, sequential explanation of what the PR does, how it does it, and why — so the reader can understand the changes without getting lost in the diff.
+Read a GitLab merge request and produce a clear, sequential explanation of what the MR does, how it does it, and why — so the reader can understand the changes without getting lost in the diff.
 
-**Parameter:** `$ARGUMENTS` — the full URL of a GitHub pull request (e.g., `https://github.com/owner/repo/pull/123`).
+**Parameter:** `$ARGUMENTS` — the full URL of a GitLab merge request (e.g., `https://gitlab.com/group/project/-/merge_requests/123`).
 
-If no argument is provided, ask the user for the PR URL and stop.
+If no argument is provided, ask the user for the MR URL and stop.
 
-## Step 1: Parse the PR URL
+## Step 1: Parse the MR URL
 
-Extract `owner`, `repo`, and `pr_number` from the URL.
+Extract `project_id` (slash-separated path) and `merge_request_iid` from the URL.
 
-For a URL like `https://github.com/owner/repo/pull/42`:
-- `owner` = `owner`
-- `repo` = `repo`
-- `pr_number` = `42`
+For a URL like `https://gitlab.com/group/subgroup/project/-/merge_requests/42`:
+- `project_id` = `group/subgroup/project`
+- `merge_request_iid` = `42`
 
-If the URL doesn't look like a GitHub PR URL, warn the user and stop.
+If the URL doesn't look like a GitLab MR URL, warn the user and stop.
 
-## Step 2: Load the PR Context
+## Step 2: Load the MR Context
 
-Use the `gh` CLI to fetch all data. Make all four calls **in parallel in a single message**:
+Use `~/.claude/scripts/gitlab-api.sh` to fetch MR data. This script reads the GitLab token securely from `~/.claude/.mcp.json` and keeps it out of conversation context.
 
-**PR metadata:**
+The script accepts a **URL-encoded** project path (e.g., `gridmatic%2Ftlaloc-env`). URL-encode the `project_id` by replacing `/` with `%2F`.
+
+Make all four calls **in parallel in a single message**:
 ```bash
-gh pr view <pr_number> -R <owner>/<repo> --json title,body,state,author,headRefName,baseRefName,number,isDraft
+~/.claude/scripts/gitlab-api.sh mr-info "<project_id_urlencoded>" <mr_iid>
+~/.claude/scripts/gitlab-api.sh mr-discussions "<project_id_urlencoded>" <mr_iid>
+~/.claude/scripts/gitlab-api.sh mr-changes "<project_id_urlencoded>" <mr_iid>
+~/.claude/scripts/gitlab-api.sh mr-commits "<project_id_urlencoded>" <mr_iid>
 ```
 
-**PR reviews (GraphQL):**
-```bash
-gh api graphql -f query='
-query($owner: String!, $repo: String!, $number: Int!) {
-  repository(owner: $owner, name: $repo) {
-    pullRequest(number: $number) {
-      reviewThreads(first: 100) {
-        nodes {
-          id
-          isResolved
-          isOutdated
-          path
-          line
-          originalLine
-          comments(first: 50) {
-            nodes {
-              id
-              author { login }
-              body
-              createdAt
-              replyTo { id }
-            }
-          }
-        }
-      }
-      reviews(first: 50) {
-        nodes {
-          id
-          author { login }
-          body
-          state
-          submittedAt
-        }
-      }
-      comments(first: 100) {
-        nodes {
-          id
-          author { login }
-          body
-          createdAt
-        }
-      }
-    }
-  }
-}' -F owner='<owner>' -F repo='<repo>' -F number=<pr_number>
-```
-
-**PR file changes:**
-```bash
-gh api repos/<owner>/<repo>/pulls/<pr_number>/files --paginate
-```
-
-**PR commits:**
-```bash
-gh pr view <pr_number> -R <owner>/<repo> --json commits
-```
-
-Parse each response as JSON.
+Each command outputs one JSON object per line.
 
 ## Step 3: Build a Mental Model
 
-Before writing anything, silently analyze the collected data to understand the PR holistically:
+Before writing anything, silently analyze the collected data to understand the MR holistically:
 
-1. **Read the PR description carefully.** This is the author's own explanation — it's the single best source of *why* the change exists. Note any linked tickets, motivation, or context.
+1. **Read the MR description carefully.** This is the author's own explanation — it's the single best source of *why* the change exists. Note any linked tickets, motivation, or context.
 2. **Scan the commit list.** The commit messages and their order reveal the author's logical progression.
 3. **Categorize every changed file** into one of these buckets:
-  - **Core logic** — the files where the main behavioral change lives
-  - **Supporting changes** — tests, migrations, configs, type definitions, or helpers that exist to support the core change
-  - **Incidental/mechanical** — auto-generated files, formatting, dependency lockfiles, renames with no logic change
-4. **Identify the reviewer discussion themes.** Group comments by topic. Note any unresolved debates — these highlight tricky or controversial parts of the PR that deserve extra explanation.
+   - **Core logic** — the files where the main behavioral change lives
+   - **Supporting changes** — tests, migrations, configs, type definitions, or helpers that exist to support the core change
+   - **Incidental/mechanical** — auto-generated files, formatting, dependency lockfiles, renames with no logic change
+4. **Identify the reviewer discussion themes.** Group comments by topic. Note any unresolved debates — these highlight tricky or controversial parts of the MR that deserve extra explanation.
 5. **Read relevant surrounding code in the local codebase** using `Read`, `Grep`, and `Glob` to understand the context the changes sit within. The diff alone is not enough — you need to understand the system the code is part of. Focus on:
-  - Functions/classes that the changed code calls or is called by
-  - Related modules or services that interact with the changed code
-  - Existing patterns or conventions in the same area of the codebase
+   - Functions/classes that the changed code calls or is called by
+   - Related modules or services that interact with the changed code
+   - Existing patterns or conventions in the same area of the codebase
 
 ## Step 4: Write the Explanation
 
@@ -107,17 +54,17 @@ Print the explanation in a single, well-structured message. Use the following fo
 
 ---
 
-### PR Overview
+### MR Overview
 
-**Title:** #number — "PR Title"
+**Title:** !IID — "MR Title"
 **Author:** @author_name
 **Target:** `target_branch`
 
-**Purpose (one paragraph):** A plain-language summary of what this PR accomplishes and *why* it exists. Reference the linked ticket or motivation from the description. Avoid jargon — explain domain-specific terms when they first appear.
+**Purpose (one paragraph):** A plain-language summary of what this MR accomplishes and *why* it exists. Reference the linked ticket or motivation from the description. Avoid jargon — explain domain-specific terms when they first appear.
 
 ---
 
-### How to Read This PR
+### How to Read This MR
 
 Before diving in, orient the reader:
 
@@ -138,7 +85,7 @@ For each logical group or file:
 
 - **What changed:** Describe the concrete code changes in plain terms. Mention specific functions, classes, or blocks that were added/modified/removed. Use short inline code references where helpful, but keep the language accessible.
 - **How it works:** Explain the mechanism — what does the new/changed code actually do at runtime? Walk through the logic step by step if it's non-trivial. If a new pattern or abstraction is introduced, explain it.
-- **Why:** Explain why this change is needed in the context of the PR's goal. Connect it back to the purpose. If the approach is non-obvious, explain why *this* approach was chosen (use commit messages, PR description, or reviewer discussions as evidence).
+- **Why:** Explain why this change is needed in the context of the MR's goal. Connect it back to the purpose. If the approach is non-obvious, explain why *this* approach was chosen (use commit messages, MR description, or reviewer discussions as evidence).
 
 Keep each file/group explanation **concise but complete**. A few sentences per bullet is ideal. For simple changes (e.g., adding a test that mirrors the implementation), a single sentence is fine.
 
@@ -146,12 +93,12 @@ Keep each file/group explanation **concise but complete**. A few sentences per b
 
 ### Key Design Decisions
 
-If the PR involves non-obvious choices, list them:
+If the MR involves non-obvious choices, list them:
 
 - **Decision:** What was chosen and what alternatives existed
-- **Rationale:** Why this approach, based on PR description, reviewer discussions, or codebase context
+- **Rationale:** Why this approach, based on MR description, reviewer discussions, or codebase context
 
-Only include this section if there are genuine decisions worth calling out. Skip it for straightforward PRs.
+Only include this section if there are genuine decisions worth calling out. Skip it for straightforward MRs.
 
 ---
 
@@ -159,7 +106,7 @@ Only include this section if there are genuine decisions worth calling out. Skip
 
 If reviewer discussions surfaced unresolved questions or debates, summarize them briefly so the reader is aware of areas that may still be in flux.
 
-Only include this section if there are genuine open threads. Skip it for clean PRs.
+Only include this section if there are genuine open threads. Skip it for clean MRs.
 
 ---
 
@@ -176,7 +123,7 @@ Wait for the user to reply. If they ask about a specific file or area, use `Read
 1. **Write for someone unfamiliar with this part of the codebase.** Assume the reader is a competent engineer who doesn't know this specific area. Define terms, explain patterns, and provide context.
 2. **Use plain language.** Avoid unnecessary jargon. When you must use a technical term, briefly explain it on first use.
 3. **Logical order, not diff order.** Present changes in the order that makes them easiest to understand, not the order git happens to list them.
-4. **Connect every change back to the "why".** Never just describe *what* changed without explaining *why* it changed. The PR description, commit messages, and reviewer discussions are your evidence.
+4. **Connect every change back to the "why".** Never just describe *what* changed without explaining *why* it changed. The MR description, commit messages, and reviewer discussions are your evidence.
 5. **Be honest about complexity.** If something is genuinely complex, say so and take extra care explaining it. Don't gloss over hard parts.
 6. **Use the local codebase.** The user is expected to have the repository checked out locally. Use `Read`, `Grep`, and `Glob` to explore surrounding code and provide richer context than the diff alone can give.
 7. **Keep it scannable.** Use headers, bold text, and bullet points so the reader can skim to the section they care about.
@@ -186,7 +133,7 @@ Wait for the user to reply. If they ask about a specific file or area, use `Read
 
 After the session, reflect on how the execution went. Consider:
 
-- Did URL parsing work correctly?
+- Did URL parsing work correctly for the given GitLab instance/path?
 - Were there issues fetching data (pagination, permissions, empty responses)?
 - Was the explanation the right level of detail — too shallow or too deep?
 - Did the logical ordering make sense, or would a different reading order have been clearer?

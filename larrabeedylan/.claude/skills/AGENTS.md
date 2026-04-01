@@ -8,17 +8,30 @@ Each skill is a subdirectory containing a `SKILL.md` file that defines the skill
 
 | Skill | Purpose |
 |---|---|
-| `address-comments` | Handle PR review feedback |
+| `address-comments` | Handle MR review feedback |
 | `branch-context` | Load branch context |
 | `commit-message` | Generate commit messages |
 | `document` | Audit and update README.md and AGENTS.md to reflect current repo state |
-| `explain` | PR change breakdown |
+| `eng-snippet` | Generate weekly engineering snippets |
+| `explain` | MR change breakdown |
 | `fix` | Linear ticket implementation |
-| `pr-description` | Generate PR descriptions |
+| `mr-description` | Generate MR descriptions |
+| `performance-review-self` | Self-assessment generator (stub) |
+| `performance-review-peer` | Peer assessment generator (stub) |
 
-## GitHub Data
+## GitLab Data
 
-PR-related skills (`explain`, `pr-description`, `address-comments`) use the `gh` CLI for all GitHub API access — both REST (`gh api`, `gh pr view --json`) and GraphQL (`gh api graphql`). Authentication is managed by `gh auth login`.
+MR-related skills (`explain`, `mr-description`, `address-comments`, `eng-snippet`) use `~/.claude/scripts/gitlab-api.sh` for all GitLab API access. The script reads the GitLab token from `~/.claude/.mcp.json` so tokens never enter conversation context.
+
+## User Data
+
+Some skills accumulate context data that is NOT tracked in git:
+- `eng-snippet/slack-context.md` — ephemeral Slack threads pasted before each run
+- `performance-review-self/context/` — weekly self-reports
+- `performance-review-peer/context/` — per-peer collaboration profiles
+- `performance-review-*/prompts.md` — review questions pasted per cycle
+
+These files are gitignored. The install script creates necessary directories.
 
 ## Adding a New Skill
 

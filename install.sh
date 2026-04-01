@@ -196,9 +196,17 @@ main() {
 
   echo ""
 
-  # ── .claude skills ─────────────────────────────────────────────────────────
+  # ── .claude setup ──────────────────────────────────────────────────────────
   local claude_src="$user_dir/.claude"
   local claude_dst="$home/.claude"
+
+  # Back up existing .claude before modifying
+  if [[ -d "$claude_dst" ]]; then
+    local backup_dir="${claude_dst}.bak.$(date +%Y%m%d%H%M%S)"
+    info "Backing up $claude_dst to $backup_dir ..."
+    cp -a "$claude_dst" "$backup_dir"
+    success "Backup created: $backup_dir"
+  fi
 
   if [[ -d "$claude_src" ]]; then
     bold "Linking .claude contents to $claude_dst ..."
@@ -255,6 +263,39 @@ main() {
       link_directory_contents "$vendor_skills" "$claude_dst/skills" "$machine"
     done
   fi
+
+  # ── clean stale skill symlinks ───────────────────────────────────────────
+  if [[ -d "$claude_dst/skills" ]]; then
+    bold "Cleaning stale skill symlinks..."
+    for existing in "$claude_dst/skills"/*/; do
+      [[ -e "$existing" || -L "${existing%/}" ]] || continue
+      local skill_name
+      skill_name="$(basename "$existing")"
+
+      # Only touch symlinks (not real directories the user created)
+      [[ -L "${existing%/}" ]] || continue
+
+      local link_target
+      link_target="$(readlink "${existing%/}")"
+
+      # Only remove if it points into our repo and the target no longer exists
+      if [[ "$link_target" == "$REPO_DIR/"* && ! -e "${existing%/}" ]]; then
+        warn "Removing stale symlink: $claude_dst/skills/$skill_name"
+        rm -f "${existing%/}"
+      fi
+    done
+  fi
+
+  # ── ensure data directories for skills that accumulate context ───────────
+  for data_dir in \
+    "$claude_dst/skills/performance-review-self/context" \
+    "$claude_dst/skills/performance-review-peer/context" \
+  ; do
+    if [[ ! -d "$data_dir" ]]; then
+      mkdir -p "$data_dir"
+      success "Created data directory: $data_dir"
+    fi
+  done
 
   echo ""
   success "Done! You may need to restart your shell for changes to take effect."

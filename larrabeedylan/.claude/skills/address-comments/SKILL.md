@@ -1,162 +1,103 @@
-# Address Comments — PR Review Feedback Handler
+# Address Comments — MR Review Feedback Handler
 
-Fetch the review threads from a GitHub pull request, present them for selection, and then critically evaluate and address the chosen comment — debating the suggestion rather than blindly applying it.
+Fetch the discussion threads from a GitLab merge request, present them for selection, and then critically evaluate and address the chosen comment — debating the suggestion rather than blindly applying it.
 
-**Parameter:** `$ARGUMENTS` — the full URL of a GitHub pull request (e.g., `https://github.com/owner/repo/pull/123`).
+**Parameter:** `$ARGUMENTS` — the full URL of a GitLab merge request (e.g., `https://gitlab.com/group/project/-/merge_requests/123`).
 
-If no argument is provided, ask the user for the PR URL and stop.
+If no argument is provided, ask the user for the MR URL and stop.
 
-## Step 1: Parse the PR URL
+## Step 1: Parse the MR URL
 
-Extract `owner`, `repo`, and `pr_number` from the URL.
+Extract `project_id` (slash-separated path) and `merge_request_iid` from the URL.
 
-For a URL like `https://github.com/acme/my-repo/pull/42`:
-- `owner` = `acme`
-- `repo` = `my-repo`
-- `pr_number` = `42`
+For a URL like `https://gitlab.com/group/subgroup/project/-/merge_requests/42`:
+- `project_id` = `group/subgroup/project`
+- `merge_request_iid` = `42`
 
-If the URL doesn't look like a GitHub PR URL, warn the user and stop.
+If the URL doesn't look like a GitLab MR URL, warn the user and stop.
 
-## Step 2: Load the PR Context
+## Step 2: Load the MR Context
 
-### 2a. Fetch PR metadata, reviews, and diff in parallel
+Use `~/.claude/scripts/gitlab-api.sh` to fetch MR data. This script reads the GitLab token securely from `~/.claude/.mcp.json` and keeps it out of conversation context.
 
-Use the `gh` CLI to fetch all data. Make all three calls **in parallel in a single message**:
+The script accepts a **URL-encoded** project path (e.g., `gridmatic%2Ftlaloc-env`). URL-encode the `project_id` by replacing `/` with `%2F`.
 
-**PR metadata:**
+Make all three calls **in parallel in a single message**:
 ```bash
-gh pr view <pr_number> -R <owner>/<repo> --json title,body,state,author,headRefName,baseRefName,number,isDraft
+~/.claude/scripts/gitlab-api.sh mr-info "<project_id_urlencoded>" <mr_iid>
+~/.claude/scripts/gitlab-api.sh mr-discussions "<project_id_urlencoded>" <mr_iid>
+~/.claude/scripts/gitlab-api.sh mr-changes "<project_id_urlencoded>" <mr_iid>
 ```
 
-**PR reviews (GraphQL):**
-```bash
-gh api graphql -f query='
-query($owner: String!, $repo: String!, $number: Int!) {
-  repository(owner: $owner, name: $repo) {
-    pullRequest(number: $number) {
-      reviewThreads(first: 100) {
-        nodes {
-          id
-          isResolved
-          isOutdated
-          path
-          line
-          originalLine
-          comments(first: 50) {
-            nodes {
-              id
-              author { login }
-              body
-              createdAt
-              replyTo { id }
-            }
-          }
-        }
-      }
-      reviews(first: 50) {
-        nodes {
-          id
-          author { login }
-          body
-          state
-          submittedAt
-        }
-      }
-      comments(first: 100) {
-        nodes {
-          id
-          author { login }
-          body
-          createdAt
-        }
-      }
-    }
-  }
-}' -F owner='<owner>' -F repo='<repo>' -F number=<pr_number>
-```
+Each command outputs one JSON object per line.
 
-**PR file changes:**
-```bash
-gh api repos/<owner>/<repo>/pulls/<pr_number>/files --paginate
-```
+## Step 2c: Check Out the MR Branch
 
-Parse each response as JSON.
+From the MR metadata (fetched in Step 2), extract the **source branch name**.
 
-- **pr-info fields:** `title`, `body` (description), `state`, `author.login`, `headRefName` (source branch), `baseRefName` (target branch), `number`, `isDraft`
-- **pr-reviews fields:** The GraphQL response is under `data.repository.pullRequest`. Contains `reviewThreads` (inline comments with `isResolved`, `path`, `line`, and nested `comments`), `reviews` (top-level review bodies with `state`), and `comments` (general PR comments).
-- **pr-changes fields:** Array of file objects with `filename`, `previous_filename`, `patch` (diff hunk), and `status`.
-
-Do NOT serialize these calls — run them in parallel.
-
-## Step 2b: Check Out the PR Branch
-
-From the PR metadata output, extract the **source branch name** (`headRefName` field).
-
-1. **Check the current branch** — run `git branch --show-current`.
+1. **Check the current branch** — run `git branch --show-current` to see what branch is currently checked out.
 2. **If already on the correct branch**, skip ahead to Step 3.
-3. **If on a different branch**, check out the PR's source branch:
+3. **If on a different branch**, check out the MR's source branch:
    - Run `git fetch origin <source_branch>` to ensure the branch is available locally.
    - Run `git checkout <source_branch>` to switch to it.
    - If the checkout fails due to uncommitted changes, warn the user and ask how to proceed (stash, commit, or abort) — do NOT force-checkout or discard changes.
-4. **Pull latest changes** — run `git pull --ff-only`. If this fails (e.g., local commits diverge), warn the user but continue.
+4. **Pull latest changes** — run `git pull --ff-only` to ensure the local branch is up to date with the remote. If this fails (e.g., local commits diverge), warn the user but continue — the branch is still usable.
 
-This ensures the local codebase matches the PR so that file reads and edits target the correct code.
+This ensures the local codebase matches the MR so that file reads and edits target the correct code.
 
 ## Step 3: Filter and Enumerate Threads
 
-The GraphQL reviews response contains three collections under `data.repository.pullRequest`:
-- `reviewThreads.nodes` — inline diff comments attached to a file and line; have `isResolved`, `path`, `line` fields, with nested `comments.nodes` (first comment is root, rest are replies)
-- `reviews.nodes` — top-level review bodies (approval/request-changes summary); have `state` and `body`
-- `comments.nodes` — general PR comments not attached to a line
+From the raw discussions response, filter to only **unresolved** discussion threads that contain review feedback.
 
-**Filter out:**
-- Inline threads where `isResolved: true`
-- Empty bodies (body is blank or whitespace only)
-- Bot/automation comments (e.g., from `github-actions`, `dependabot`, `atlantis`). Do NOT exclude AI code-review bots — their feedback is real review feedback.
-- Review entries with `state: "APPROVED"` and no substantive body
+**Detecting resolved status:** The discussion API may not always include an explicit `resolved` field. If present, use it. Otherwise, look for a "resolved all threads" system note and treat threads created **after** that timestamp as unresolved. Threads with reply notes from the MR author saying "agreed", "fixed", etc. followed by a system "resolved all threads" note are likely resolved.
+
+Exclude:
+- System notes (status changes, label additions, pipeline results, merge status updates, approvals)
+- Already-resolved threads
+- Threads authored solely by the MR author with no replies (self-notes)
+- Comments from **operational** bots (e.g., `atlantis` — Terraform plan/apply output, merge conflict reports, pipeline status). Do NOT exclude AI code-review bots (e.g., `gemini-mr-reviewer`) — their feedback is real review feedback that should be presented.
 
 For each remaining thread, extract:
 - **Thread number** (sequential, starting at 1)
-- **Type** (`inline`, `review`, or `general`)
-- **Author** of the initial comment (from `author.login`)
-- **File path and line** if inline (from `path` and `line` on the thread node)
+- **Author** of the initial comment
+- **File path and line(s)** if it's an inline/diff comment (from the position data)
 - **Initial comment body** (full text)
-- **Replies** (subsequent entries in `comments.nodes` after the first, each with `author.login` and `body`)
-- **Resolved status** (`isResolved` for inline threads)
+- **Replies** (all subsequent notes in the thread, with author and body)
+- **Resolved status**
 
 ## Step 4: Display the Threads
 
 Print a numbered summary of all unresolved discussion threads:
 
 ```
-## Unresolved Comment Threads on #<pr_number> — "PR Title"
+## Unresolved Comment Threads on !IID — "MR Title"
 
 **1.** `src/path/file.py:42` — @reviewer_name
-  > "The comment body here (first ~3 lines or 300 chars)..."
-  💬 2 replies
+   > "The comment body here (first ~3 lines or 300 chars)..."
+   💬 2 replies
 
 **2.** (General comment) — @other_reviewer
-  > "This approach seems overly complex..."
-  💬 0 replies
+   > "This approach seems overly complex..."
+   💬 0 replies
 
-**3.** `pkg/handler.go:118` — @reviewer_name
-  > "Consider using a context.WithTimeout here..."
-  💬 1 reply
+**3.** `pkg/handler.go:118-125` — @reviewer_name
+   > "Consider using a context.WithTimeout here..."
+   💬 1 reply
 
 ---
 Enter a number to address that comment, or "all" to work through them sequentially.
 ```
 
-**Do NOT use `AskUserQuestion` here.** Simply print the numbered list above and stop. Wait for the user to reply in chat with a number (e.g., `2`) or `all`.
+**Do NOT use `AskUserQuestion` here.** Simply print the numbered list above and stop. Wait for the user to reply in chat with a number (e.g., `2`) or `all`. This is faster and less intrusive than a modal prompt.
 
-If there are **no unresolved threads**, tell the user "No unresolved comment threads found on this PR" and stop.
+If there are **no unresolved threads**, tell the user "No unresolved comment threads found on this MR" and stop.
 
 ## Step 5: Load Full Context for the Selected Thread
 
 Once the user picks a thread:
 
-1. **Display the full thread** — show the complete initial comment and all replies with authors, untruncated.
-2. **Show the relevant code** — if it's an inline comment, display the surrounding diff hunk from `pr-changes` for that file. Also read the current local version of the file around the referenced lines using the `Read` tool so you can see the latest state (the diff may be outdated if commits were pushed after the comment was written).
+1. **Display the full thread** — show the complete initial comment and all replies with authors, so nothing is truncated.
+2. **Show the relevant code** — if it's an inline comment, display the surrounding diff hunk from the MR changes fetched in Step 2c. If the file exists locally, also read the current local version of the file around the referenced lines using the `Read` tool so you can see the latest state (the MR diff may be outdated if commits were pushed since the comment was written).
 3. **Identify what the reviewer is asking for** — summarize the reviewer's request/suggestion in one sentence.
 
 ## Step 6: Critically Evaluate the Feedback
@@ -208,7 +149,7 @@ If the user chooses "Discuss", continue the dialogue — ask clarifying question
 
 ### If applying changes (fully or with modifications):
 
-1. Make the code changes using the `Edit` tool.
+1. Make the code changes using `Edit` tool.
 2. Show the user what was changed.
 3. If the change was modified from the original suggestion, draft a reply for the comment thread explaining what was done differently and why.
 
@@ -250,26 +191,23 @@ Then proceed to **Step 7b** to offer posting the reply.
 
 ### Step 7b: Offer to Post the Reply
 
-After drafting a reply (for reject or modify decisions), ask the user:
+After drafting a reply (for **Reject** or **Modify** decisions), ask the user:
 
-> Would you like me to post this reply to the thread on GitHub? (yes/no)
+> Would you like me to post this reply to the thread on GitLab? (yes/no)
 
-If the user says yes:
+If the user says **yes**, post the reply using the discussion thread ID saved from Step 3.
 
-1. Use the **thread ID** from the reviews GraphQL data for the selected thread (the `id` field on `reviewThreads.nodes`).
-2. Post the reply using the `github_api.py` script, piping the body via heredoc to stdin to avoid shell encoding issues:
-   ```bash
-   python3 ~/.claude/scripts/github_api.py reply-to-thread '<thread_id>' << 'ENDOFBODY'
-   <reply text here>
-   ENDOFBODY
-   ```
-   - The `<thread_id>` is the GraphQL node ID from the thread data.
-   - **Always** use a heredoc piped to stdin for the body — never pass it as a CLI argument or use temp files with redirects.
-3. Confirm to the user that the reply was posted successfully, or report any errors.
+Use the `gitlab-api.sh` script to reply directly to the discussion thread:
 
-If the user says no, continue to Step 8 as normal.
+```bash
+~/.claude/scripts/gitlab-api.sh reply-to-thread "<project_id_urlencoded>" <mr_iid> "<discussion_id>" "<reply_text>"
+```
 
-**Note:** This only applies to **inline** threads (which have a thread ID). For `general` or `review` type comments, the `reply-to-thread` command won't work — in those cases, skip this step and just present the drafted reply for the user to copy.
+The `discussion_id` is the thread ID from the discussions fetched in Step 2. Make sure to properly escape/quote the reply text — pass it as a single shell argument.
+
+After posting, confirm to the user that the reply was posted successfully and show the note ID.
+
+If the user says **no**, skip posting and continue to Step 8.
 
 ## Step 8: Offer to Continue
 
@@ -278,21 +216,21 @@ After resolving one thread, offer to address the next unresolved thread. Loop ba
 ## Important Rules
 
 1. **NEVER auto-apply suggestions.** Always analyze and present your assessment first. The whole point of this skill is to think critically, not to blindly accept reviewer feedback.
-2. **NEVER post replies to GitHub.** Only draft replies and print them in chat. The user decides whether and when to post them.
-3. **NEVER resolve threads.** Thread resolution is the user's action in the GitHub UI after they've posted their reply or pushed changes.
-4. **Be honest in your assessment.** If the reviewer is right, say so. If they're wrong, explain why clearly. Don't just side with the PR author.
+2. **NEVER post replies to GitLab.** Only draft replies and print them in chat. The user decides whether and when to post them.
+3. **NEVER resolve threads.** Thread resolution is the user's action in the GitLab UI after they've posted their reply or pushed changes.
+4. **Be honest in your assessment.** If the reviewer is right, say so. If they're wrong, explain why clearly. Don't just side with the MR author.
 5. **Consider codebase context.** When evaluating suggestions, look at how similar patterns are handled elsewhere in the codebase using `Grep` and `Read`. Consistency matters.
 6. **Keep replies concise.** Drafted replies should be 2-5 sentences. Long replies in code review threads are rarely read.
-7. **Use the local codebase.** The user is expected to have the PR branch checked out locally. Use `Read`, `Grep`, and `Glob` to explore the actual code — don't rely solely on the diff from the API.
+7. **Use the local codebase.** The user is expected to have the MR branch checked out locally. Use `Read`, `Grep`, and `Glob` to explore the actual code — don't rely solely on the diff from the API.
 
 ## Step 9: Self-Improvement
 
 After the session, reflect on how the execution went. Consider:
 
-- Did URL parsing work correctly for the given GitHub URL?
-- Were there issues fetching reviews (pagination, permissions, empty responses)?
+- Did URL parsing work correctly for the given GitLab instance/path?
+- Were there issues fetching discussions (pagination, permissions, empty responses)?
 - Did the diff context help or was it stale relative to the local code?
 - Were the drafted replies well-received or did the user need to heavily edit them?
 - Did the critical analysis add value, or was it obvious the reviewer was correct?
 
-If any issues were encountered, **edit this skill file** (`~/.claude/skills/address-comments/SKILL.MD`) to add instructions, warnings, or tips that would prevent the same issue next time. Keep edits surgical. Briefly tell the user what was updated and why.
+If any issues were encountered, **edit this skill file** (`~/.claude/skills/address-comments/SKILL.md`) to add instructions, warnings, or tips that would prevent the same issue next time. Keep edits surgical. Briefly tell the user what was updated and why.
