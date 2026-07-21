@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Demeter dotfile installer
-# Symlinks files from your username directory to the appropriate locations.
+# Symlinks files from a profile directory (profiles/<name>/) to the appropriate locations.
 # Supports per-machine file selection via a skip list.
 
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROFILES_DIR="$REPO_DIR/profiles"
 YELLOW='\033[1;33m'
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -31,33 +32,78 @@ ask() {
   [[ "$reply" =~ ^[Yy]$ ]]
 }
 
-# ── detect username & machine ─────────────────────────────────────────────────
+# ── profile selection & machine ───────────────────────────────────────────────
 
-detect_username() {
+# Usage / help text. Enumerates the available profiles under profiles/.
+usage() {
+  cat <<EOF
+Usage: ${0##*/} [profile]
+
+  profile   Profile to install. Either the name of a directory under
+            profiles/ (e.g. larrabeedylan_work_linux) or a path to a
+            profile directory. If omitted, auto-selects when only one
+            profile exists, otherwise prompts interactively.
+
+Available profiles:
+EOF
+  local found=0
+  for dir in "$PROFILES_DIR"/*/; do
+    [[ -d "$dir" ]] || continue
+    echo "  - $(basename "$dir")"
+    found=1
+  done
+  [[ "$found" -eq 0 ]] && echo "  (none found in $PROFILES_DIR)"
+}
+
+# Resolve the profile directory to install.
+#   - With an argument: accept a bare profile name (under profiles/) or a path.
+#   - Without one: auto-select if a single profile exists, else prompt.
+# Prints the absolute profile directory to stdout; all prompts go to stderr so
+# they don't pollute the captured value.
+resolve_profile() {
+  local arg="${1:-}"
+
+  if [[ -n "$arg" ]]; then
+    local candidate=""
+    if [[ -d "$arg" ]]; then
+      candidate="$arg"                    # explicit path to a profile dir
+    elif [[ -d "$PROFILES_DIR/$arg" ]]; then
+      candidate="$PROFILES_DIR/$arg"      # bare name under profiles/
+    else
+      error "Profile not found: $arg" >&2
+      usage >&2
+      exit 1
+    fi
+    ( cd "$candidate" && pwd )            # normalize to absolute, no trailing slash
+    return
+  fi
+
   local candidates=()
-  for dir in "$REPO_DIR"/*/; do
-    local name
-    name="$(basename "$dir")"
-    [[ "$name" == _* ]] && continue   # skip _starter etc.
-    candidates+=("$name")
+  for dir in "$PROFILES_DIR"/*/; do
+    [[ -d "$dir" ]] || continue
+    candidates+=("$(basename "$dir")")
   done
 
   if [[ ${#candidates[@]} -eq 0 ]]; then
-    error "No user directories found in repo."
+    error "No profiles found in $PROFILES_DIR." >&2
     exit 1
   elif [[ ${#candidates[@]} -eq 1 ]]; then
-    echo "${candidates[0]}"
+    echo "$PROFILES_DIR/${candidates[0]}"
   else
-    bold "\nMultiple user directories found:"
+    bold "\nAvailable profiles:" >&2
     local i=1
     for c in "${candidates[@]}"; do
-      echo "  $i) $c"
+      echo "  $i) $c" >&2
       ((i++))
     done
-    echo -n "Select your directory (default: 1): "
+    echo -en "${BOLD}Select your profile (default: 1): ${RESET}" >&2
     read -r choice
     choice="${choice:-1}"
-    echo "${candidates[$((choice-1))]}"
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#candidates[@]} )); then
+      error "Invalid selection: $choice" >&2
+      exit 1
+    fi
+    echo "$PROFILES_DIR/${candidates[$((choice-1))]}"
   fi
 }
 
@@ -84,7 +130,7 @@ SKIP_LIST=(
 # Vendor packages whose skills should NOT be linked.
 # Use this for vendors that provide dev-only skills not relevant to your workflow.
 SKIP_VENDOR_SKILLS=(
-  "dippy"
+  # "some-vendor"   # example: don't link this vendor's skills
 )
 
 should_skip() {
@@ -150,14 +196,21 @@ link_directory_contents() {
 # ── main ──────────────────────────────────────────────────────────────────────
 
 main() {
+  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    usage
+    exit 0
+  fi
+
   bold "\n=== Demeter Dotfile Installer ==="
   echo ""
 
-  local username machine
-  username="$(detect_username)"
+  local profile_dir profile machine
+  profile_dir="$(resolve_profile "${1:-}")"
+  profile="$(basename "$profile_dir")"
   machine="$(detect_machine)"
 
-  info "User directory : $username"
+  info "Profile        : $profile"
+  info "Profile dir    : $profile_dir"
   info "Machine type   : $machine"
   info "Repo           : $REPO_DIR"
   echo ""
@@ -173,7 +226,7 @@ main() {
     git -C "$REPO_DIR" submodule update --init --recursive 2>/dev/null
   fi
 
-  local user_dir="$REPO_DIR/$username"
+  local user_dir="$profile_dir"
   local home="$HOME"
 
   # ── standard dotfiles ──────────────────────────────────────────────────────
@@ -265,23 +318,25 @@ main() {
   fi
 
   # ── clean stale skill symlinks ───────────────────────────────────────────
+  # Remove symlinks in ~/.claude/skills that point into this repo but whose
+  # target no longer exists (e.g. a skill was renamed or deleted). Iterate over
+  # ALL entries — not just ones that resolve to a directory — so that BROKEN
+  # symlinks (whose target was renamed away) are caught too. A trailing-slash
+  # glob (*/) would silently skip them.
   if [[ -d "$claude_dst/skills" ]]; then
     bold "Cleaning stale skill symlinks..."
-    for existing in "$claude_dst/skills"/*/; do
-      [[ -e "$existing" || -L "${existing%/}" ]] || continue
-      local skill_name
-      skill_name="$(basename "$existing")"
-
-      # Only touch symlinks (not real directories the user created)
-      [[ -L "${existing%/}" ]] || continue
+    for existing in "$claude_dst/skills"/*; do
+      # Only touch symlinks — never real files/dirs the user created.
+      [[ -L "$existing" ]] || continue
 
       local link_target
-      link_target="$(readlink "${existing%/}")"
+      link_target="$(readlink "$existing")"
 
-      # Only remove if it points into our repo and the target no longer exists
-      if [[ "$link_target" == "$REPO_DIR/"* && ! -e "${existing%/}" ]]; then
-        warn "Removing stale symlink: $claude_dst/skills/$skill_name"
-        rm -f "${existing%/}"
+      # Remove only if it points into our repo AND the target no longer exists.
+      # For a symlink, `-e` follows the link, so `! -e` is true when it dangles.
+      if [[ "$link_target" == "$REPO_DIR/"* && ! -e "$existing" ]]; then
+        warn "Removing stale symlink: $existing -> $link_target"
+        rm -f "$existing"
       fi
     done
   fi

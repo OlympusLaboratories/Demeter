@@ -1,35 +1,42 @@
 # Demeter
 
-A shared dotfile repo. Each contributor keeps their config in a directory named after their username. An interactive install script symlinks everything to the right places on any machine.
+A shared dotfile repo. Each machine setup lives in its own profile directory under `profiles/`. An interactive install script symlinks everything to the right places on any machine.
 
 ## Structure
 
 ```
 Demeter/
 ├── install.sh          # interactive symlink installer
+├── uninstall.sh        # removes symlinks / restores a clean state
 ├── _starter/           # copy this to get started
 │   └── .bash_profile
 ├── _vendor/            # vendor packages — skills + tools (git submodules)
-└── <username>/         # your directory — named after your system username
-    ├── .bash_profile
-    ├── .zshrc
-    └── .claude/
-        ├── skills/     # Claude Code skills, synced to ~/.claude/skills/
-        └── scripts/    # helper scripts used by skills
+└── profiles/           # one directory per machine profile
+    └── <profile>/      # e.g. larrabeedylan_work_linux
+        ├── .bash_profile
+        ├── .zshrc
+        └── .claude/
+            ├── skills/     # Claude Code skills, synced to ~/.claude/skills/
+            └── scripts/    # helper scripts used by skills
 ```
 
 ## Setup
 
 1. Clone the repo somewhere permanent (e.g. `~/Demeter`)
-2. Add your dotfiles in a directory named after your username
-3. Run the installer:
+2. Add your dotfiles in a profile directory under `profiles/`
+3. Run the installer, optionally naming the profile to install:
 
 ```bash
-./install.sh
+./install.sh [profile]          # e.g. ./install.sh larrabeedylan_work_linux
 ```
 
+`profile` may be a directory name under `profiles/` or a path to a profile
+directory. If omitted, the installer auto-selects when only one profile exists
+and otherwise prompts you to pick one. Run `./install.sh --help` to list the
+available profiles.
+
 The script will:
-- Detect your username directory automatically
+- Install the profile you selected (by argument, auto-detected, or chosen from the menu)
 - Detect whether you're on macOS or Linux
 - Symlink each dotfile to `~/`
 - Back up `~/.claude` before modifying (timestamped copy)
@@ -37,18 +44,32 @@ The script will:
 - Symlink vendor skills from `_vendor/` into `~/.claude/skills/`
 - Clean stale skill symlinks (e.g. after a skill is renamed or removed from the repo)
 - Create data directories for skills that accumulate context
-- Install vendor tools (e.g. [Dippy](https://github.com/OlympusLabs-Forks/Dippy) — a PreToolUse hook that auto-approves safe bash commands)
-- Configure Claude Code hooks in `~/.claude/settings.json`
 - Back up any existing real files before replacing them
 - Skip already-correct symlinks
 
 Re-run it anytime after pulling changes — it's idempotent.
 
+## Uninstalling
+
+To un-symlink everything and start fresh:
+
+```bash
+./uninstall.sh
+```
+
+The script will:
+- Remove every symlink in `~/` and `~/.claude` whose target points back into this repo (layout-agnostic — it reverses whatever was linked)
+- Remove the templated `~/.claude/settings.json` copy (prompts first)
+- Clean up now-empty skill directories left behind
+- Optionally restore the most recent `~/.claude.bak.*` backup that `install.sh` created
+
+Your repo files are never touched, and existing backups and skill data directories are left in place.
+
 ## Adding Your Dotfiles
 
 ```bash
-cp -r _starter <your-username>
-cd <your-username>
+cp -r _starter profiles/<your-profile>
+cd profiles/<your-profile>
 # add your .zshrc, .bash_profile, .claude/skills, etc.
 ```
 

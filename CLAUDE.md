@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Demeter is a shared dotfile repo. Each contributor keeps their config in a directory named after their system username. An interactive install script symlinks everything to the right places on any machine (macOS or Linux).
+Demeter is a shared dotfile repo. Each machine setup lives in its own profile directory under `profiles/`. An interactive install script symlinks everything to the right places on any machine (macOS or Linux).
 
 ## Repo Structure
 
@@ -12,14 +12,15 @@ Demeter/
   _starter/               # Template for new contributors — copy to get started
     .bash_profile
   _vendor/                # Vendor packages (skills + tools) — linked/installed by installer
-  <username>/             # Per-user dotfile directory
-    .zshrc
-    .bash_profile
-    .claude/
-      skills/             # Claude Code skills, synced to ~/.claude/skills/
-        <skill-name>/
-          SKILL.md
-      scripts/            # Helper scripts used by skills
+  profiles/               # One directory per machine profile
+    <profile>/            # e.g. larrabeedylan_work_linux
+      .zshrc
+      .bash_profile
+      .claude/
+        skills/           # Claude Code skills, synced to ~/.claude/skills/
+          <skill-name>/
+            SKILL.md
+        scripts/          # Helper scripts used by skills
 ```
 
 ## Context Discovery
@@ -30,16 +31,15 @@ Before planning or making changes in a directory, **read the `README.md` and `AG
 
 The installer does the following in order:
 
-1. Detects user directory (auto if only one, prompts if multiple)
+1. Selects the profile to install — from the first CLI argument (a `profiles/` subdirectory name or a path), else auto if only one profile exists, else prompts. `install.sh --help` lists available profiles.
 2. Detects machine type (macOS = `mac`, Linux = `linux`)
 3. Initializes git submodules if `.gitmodules` exists
-4. Symlinks dotfiles from `<username>/` to `~/` (skipping `.claude/`)
+4. Symlinks dotfiles from `profiles/<profile>/` to `~/` (skipping `.claude/`)
 5. Backs up existing `~/.claude` directory (timestamped copy)
 6. Symlinks `.claude/` contents individually (skills linked per-directory into `~/.claude/skills/`)
 7. Symlinks vendor skills from `_vendor/*/` into `~/.claude/skills/`
 8. Cleans stale skill symlinks (removes symlinks pointing to deleted repo paths)
 9. Creates data directories for skills that accumulate context
-10. Configures Claude Code hooks in `~/.claude/settings.json` for vendor tools (e.g. Dippy)
 
 Key behaviors:
 - Creates a full backup of `~/.claude` before modifying it
@@ -62,10 +62,9 @@ Key behaviors:
 
 ## Conventions
 
-- **One directory per contributor**, named after their system username
-- **Dotfiles only**: Files in user directories should be dotfiles (prefixed with `.`) or inside `.claude/`
+- **One profile directory per machine setup**, under `profiles/` (e.g. `larrabeedylan_work_linux`)
+- **Dotfiles only**: Files in profile directories should be dotfiles (prefixed with `.`) or inside `.claude/`
 - **No secrets in repo**: Sensitive values (API keys, tokens) belong in `~/.secrets` or similar, sourced from shell config — never committed
 - **Machine-specific skipping**: Use the `SKIP_LIST` array in `install.sh` to control per-platform linking
 - **Skills**: Each skill gets its own directory under `.claude/skills/` with a `SKILL.md` file
-- **Vendor packages**: Third-party skill sets and tools go in `_vendor/<name>/` as git submodules
-- **Vendor tools**: Packages in `_vendor/` that need CLI installation (e.g. Dippy) are handled by `install_vendor_tools()` in `install.sh`
+- **Vendor packages**: Third-party skill sets go in `_vendor/<name>/` as git submodules
