@@ -95,7 +95,9 @@ Load the `get_issue` tool via `ToolSearch` (query: `select:mcp__claude_ai_Linear
 
 ### 3a. Fetch by identifier
 
-Use `mcp__claude_ai_Linear__get_issue` with `id: TICKET_ID` (e.g., `PLAT-1180`). This returns the full issue including title, description, status, labels, and assignee.
+Use `mcp__claude_ai_Linear__get_issue` with `id: TICKET_ID` and `includeRelations: true` (e.g., `PLAT-1180`). This returns the full issue including title, description, status, labels, assignee, relations, and — critically — the **`parent`** field.
+
+**Record the `parent` field now.** Explicitly note whether the issue has a parent and, if so, capture the parent's identifier. This determines whether Step 3f applies, and Step 3f is mandatory whenever a parent exists — do not lose this information between steps.
 
 ### 3b. If not found
 
@@ -143,23 +145,32 @@ If the ticket matches this pattern:
 
 If the ticket does NOT match this pattern, continue to Step 4 as normal.
 
-## Step 3f: Load Initiative Context (if this ticket is a subtask)
+## Step 3f: Load Parent and Sibling Context (MANDATORY for subtasks)
 
-Determine whether this ticket is a **subtask of a larger initiative** — i.e. whether the Linear issue has a **parent**. Check the `get_issue` result for a `parent` field (and any `project`/`initiative`/relationship linkage). If those fields aren't present in the response, re-fetch with a relations-capable call (`ToolSearch: select:mcp__claude_ai_Linear__get_issue`) and inspect for a parent.
+**This step is not optional and must not be skipped.** A subtask implemented without its parent and sibling context is a failure of this skill even when the code itself is correct — the implementation will not fit the larger design. Use the `parent` field you recorded in Step 3a to decide which branch applies.
 
-**If the ticket has a parent (or is otherwise clearly one piece of a larger initiative), gather the surrounding context before planning** — look at sibling tasks, the parent task, and tickets related to the parent for full context on the initiative this ticket is part of:
+**If the issue has NO parent:** state explicitly to the user — "This ticket has no parent; no initiative context to load" — and continue to Step 4. Do not silently skip; say it.
 
-1. **Parent task** — fetch the parent issue (`get_issue` on the parent's ID) for its full title, description, and comments; this frames the overall goal.
-2. **Sibling tasks** — list the parent's other children (`ToolSearch: select:mcp__claude_ai_Linear__list_issues`, filtered by the parent) to see the related work landing alongside this ticket and avoid overlap or conflicting approaches.
-3. **Tickets related to the parent** — fetch issues linked/related to the parent (relations, blocks/blocked-by, or the parent's project/initiative issues) for the wider design intent.
+**If the issue HAS a parent, you MUST load all of the following before planning:**
 
-Read this material the way you read the ticket itself: it defines the initiative this ticket belongs to, and the implementation should fit that larger design rather than solving the subtask in isolation. Briefly tell the user what initiative this ticket rolls up to and any sibling/parent context that will shape the approach.
+1. **Parent ticket** — call `get_issue` with `id:` set to the parent's identifier and `includeRelations: true`. Read its full title, description, and comments (fetch comments the same way as Step 3c). This frames the overall goal.
+2. **Sibling tickets** — call `mcp__claude_ai_Linear__list_issues` with `parentId:` set to the parent's identifier (load it via `ToolSearch: select:mcp__claude_ai_Linear__list_issues` if not already available). This returns every child of the parent — i.e. this ticket's siblings. Read each sibling's title and description to understand the work landing alongside this ticket and avoid overlap or conflicting approaches. For any sibling that looks closely related, fetch its full issue with `get_issue`.
+3. **Related tickets** — from the parent's `relations` (blocks / blocked-by / related — available because you passed `includeRelations: true`) and its `project`, fetch the linked issues for the wider design intent.
 
-**If the ticket has no parent and isn't part of a larger initiative, skip this step.**
+Do not treat a failed or empty tool call as "no context." If a call errors, retry or try the alternate tool, and only move on once you have genuinely confirmed there is nothing there.
+
+**Checkpoint — you may not enter plan mode (Step 4) until you have stated all of the following to the user:**
+- the parent ticket's identifier and overall goal,
+- how many siblings exist and what each covers,
+- any related/blocking tickets that affect the approach.
+
+Read this material the way you read the ticket itself: it defines the initiative this ticket belongs to, and the implementation should fit that larger design rather than solving the subtask in isolation.
 
 ## Step 4: Plan the Implementation
 
-Now enter plan mode using `EnterPlanMode`. Use the ticket title, description, comments, any parent/initiative context from Step 3f, and any labels/context to:
+**Gate: do not enter plan mode until the Step 3f checkpoint is satisfied** — either you have stated the parent/sibling/related context to the user, or you have confirmed the ticket has no parent. If you cannot yet do either, return to Step 3f before continuing.
+
+Now enter plan mode using `EnterPlanMode`. Use the ticket title, description, comments, the parent/sibling/related context from Step 3f, and any labels/context to:
 
 1. **Explore the codebase** — use Glob, Grep, and Read to understand relevant files, existing patterns, and architecture.
 2. **Design an implementation approach** — identify which files need changes, what the changes are, and in what order.
