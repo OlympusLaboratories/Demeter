@@ -1,0 +1,41 @@
+{
+  "$schema": "security-audit-state/v1",
+  "audit_id": null,
+  "target_dir": null,
+  "created_at": null,
+  "updated_at": null,
+  "flags": {
+    "resume": true,
+    "restart": false,
+    "stage": null,
+    "only_category": null,
+    "severity_threshold": null,
+    "no_install": false,
+    "sandbox": "docker",
+    "dry_run": false
+  },
+  "target_authorizations": {
+    "external_sandboxes": [],
+    "cloud_saas_scanners": [],
+    "third_party_collaborators": []
+  },
+  "detected_classes": [],
+  "methodology_files_loaded": [],
+  "tool_versions": {},
+  "stages": {
+    "stage1": { "status": "pending", "started_at": null, "completed_at": null, "artifact": "recon.md" },
+    "stage2": { "status": "pending", "started_at": null, "completed_at": null, "artifact": "threat_model.md" },
+    "stage3": { "status": "pending", "started_at": null, "completed_at": null, "artifact": "audit_plan.md" },
+    "stage4": { "status": "pending", "started_at": null, "completed_at": null, "artifact": "findings.md",
+                "counts": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0,
+                           "false_positives_dismissed": 0, "deferred_to_stage5": 0} },
+    "stage5": { "status": "pending", "started_at": null, "completed_at": null, "artifact": "pentest_results.md",
+                "counts": {"exploited": 0, "not_exploitable": 0, "unexecuted": 0, "blocked": 0} },
+    "stage6": { "status": "pending", "started_at": null, "completed_at": null, "artifact": "remediation_plan.md",
+                "approved_ids": [], "deferred_ids": [], "approval_timestamp": null },
+    "stage7": { "status": "pending", "started_at": null, "completed_at": null, "fixed_ids": [], "deferred_ids": [] },
+    "stage8": { "status": "pending", "started_at": null, "completed_at": null, "verified_ids": [], "blocker_ids": [] },
+    "stage9": { "status": "pending", "started_at": null, "completed_at": null, "artifact": "report.md" }
+  },
+  "tool_invocations": []
+}
