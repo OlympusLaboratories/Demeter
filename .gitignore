@@ -1,11 +1,11 @@
 .vscode/
 
 # Override global gitignore — we DO want to track settings.local.json in this repo
-!larrabeedylan/.claude/.claude/settings.local.json
+!profiles/*/.claude/.claude/settings.local.json
 
 # Skill user data — lives in skill dirs but not tracked
-larrabeedylan/.claude/skills/eng-snippet/slack-context.md
-larrabeedylan/.claude/skills/performance-review-self/context/
-larrabeedylan/.claude/skills/performance-review-self/prompts.md
-larrabeedylan/.claude/skills/performance-review-peer/context/
-larrabeedylan/.claude/skills/performance-review-peer/prompts.md
+profiles/*/.claude/skills/reflect-week/slack-context.md
+profiles/*/.claude/skills/reflect-self/context/
+profiles/*/.claude/skills/reflect-self/prompts.md
+profiles/*/.claude/skills/reflect-peer/context/
+profiles/*/.claude/skills/reflect-peer/prompts.md

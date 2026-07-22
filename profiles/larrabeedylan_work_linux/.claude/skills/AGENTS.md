@@ -8,18 +8,18 @@ Each skill is a subdirectory containing a `SKILL.md` file that defines the skill
 
 | Skill | Purpose |
 |---|---|
-| `branch-context` | Load branch context |
-| `commit-message` | Generate commit messages |
-| `document` | Audit and update README.md and AGENTS.md to reflect current repo state |
-| `eng-snippet` | Generate weekly engineering snippets |
-| `explain` | MR change breakdown |
-| `feedback` | Work through review feedback — MR/PR threads or a local review agent's output |
-| `fix` | Linear ticket implementation |
-| `mr-description` | Generate MR descriptions |
-| `performance-review-self` | Self-assessment generator (stub) |
-| `performance-review-peer` | Peer assessment generator (stub) |
-| `ultra-kludge` | Adversarial swarm that reviews recent large features for accumulated kludge/AI-slop and proposes refactors (uses the Workflow tool; prints a `wf_…` run ID to watch live with `wfwatch <id>`) |
-| `ultra-review` | Adversarial multi-agent review of proposed local changes (uses the Workflow tool; prints a `wf_…` run ID to watch live with `wfwatch <id>`) |
+| `changes-branch` | Load branch context |
+| `changes-description` | Generate MR descriptions |
+| `changes-explain` | MR change breakdown |
+| `commit-msg` | Generate commit messages |
+| `docs-update` | Audit and update README.md and AGENTS.md to reflect current repo state |
+| `fix-feedback` | Work through review feedback — MR/PR threads or a local review agent's output |
+| `fix-linear` | Linear ticket implementation |
+| `reflect-peer` | Peer assessment generator (stub) |
+| `reflect-self` | Self-assessment generator (stub) |
+| `reflect-week` | Generate weekly engineering snippets |
+| `review-code` | Adversarial multi-agent review of proposed local changes (uses the Workflow tool; prints a `wf_…` run ID to watch live with `wfwatch <id>`) |
+| `review-kludge` | Adversarial swarm that reviews recent large features for accumulated kludge/AI-slop and proposes refactors (uses the Workflow tool; prints a `wf_…` run ID to watch live with `wfwatch <id>`) |
 
 ## GitLab Data
 

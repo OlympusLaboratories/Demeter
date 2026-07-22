@@ -343,8 +343,8 @@ main() {
 
   # ── ensure data directories for skills that accumulate context ───────────
   for data_dir in \
-    "$claude_dst/skills/performance-review-self/context" \
-    "$claude_dst/skills/performance-review-peer/context" \
+    "$claude_dst/skills/reflect-self/context" \
+    "$claude_dst/skills/reflect-peer/context" \
   ; do
     if [[ ! -d "$data_dir" ]]; then
       mkdir -p "$data_dir"
