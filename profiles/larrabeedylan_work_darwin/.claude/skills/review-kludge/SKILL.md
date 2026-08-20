@@ -13,6 +13,8 @@ If omitted, the skill auto-detects the recently churned "large features" from gi
 
 This skill reviews the code **as it currently stands** — history only tells it *where* the recent features live. It uses the **Workflow** tool to orchestrate the swarm; invoking it is an explicit opt-in to multi-agent orchestration, so proceed without asking, but respect the scaling rules so the run stays proportional to the scope.
 
+> **Preflight — confirm the Workflow tool exists.** Before Step 3, verify the `Workflow` tool is actually provisioned (`ToolSearch` with `select:Workflow`). It is **not** available in every session. If it's missing, do **not** abort and do **not** claim the run can't happen — run the identical three-phase pipeline with the **Agent** tool instead, per **Step 3c** below. (`wfwatch` is just a user shell function that tails a journal file; its presence says nothing about whether the `Workflow` tool is provisioned — the two are unrelated.)
+
 ## Step 1: Determine the Review Scope
 
 Figure out which "recent large features" to review. Run git with the Bash tool.
@@ -238,6 +240,22 @@ The **Workflow** tool runs the swarm in the background and its tool result inclu
 ```
 
 Use the **actual** `runId` string from the Workflow tool result verbatim (do not fabricate or abbreviate it — `wfwatch` resolves the run's journal by exact ID). Then proceed to wait for the workflow to complete and continue with Step 4.
+
+## Step 3c: Fallback when the Workflow tool isn't available
+
+If the preflight found no `Workflow` tool, run the **same** Analyze → Patterns → Critique pipeline manually with the **Agent** tool. This is a supported path, not a degraded guess — it produces the same report; it only loses the harness's structured schema-enforcement and true live-streaming. Do **not** ask permission first: the user already opted in by invoking the skill.
+
+**Phase 1 — Analyze (parallel):** launch one background `Agent` per feature area (subagent_type `general-purpose`, a cheap model like `sonnet` for the fan-out). Give each the Step-3 analysis prompt for its area (the `LENSES`, the "prefer a pattern already in THIS codebase", the "don't pad / return empty if clean" rules) and ask it to return a JSON array of proposal objects with the `PROPOSAL_ITEM` fields plus concrete `file:line` locations. Collect each result on its completion notification.
+
+**Phase 2 — Patterns (you do it):** you have every area's findings, so synthesize yourself — describe the emergent patterns and produce **one consolidated list**, merging duplicate/overlapping proposals that multiple areas raised (e.g. the same helper reinvented in three places) and keeping each proposal's fields intact. Write the consolidated list to a scratch JSON file (ids `P01…`) so the critique agents can read it without you re-pasting it N times.
+
+**Phase 3 — Critique (parallel):** the harness's "VOTES-per-proposal" fan-out (5 × N agents) is infeasible by hand. Instead launch **`VOTES` skeptic agents** (5 for scale 3, else 3), each of which reads the whole consolidated file and votes keep/drop **on every proposal**, returning a JSON array of `{id, keep, reason}`. Give them the Step-3 skeptic prompt (default keep=false; kill over-engineering/premature-abstraction/behavior-changing/churn; verify claims against real code with Read/Grep — the proposals were written by other agents and may be wrong). Vary each skeptic's emphasis (dead-code grep rigor, effort-vs-payoff, layering/correctness, whole-codebase-convention) so they aren't redundant. Tally per proposal: **majority keeps** (e.g. ≥3/5). Rank survivors by impact → risk → effort, exactly as the script does.
+
+**Emit a `wfwatch`-compatible journal** so the user can still watch progress. Create `~/.claude/projects/<project-slug>/<session-id>/subagents/workflows/<runId>/journal.jsonl` (any `runId` of the form `wf_…`; the `*/*` in `wfwatch`'s glob matches the project/session dirs). Append one JSONL event per phase step — `{"type":"started","agentId":"<short-label>","phase":"Analyze","label":"…"}` when you launch each area/skeptic, and `{"type":"result","agentId":"<same-label>","phase":"…","label":"…","result":"<short summary string>"}` when it returns. `wfwatch` counts `started` vs `result` and previews the `result` string, so use readable `agentId` labels (e.g. `eng-quests`, `skeptic-3`), keep `started`/`result` counts paired, and print the run id + `wfwatch <runId>` to the user right after Phase 1 launches. Note honestly that it advances **stepwise** (each time you regain control on a completion), not truly live mid-agent.
+
+**Gotcha — interrupts cancel background agents.** If the user interrupts the parent session while area/skeptic agents are in flight, those agents are **hard-cancelled** and cannot be resumed (`SendMessage` returns "stopped by the user"). Detect stalls (their task ids stop being found / transcripts stop growing) and **relaunch** the cancelled ones fresh — the user re-invoking or pushing the skill forward is your authorization to relaunch. Never fabricate or predict a cancelled agent's findings.
+
+Then continue to Step 4 exactly as written (present the report, offer next steps). In Step 4's honesty line, state that the run used the Agent-based fallback because the Workflow tool wasn't provisioned.
 
 ## Step 4: Present the Refactor Report
 
