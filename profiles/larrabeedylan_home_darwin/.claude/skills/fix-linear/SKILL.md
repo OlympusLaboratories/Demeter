@@ -24,7 +24,11 @@ Store `$ARGUMENTS` (trimmed, uppercased) as `TICKET_ID`. It should match a patte
 
 The target branch name is `FIRST_NAME/TICKET_ID` — e.g., `dylan/ENG-123`. Store this as `BRANCH_NAME`.
 
-## Step 2: Set Up the Branch
+## Step 2: Set Up the Worktree
+
+By default this skill isolates the work in its own **git worktree** — a separate working directory on its own branch that shares the repo's `.git`. This lets you run several fixes in parallel (one terminal/session per worktree) without branch checkouts colliding in a single working tree.
+
+**Escape hatch (in-place checkout):** If `$ARGUMENTS` contains `in place`, `--here`, or `no worktree` (case-insensitive), skip the worktree setup and use **Step 2-INPLACE** instead. Also fall back to Step 2-INPLACE if the repo cannot host worktrees (e.g. `git worktree list` errors).
 
 ### 2a. Determine the default branch
 
@@ -40,7 +44,73 @@ git branch -r | grep -E 'origin/(main|master)$' | head -1 | sed 's@.*origin/@@'
 
 Store the result as `DEFAULT_BRANCH`.
 
-### 2b. Check the current branch
+### 2b. Check whether you're already set up
+
+```bash
+git rev-parse --abbrev-ref HEAD
+```
+
+If the current branch already matches `BRANCH_NAME` (case-insensitive), you're already in the right worktree/branch. Fetch and merge the latest default branch, then skip to Step 3:
+
+```bash
+git fetch origin <DEFAULT_BRANCH> --quiet
+git merge origin/<DEFAULT_BRANCH> --no-edit
+```
+
+If the merge has conflicts, stop and tell the user so they can resolve them before continuing.
+
+### 2c. Create and enter the worktree
+
+Set `WORKTREE_PATH` to `.claude/worktrees/<BRANCH_NAME>` (relative to the repo root). Run these commands from the **main repo root**.
+
+1. Fetch the latest default branch:
+   ```bash
+   git fetch origin <DEFAULT_BRANCH> --quiet
+   ```
+2. Check whether a worktree for this branch already exists:
+   ```bash
+   git worktree list --porcelain
+   ```
+   If `BRANCH_NAME` (or `WORKTREE_PATH`) is already listed, **enter it** with the `EnterWorktree` tool (`path:` = that worktree's path), merge `origin/<DEFAULT_BRANCH>` (`--no-edit`), then skip to Step 3 — its dependencies are already installed, so skip Step 2d too.
+3. Check whether the branch already exists locally or on the remote:
+   ```bash
+   git branch --list <BRANCH_NAME>
+   git branch -r --list origin/<BRANCH_NAME>
+   ```
+4. **If the branch exists** (locally or remotely) but has no worktree, add a worktree on it:
+   ```bash
+   git worktree add <WORKTREE_PATH> <BRANCH_NAME>
+   ```
+   Then call the `EnterWorktree` tool with `path: <WORKTREE_PATH>` to move this session into it, and merge in the latest default branch:
+   ```bash
+   git merge origin/<DEFAULT_BRANCH> --no-edit
+   ```
+   If the merge conflicts, stop and tell the user.
+5. **If the branch does not exist**, create it in a fresh worktree off the up-to-date default branch:
+   ```bash
+   git worktree add -b <BRANCH_NAME> <WORKTREE_PATH> origin/<DEFAULT_BRANCH>
+   ```
+   Then call the `EnterWorktree` tool with `path: <WORKTREE_PATH>` to move this session into it.
+
+After entering, confirm to the user which worktree and branch they are now in. Every later step (implementation, `commit-msg`, `changes-description`, `review-code`, `fix-feedback`) runs inside this worktree.
+
+> **Cleanup is manual.** Worktrees created here are *not* auto-removed on session exit. When the branch is merged or abandoned, the user removes it with `git worktree remove <WORKTREE_PATH>`. See `WORKTREES.md` in the Demeter repo for the full worktree guide.
+
+### 2d. Offer to install dependencies
+
+A fresh worktree has no installed dependencies or build artifacts. Detect the project's package manager from files present in the worktree and **offer to run the install command — wait for the user's approval before running it**:
+
+- `package-lock.json` → `npm install` · `yarn.lock` → `yarn` · `pnpm-lock.yaml` → `pnpm install` · `bun.lockb` → `bun install`
+- `uv.lock` → `uv sync` · `poetry.lock` → `poetry install` · `requirements.txt` → `pip install -r requirements.txt`
+- `go.mod` → `go mod download` · `Gemfile` → `bundle install` · `Cargo.toml` → `cargo fetch`
+
+If several match, prefer the one matching the lockfile present. If none match, or the user declines, note that dependencies are not installed and continue.
+
+## Step 2-INPLACE: In-Place Branch Checkout (escape hatch only)
+
+Use this **only** when the escape hatch in Step 2 applies — it's the original single-working-tree behavior. Compute `DEFAULT_BRANCH` as in Step 2a first.
+
+### Check the current branch
 
 ```bash
 git rev-parse --abbrev-ref HEAD
@@ -48,23 +118,15 @@ git rev-parse --abbrev-ref HEAD
 
 Store as `CURRENT_BRANCH`.
 
-### 2c. Branch logic
-
 **If `CURRENT_BRANCH` already matches `BRANCH_NAME`** (case-insensitive):
 
-1. Fetch the latest default branch:
-   ```bash
-   git fetch origin <DEFAULT_BRANCH> --quiet
-   ```
-2. Merge the default branch into the current branch to pick up any new changes:
-   ```bash
-   git merge origin/<DEFAULT_BRANCH> --no-edit
-   ```
-3. If the merge has conflicts, stop and tell the user about the conflicts so they can resolve them before continuing.
+1. `git fetch origin <DEFAULT_BRANCH> --quiet`
+2. `git merge origin/<DEFAULT_BRANCH> --no-edit`
+3. If the merge has conflicts, stop and tell the user so they can resolve them before continuing.
 
 **Otherwise (not on the target branch):**
 
-1. Check for uncommitted changes. If there are any, warn the user and stop — do not switch branches with dirty working tree.
+1. Check for uncommitted changes. If there are any, warn the user and stop — do not switch branches with a dirty working tree.
    ```bash
    git status --porcelain
    ```
@@ -184,7 +246,7 @@ Once the user approves the plan, implement the changes.
 Execute the approved plan:
 - Use `TodoWrite` to track implementation tasks.
 - Write clean, minimal code that follows existing codebase patterns.
-- **Do not reference the ticket, task, or initiative in code comments.** Comments should explain the code for future maintainers — never cite the Linear ticket/task/initiative that prompted the change (no `# ENG-123`, `// per PLAT-1180`, `# for the X initiative`, etc.). That context belongs in the commit message and MR description, not the source.
+- **Add no comments to the code you write or change.** No explanatory comments, no banners, no docstring on a symbol that did not have one, no `TODO`s, no commented-out code — and never a reference to the Linear ticket, task, or initiative (`# ENG-123`, `// per PLAT-1180`, `# for the X initiative`). A comment written alongside the code restates the line, goes stale, and makes the reviewer read past it to reach the change. Write the code so it does not need one, and put every explanation in the commit message and MR description instead. Exempt because they are program input rather than commentary: linter and type directives, build pragmas, codegen markers, required license headers, and any doc-comment CI fails without. Leave comments already in the file alone unless your change makes one untrue — then correct or delete it.
 - Run any relevant tests or linters if the project has them configured.
 - Mark each todo as completed as you finish it.
 
@@ -195,16 +257,16 @@ After implementation is complete, give the user a summary of what was changed.
 Immediately after implementation is complete — do not wait for the user to commit or ask for these:
 
 1. Invoke the `commit-msg` skill using the `Skill` tool to generate a commit message.
-2. **Immediately** invoke the `changes-description` skill using the `Skill` tool to generate an MR description. Do NOT wait for the user to respond to the commit message first — both outputs must be presented in the same turn, back-to-back. The `commit-msg` skill ends with a suggestion to run `/commit`, but you must continue and invoke `changes-description` before yielding to the user.
+2. **Immediately** invoke the `changes-description` skill using the `Skill` tool to generate an MR description. Do NOT wait for the user to respond to the commit message first — both outputs must be presented in the same turn, back-to-back. The `commit-msg` skill ends with a suggestion to run `/commit`, but you must continue and invoke `changes-description` before yielding to the user. Pass `--quick` unless the branch is large or the user asked for a thorough description — `changes-description` runs a multi-agent debate, and the full-length version is disproportionate for a routine ticket.
 
 ## Important Rules
 
-1. **NEVER modify external state beyond git branch operations.** Do not update Linear tickets, push branches, or create MRs unless explicitly asked.
+1. **NEVER modify external state beyond local git branch/worktree operations.** Creating a local branch or worktree is fine; do not update Linear tickets, push branches, or create MRs unless explicitly asked. Never remove a worktree the user didn't ask you to — cleanup is the user's call.
 2. **Respect uncommitted work.** Never discard or stash uncommitted changes without the user's explicit approval.
 3. **Ask, don't assume.** If the ticket is vague, ask the user for clarification rather than guessing.
 4. **Follow existing patterns.** Match the coding style, naming conventions, and architecture of the existing codebase.
 5. **Keep the user informed.** Summarize what you're doing at each major step so the user can course-correct early.
-6. **No ticket references in code comments.** Never mention the Linear ticket, task, or initiative in comments on generated code — it's noise for future maintainers. Keep that context in the commit message and MR description instead.
+6. **No comments in the code.** Do not add explanatory comments, docstrings, or ticket references to code you write or modify — the full rule is in Step 5. Explanation goes in the commit message and MR description, never the source. Machine-read directives (linter suppressions, build pragmas, a doc-comment CI requires) are program input, not commentary, and stay allowed.
 
 ## Step 7: Self-Improvement
 

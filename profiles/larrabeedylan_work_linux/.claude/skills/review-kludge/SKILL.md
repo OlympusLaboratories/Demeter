@@ -277,7 +277,7 @@ Do not refactor anything in this step — this skill reviews and proposes, it do
 ## Step 5: Offer Next Steps
 
 After the report, offer (as plain text, not `AskUserQuestion`):
-- Implement one or more of the proposals (you can do the refactor if the user picks some — smallest-risk first).
+- Implement one or more of the proposals (you can do the refactor if the user picks some — smallest-risk first). Add no comments while refactoring: no note marking an extracted helper, a converged pattern, or what the old shape was. A refactor's whole claim is that the code now reads for itself.
 - Re-run at a higher `scale`, or on a specific area, for a deeper pass.
 - Dive deeper into any single proposal (show the full before/after shape).
 

@@ -96,17 +96,29 @@ Parse each response as JSON.
 
 Do NOT serialize these calls — run them in parallel.
 
-## Step 2b: Check Out the PR Branch (Mode A)
+## Step 2b: Set Up the PR Branch (Mode A)
 
-From the PR metadata output, extract the **source branch name** (`headRefName` field).
+From the PR metadata output, extract the **source branch name** (`headRefName` field) as `SOURCE_BRANCH`.
 
-1. **Check the current branch** — run `git branch --show-current`.
-2. **If already on the correct branch**, skip ahead to Step 3.
-3. **If on a different branch**, check out the PR's source branch:
-   - Run `git fetch origin <source_branch>` to ensure the branch is available locally.
-   - Run `git checkout <source_branch>` to switch to it.
-   - If the checkout fails due to uncommitted changes, warn the user and ask how to proceed (stash, commit, or abort) — do NOT force-checkout or discard changes.
-4. **Pull latest changes** — run `git pull --ff-only`. If this fails (e.g., local commits diverge), warn the user but continue.
+By default, isolate the checkout in its own **git worktree** so it doesn't disturb other work in progress. **Escape hatch:** if `$ARGUMENTS` contains `in place`, `--here`, or `no worktree`, or the repo can't host worktrees, use the in-place checkout at the end of this step instead.
+
+1. **Already on it?** Run `git branch --show-current` — if it already equals `SOURCE_BRANCH`, pull latest and skip to Step 3:
+   ```bash
+   git pull --ff-only
+   ```
+2. **Existing worktree?** Run `git worktree list --porcelain` — if `SOURCE_BRANCH` is already checked out in a worktree, enter it with the `EnterWorktree` tool (`path:` = that worktree's path) and skip to step 5 (no dependency install needed — it already has them).
+3. **Fetch the branch:** `git fetch origin <SOURCE_BRANCH>`
+4. **Add and enter a worktree** at `.claude/worktrees/<SOURCE_BRANCH>` (run from the repo root):
+   ```bash
+   git worktree add .claude/worktrees/<SOURCE_BRANCH> <SOURCE_BRANCH>
+   ```
+   If the branch only exists on the remote, use `git worktree add .claude/worktrees/<SOURCE_BRANCH> origin/<SOURCE_BRANCH>` to create a local tracking branch. Then call the `EnterWorktree` tool with `path: .claude/worktrees/<SOURCE_BRANCH>` to move this session into it.
+5. **Update to latest:** `git pull --ff-only`. If this fails (local commits diverge), warn the user but continue — the branch is still usable.
+6. **Offer to install dependencies** — a fresh worktree has none. Detect the package manager (npm/yarn/pnpm/bun/uv/poetry/pip/go/bundler/cargo) from the lockfile present and offer to run its install command; wait for the user's approval before running it. Skip this if you reused an existing worktree in step 2.
+
+Worktrees are cleaned up manually — remove with `git worktree remove <path>` once the PR is merged. See `WORKTREES.md` in the Demeter repo for the full guide.
+
+**In-place checkout (escape hatch):** after `git fetch origin <SOURCE_BRANCH>`, run `git checkout <SOURCE_BRANCH>` in the current tree. If checkout fails due to uncommitted changes, warn the user and ask how to proceed (stash, commit, or abort) — do NOT force-checkout or discard changes. Then `git pull --ff-only`.
 
 This ensures the local codebase matches the PR so that file reads and edits target the correct code.
 
@@ -231,7 +243,7 @@ If the user chooses "Discuss", continue the dialogue — ask clarifying question
 
 ### If applying changes (fully or with modifications):
 
-1. Make the code changes using the `Edit` tool.
+1. Make the code changes using the `Edit` tool. **Add no comments while doing it** — not the reviewer's point, not why the code now looks this way; that goes in the drafted reply, not the source.
 2. Show the user what was changed.
 3. If the change was modified from the original suggestion, draft a reply for the comment thread explaining what was done differently and why.
 
@@ -309,6 +321,7 @@ After resolving one thread, offer to address the next unresolved thread. Loop ba
 5. **Consider codebase context.** When evaluating suggestions, look at how similar patterns are handled elsewhere in the codebase using `Grep` and `Read`. Consistency matters.
 6. **Keep replies concise.** Drafted replies should be 2-5 sentences. Long replies in code review threads are rarely read.
 7. **Use the local codebase.** The user is expected to have the PR branch checked out locally. Use `Read`, `Grep`, and `Glob` to explore the actual code — don't rely solely on the diff from the API.
+8. **No comments in the code.** When you apply a change, add no explanatory comment, docstring, or note recording what the reviewer asked for — a reviewer reading the next diff does not need the last review narrated back at them. That belongs in the drafted reply. Machine-read directives (linter suppressions, build pragmas, a doc-comment CI requires) are program input, not commentary, and stay allowed.
 
 ## Step 9: Self-Improvement
 

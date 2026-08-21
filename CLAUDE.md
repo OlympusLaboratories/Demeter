@@ -17,6 +17,7 @@ Demeter/
       .zshrc
       .bash_profile
       .claude/
+        CLAUDE.md         # global agent instructions, synced to ~/.claude/CLAUDE.md
         skills/           # Claude Code skills, synced to ~/.claude/skills/
           <skill-name>/
             SKILL.md
@@ -47,6 +48,7 @@ Key behaviors:
 - Skips already-correct symlinks
 - Removes stale skill symlinks that point into the repo but whose target no longer exists
 - Respects `SKIP_LIST` for machine-specific files (format: `"filename:machine"`)
+- `.claude/CLAUDE.md` is symlinked to `~/.claude/CLAUDE.md` — the user-level instruction file loaded in every repository (no installer change was needed; the top-level `.claude/` file loop already handles it)
 - `settings.json` is copied (not symlinked) with `__DEMETER_REPO__` path templating
 - `settings.local.json` lives at `.claude/.claude/` and is symlinked normally
 - `.mcp.json` is NOT managed by the repo (contains tokens) — configure manually
@@ -67,4 +69,5 @@ Key behaviors:
 - **No secrets in repo**: Sensitive values (API keys, tokens) belong in `~/.secrets` or similar, sourced from shell config — never committed
 - **Machine-specific skipping**: Use the `SKIP_LIST` array in `install.sh` to control per-platform linking
 - **Skills**: Each skill gets its own directory under `.claude/skills/` with a `SKILL.md` file
+- **No comments in code**: `.claude/CLAUDE.md` forbids agent-written code comments globally. Any skill that writes or edits code must restate the rule in its own prompt — subagents spawned by a skill receive the skill's text, not the user's `CLAUDE.md`. The only sanctioned exception is `security-audit`'s PoC and verification tests, where the write-up is the deliverable
 - **Vendor packages**: Third-party skill sets go in `_vendor/<name>/` as git submodules

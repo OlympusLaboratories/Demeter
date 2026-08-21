@@ -86,7 +86,7 @@ Some fixes are structural and can't be cleanly reverted one line at a time (e.g.
 - Use a feature-flag-style in-memory switch during testing that routes requests back through the old path.
 - Or assert the **behavior** the fix guarantees (e.g., "the deserializer only accepts a specific schema; any other input is rejected with 400 and no parser state mutation"), and test the negation directly.
 
-Document the alternative approach in the test docstring.
+Document the alternative approach in the test docstring — the same narrow exception to the global no-comments-in-code rule that Stage 5 takes for PoC tests, and the only comment this stage writes.
 
 ## Writing results
 

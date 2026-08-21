@@ -12,9 +12,11 @@ The snippet covers the past 7 days. **Immediately** use the Bash tool to calcula
 
 **IMPORTANT:** Run each `date` command as its own Bash tool call — do NOT wrap them in `echo` statements, as `echo` triggers an unnecessary user permission prompt. Just run the bare `date` command directly.
 
+**IMPORTANT (macOS):** this machine uses BSD `date`, which has no `-d` flag — `date -u -d "7 days ago"` fails. Use `-v-7d` instead.
+
 ```
 date -u +%Y-%m-%d
-date -u -d "7 days ago" +%Y-%m-%d
+date -u -v-7d +%Y-%m-%d
 ```
 
 ## Step 1: Read Slack/Discussion Context
@@ -22,6 +24,7 @@ date -u -d "7 days ago" +%Y-%m-%d
 Read the file `~/.claude/skills/reflect-week/slack-context.md` using the Read tool. This file contains Slack threads, discussions, and other context that Dylan has pasted before running this command.
 
 - If the file is empty or only has the template header, that's fine — skip Slack context and proceed with GitLab + Linear data only.
+- **ALWAYS check whether the content is stale before using it.** Dylan does not always refresh this file between runs, and a leftover paste from a prior week will silently pollute the report with work that already got credited. Two checks: (a) do the in-thread dates ("Jul 22nd", "07/23", "Yesterday at 2:44 PM") fall inside this week's range? (b) `ls ~/.claude/skills/reflect-self/context/` — if the most recent report's date range matches the threads' dates, this content was already consumed. If stale: do **not** attribute it to this week, state the caveat at the top of the detailed report and in the chat response, and proceed with GitLab + Linear only.
 - If it has content, parse the pasted threads for: incident responses, architecture decisions, cross-team coordination, deployment discussions, problem resolutions, or any other notable work items.
 - **Thread boundaries:** The pasted content contains multiple Slack threads concatenated together. Delineate thread boundaries by looking for recurring phrases like "Reply…Also send to" which appear at the end of each copied thread. Use the channel names in these markers (e.g., "Also send to platform-infra-team", "Also send to retail-eng") to identify the domain/team context for each thread.
 
@@ -41,6 +44,28 @@ Use the helper script at `~/.claude/scripts/gitlab-api.sh`. This script reads th
 ```
 
 For each MR, note the title, target project/repo name, and status.
+
+**`merged-mrs` does NOT filter by merge date.** It returns MRs updated since the start date, so the list will include MRs merged weeks or even years earlier. Always filter client-side on the `merged_at` field and discard anything before the start date.
+
+**Descriptions from `merged-mrs`/`open-mrs` are truncated to ~200 chars.** For the detailed report (Step 4), fetch full descriptions with `mr-info` for the MRs that matter.
+
+```bash
+# Full MR description — NOTE: project path must be URL-encoded (%2F for every slash).
+# Passing a raw path (gridmatic/foundation/gridmatic-dev) returns empty and throws a
+# JSONDecodeError traceback, which is easy to misread as "the MR doesn't exist".
+~/.claude/scripts/gitlab-api.sh mr-info gridmatic%2Ffoundation%2Fgridmatic-dev 557
+
+# Review threads — same URL-encoding requirement. Use this to find peers for Step 4.5:
+# reviewer usernames are the strongest signal available when Slack context is missing.
+~/.claude/scripts/gitlab-api.sh mr-discussions gridmatic%2Ftlaloc-env 2829
+```
+
+**An MR named in Slack may have been closed, not merged.** `open-mrs` lists only open MRs and
+`merged-mrs` only merged ones, so an abandoned MR appears in neither and it is easy to report a
+superseded approach as work-in-flight. Run `mr-info` on any MR number that came from Slack rather
+than from the two list commands, and check its `state`.
+
+`mr-discussions` prints one JSON object per thread on its own line — it is NOT a single JSON array, so `json.load()` on the whole stream fails. Parse line-by-line, or just `grep -o '"author": "[^"]*"' | sort | uniq -c` to get a participant tally quickly. Filter out the bots (`griddy-bot`, `gridmatic-releaser`, `gridmatic-linear`) when identifying human peers.
 
 IMPORTANT: Never use curl with API tokens directly. Always use the helper script.
 
@@ -74,6 +99,10 @@ Load the Notion tools via `ToolSearch` (query: `+notion search`) if not already 
 3. Cache the OKRs in memory for use in Steps 4 and 5.
 
 **Quarter calculation:** Q1 = Jan–Mar, Q2 = Apr–Jun, Q3 = Jul–Sep, Q4 = Oct–Dec. Derive from the current date.
+
+**Verify the quarter before using the page.** Several "Platform Infrastructure" OKR pages exist with identical titles, one per quarter, and `notion-search` ranks the wrong quarter first even when the query names the right one. After `notion-fetch`, check the `<ancestor-path>` in the response — it shows `<parent-page ... title="2026 Q3"/>`. If the parent is the wrong quarter, fetch a different result. The Q3 2026 Platform Infrastructure page is `4ca6763b-19a6-82d9-9500-01278c1935ae`; its parent quarter page is `3736763b-19a6-806a-b114-fa9024254282`.
+
+**These OKRs are objective/bullet lists, not per-person KRs.** Map Dylan's work to the objective bullets that fit (e.g. Security → "rollout gridmatic.dev IAM widely, revoke legacy IAM access"; Dev + Infra Platform → "Rollout rdev to all of eng"). Don't expect a KR with Dylan's name on it.
 
 **If no OKRs are found:** Note it briefly and continue — OKR mapping is optional enrichment, not a blocker.
 
@@ -223,6 +252,7 @@ and any notable dynamics (mentoring, joint debugging, coordination).
 - **Only include peers with meaningful interaction.** A drive-by emoji reaction doesn't count. Look for substantive collaboration: discussion, review, joint problem-solving, coordination.
 - **Be specific about Dylan's role.** The point is to capture what Dylan contributed to the relationship, not just that they were in the same thread.
 - **Skip if no peers found.** If the week's data has no clear peer interactions, skip this step entirely.
+- **When Slack context is missing or stale, MR review threads are the fallback peer source.** Run `mr-discussions` (Step 2) over the week's significant MRs and use the non-bot authors. Distinguish a substantive review (an inline question that changed the code) from a bare `lgtm` — write both up if they occurred, but say plainly which is which and note that a bare approval is thin evidence about a working relationship.
 - **Keep it factual.** These profiles are raw evidence — save editorializing for the `reflect-peer` skill at review time.
 
 ## Step 5: Synthesize the Snippet

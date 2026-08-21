@@ -11,9 +11,9 @@ Goal: apply the approved fixes. Root-cause fixes preferred. Preserve style and c
 
 1. **Only touch approved findings.** The in-scope set is in `state.json.stage7.approved_ids`. Do not drift.
 2. **Root cause first.** Parameterize, don't blacklist. Enforce authorization in policy, don't patch one handler. Replace weak crypto, don't add a warning.
-3. **Preserve code style and conventions.** Match existing formatter config, import order, naming, comment style. Do not reformat unrelated code.
+3. **Preserve code style and conventions.** Match existing formatter config, import order, and naming. Do not reformat unrelated code, and do not restyle or tidy comments already in the file.
 4. **Minimize diff.** Fix the bug. Do not "improve" adjacent code, add docstrings, or rename variables that were fine.
-5. **Comment only when non-obvious.** If the fix protects a subtle invariant, add one line referencing the finding ID: `// SA-007: keep parameterization — see audit.` Do NOT add verbose explanatory paragraphs.
+5. **Add no comments.** Do not annotate the fix — no explanatory comment, no docstring, and no finding-ID marker in the source. The finding ID, the invariant the fix protects, and the reasoning belong in `findings.md` and the final report, which is where a reviewer goes looking for them; in the source they are noise that ages badly. Machine-read directives (linter suppressions, build pragmas, required license headers, a doc-comment CI fails without) are program input rather than commentary and stay allowed. If your fix makes an existing comment untrue, correct or delete it.
 6. **Defense in depth is a separate change** from the root cause. Land the root-cause fix first; if the plan includes defense-in-depth, commit to both but order them.
 7. **Update `findings.md`** — append a remediation entry referencing the original finding ID with a diff summary (paths touched, line counts added/removed, behavior change one-liner).
 8. **Re-run the flagging scanner on touched files.** If semgrep flagged it, re-run semgrep on the touched paths only. If the flag persists, the fix may not have addressed the scanner's concern — investigate before marking done.

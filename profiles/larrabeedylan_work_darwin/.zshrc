@@ -41,7 +41,7 @@ alias gd='git diff'
 alias gpsh='git push'
 alias gpu='git push --force-with-lease -u origin HEAD'
 alias gpl='git pull'
-alias go='git checkout '
+# `go` is a worktree-aware git checkout — see the GIT WORKTREES section below
 alias gco.='git checkout .'
 alias gri='git rebase -i'
 alias got='git '      # typo recovery
@@ -71,6 +71,319 @@ alias f='freshen'
 
 # Go the language (alias 'go' is git checkout)
 alias gol='command go'
+
+### GIT WORKTREES
+# Portable across bash and zsh — keep these three profiles' copies identical.
+# (zsh note: never name a local `path` — it shadows $PATH. Hence `wp`.)
+
+# Where `wt` creates new worktrees, relative to the main working tree.
+: "${WT_ROOT:=.claude/worktrees}"
+# Age (in days) at which `wtclean` calls a worktree stale.
+: "${WT_STALE_DAYS:=90}"
+
+_wt_in_repo() {
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 && return 0
+  echo "${1:-wt}: not inside a git repository" >&2
+  return 1
+}
+
+# Absolute path of the main working tree (the one that owns .git)
+_wt_main_root() {
+  git worktree list --porcelain 2>/dev/null | awk '/^worktree /{ print substr($0, 10); exit }'
+}
+
+# One "<path><TAB><branch>" line per worktree; branch is "(detached)" when headless
+_wt_list() {
+  git worktree list --porcelain 2>/dev/null | awk '
+    /^worktree / { wp = substr($0, 10); branch = "(detached)"; next }
+    /^branch /   { branch = substr($0, 8); sub(/^refs\/heads\//, "", branch); next }
+    /^$/         { if (wp != "") { print wp "\t" branch; wp = "" } next }
+    END          { if (wp != "") print wp "\t" branch }
+  '
+}
+
+# Upstream state of a branch: gone (remote branch deleted) | none | ok
+_wt_upstream_state() {
+  local up track
+  up=$(git for-each-ref --format='%(upstream)' "refs/heads/$1" 2>/dev/null)
+  [ -n "$up" ] || { echo none; return 0; }
+  track=$(git for-each-ref --format='%(upstream:track)' "refs/heads/$1" 2>/dev/null)
+  case "$track" in
+    *gone*) echo gone ;;
+    *)      echo ok ;;
+  esac
+}
+
+# wt [<branch>] — cd to the worktree for a branch.
+#   no argument         → the main working tree
+#   exact branch/dir    → that worktree
+#   unique substring    → that worktree (ambiguous matches are listed, not guessed)
+#   branch has no worktree yet → offer to create one under $WT_ROOT
+wt() {
+  _wt_in_repo wt || return 1
+  local query="$1" list hits n root target branch ans
+
+  list=$(_wt_list)
+
+  if [ -z "$query" ]; then
+    target=$(_wt_main_root)
+    [ -n "$target" ] || return 1
+    cd "$target" || return 1
+    echo "→ $(pwd)  [$(git symbolic-ref --short HEAD 2>/dev/null || echo detached)]"
+    return 0
+  fi
+
+  # exact branch, then exact directory name, then case-insensitive substring
+  hits=$(printf '%s\n' "$list" | awk -F'\t' -v q="$query" '$2 == q')
+  [ -n "$hits" ] || hits=$(printf '%s\n' "$list" | awk -F'\t' -v q="$query" \
+    '{ d = $1; sub(/.*\//, "", d); if (d == q) print }')
+  [ -n "$hits" ] || hits=$(printf '%s\n' "$list" | awk -F'\t' -v q="$query" \
+    'BEGIN { q = tolower(q) } index(tolower($2), q) || index(tolower($1), q)')
+
+  n=$(printf '%s\n' "$hits" | grep -c .)
+
+  if [ "$n" -gt 1 ]; then
+    echo "wt: '$query' matches $n worktrees:" >&2
+    printf '%s\n' "$hits" | awk -F'\t' '{ printf "  %-36s %s\n", $2, $1 }' >&2
+    return 1
+  fi
+
+  if [ "$n" -eq 1 ]; then
+    target=$(printf '%s\n' "$hits" | cut -f1)
+    cd "$target" || return 1
+    echo "→ $(pwd)  [$(git symbolic-ref --short HEAD 2>/dev/null || echo detached)]"
+    return 0
+  fi
+
+  # No worktree matched — is there a branch by that name to build one from?
+  branch=$(git for-each-ref --format='%(refname:short)' refs/heads | grep -iF -- "$query" | head -1)
+  if [ -z "$branch" ]; then
+    branch=$(git for-each-ref --format='%(refname:lstrip=3)' refs/remotes \
+      | grep -iF -- "$query" | grep -v '^HEAD$' | head -1)
+  fi
+  if [ -z "$branch" ]; then
+    echo "wt: no worktree or branch matching '$query'" >&2
+    wtl >&2
+    return 1
+  fi
+
+  root=$(_wt_main_root)
+  target="$root/$WT_ROOT/$branch"
+  printf "wt: no worktree for '%s' — create %s? [y/N] " "$branch" "$WT_ROOT/$branch"
+  read -r ans
+  case "$ans" in
+    [yY]*) ;;
+    *) return 1 ;;
+  esac
+
+  if git show-ref --verify --quiet "refs/heads/$branch"; then
+    git -C "$root" worktree add "$target" "$branch" || return 1
+  elif git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+    git -C "$root" worktree add --track -b "$branch" "$target" "origin/$branch" || return 1
+  else
+    echo "wt: '$branch' is not a local branch or an origin branch" >&2
+    return 1
+  fi
+  cd "$target" || return 1
+  echo "→ $(pwd)  [$branch]"
+}
+
+# wtl — list worktrees with branch, age, upstream state and dirty flag.
+# `*` marks the worktree you are standing in.
+wtl() {
+  _wt_in_repo wtl || return 1
+  local here root list wp branch mark age state rel
+  here=$(git rev-parse --show-toplevel 2>/dev/null)
+  root=$(_wt_main_root)
+  list=$(_wt_list)
+
+  printf '%-2s %-36s %-16s %-14s %s\n' " " "BRANCH" "LAST COMMIT" "STATE" "PATH"
+  while IFS=$'\t' read -r wp branch; do
+    [ -n "$wp" ] || continue
+    mark=" "; [ "$wp" = "$here" ] && mark="*"
+    age=$(git -C "$wp" log -1 --format='%cr' 2>/dev/null)
+    case "$(_wt_upstream_state "$branch")" in
+      gone) state="gone" ;;
+      none) state="local" ;;
+      *)    state="tracked" ;;
+    esac
+    [ -n "$(git -C "$wp" status --porcelain 2>/dev/null)" ] && state="$state,dirty"
+    if [ "$wp" = "$root" ]; then
+      rel="(main)"
+    else
+      rel="$wp"
+      case "$wp" in "$root"/*) rel="${wp#$root/}" ;; esac
+    fi
+    printf '%-2s %-36s %-16s %-14s %s\n' "$mark" "$branch" "${age:-?}" "$state" "$rel"
+  done <<< "$list"
+}
+
+# wtclean [-y] [--days N] [--no-fetch] [--keep-branches]
+#   Removes worktrees whose branch was deleted on the remote, or whose last
+#   commit is older than N days (default $WT_STALE_DAYS). Merged branches are
+#   deleted too; unmerged stale ones are kept and reported.
+#   Dry run unless -y. Never touches the main working tree, the worktree you are
+#   standing in, a detached-HEAD worktree, or one with uncommitted changes.
+wtclean() {
+  _wt_in_repo wtclean || return 1
+  local apply=0 days="$WT_STALE_DAYS" fetch=1 keep_branches=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -y|--yes)       apply=1 ;;
+      --days)         shift; days="$1" ;;
+      --no-fetch)     fetch=0 ;;
+      --keep-branches) keep_branches=1 ;;
+      -h|--help)
+        echo "usage: wtclean [-y] [--days N] [--no-fetch] [--keep-branches]"
+        return 0 ;;
+      *) echo "wtclean: unknown option '$1'" >&2; return 2 ;;
+    esac
+    shift
+  done
+  case "$days" in ''|*[!0-9]*) echo "wtclean: --days needs a number" >&2; return 2 ;; esac
+
+  local root here list wp branch kind reason last cutoff removed=0 skipped=0
+  root=$(_wt_main_root)
+  here=$(git rev-parse --show-toplevel 2>/dev/null)
+
+  if [ "$fetch" -eq 1 ]; then
+    echo "fetching --prune (use --no-fetch to skip) …"
+    git -C "$root" fetch --all --prune --quiet \
+      || echo "wtclean: fetch failed — remote state may be stale" >&2
+  fi
+  git -C "$root" worktree prune
+
+  cutoff=$(( $(date +%s) - days * 86400 ))
+  list=$(_wt_list)
+
+  while IFS=$'\t' read -r wp branch; do
+    [ -n "$wp" ] || continue
+    [ "$wp" = "$root" ] && continue
+    if [ "$branch" = "(detached)" ]; then
+      echo "  skip     $wp — detached HEAD"
+      continue
+    fi
+
+    kind=""; reason=""
+    if [ "$(_wt_upstream_state "$branch")" = "gone" ]; then
+      kind="gone"; reason="branch deleted on remote"
+    else
+      last=$(git -C "$wp" log -1 --format='%ct' 2>/dev/null)
+      if [ -n "$last" ] && [ "$last" -lt "$cutoff" ]; then
+        kind="stale"
+        reason="untouched for ${days}+ days (last $(git -C "$wp" log -1 --format='%cr'))"
+      fi
+    fi
+    [ -n "$kind" ] || continue
+
+    if [ "$wp" = "$here" ]; then
+      echo "  skip     $branch — you are standing in it ($reason)"
+      skipped=$((skipped + 1))
+      continue
+    fi
+    if [ -n "$(git -C "$wp" status --porcelain 2>/dev/null)" ]; then
+      echo "  skip     $branch — uncommitted changes ($reason)"
+      skipped=$((skipped + 1))
+      continue
+    fi
+
+    if [ "$apply" -eq 0 ]; then
+      echo "  would remove  $branch — $reason"
+      removed=$((removed + 1))
+      continue
+    fi
+
+    git -C "$root" worktree remove "$wp" || continue
+    echo "  removed  $branch — $reason"
+    removed=$((removed + 1))
+    [ "$keep_branches" -eq 1 ] && continue
+    if [ "$kind" = "gone" ]; then
+      git -C "$root" branch -D "$branch" >/dev/null && echo "           branch $branch deleted"
+    elif git -C "$root" branch -d "$branch" >/dev/null 2>&1; then
+      echo "           branch $branch deleted"
+    else
+      echo "           branch $branch kept (unmerged — 'git branch -D $branch' to drop it)"
+    fi
+  done <<< "$list"
+
+  git -C "$root" worktree prune
+  if [ "$apply" -eq 0 ]; then
+    printf '\n%d to remove, %d skipped. Re-run with -y to apply.\n' "$removed" "$skipped"
+  else
+    printf '\n%d removed, %d skipped.\n' "$removed" "$skipped"
+  fi
+}
+
+alias wtc='wtclean'
+
+# go [<branch>|<worktree>] — checkout that treats worktrees as branches.
+#   local branch, not checked out anywhere else → git checkout
+#   local branch held by another worktree       → cd to that worktree
+#   worktree directory name (no such branch)    → cd to that worktree
+#   anything else (-b, ., --, paths, tags, ...) → handed to git checkout verbatim
+go() {
+  # Only a single bare word can name a branch or worktree; everything else
+  # (`go -b new`, `go .`, `go -- file`, `go HEAD~1 file`) is plain checkout.
+  if [ "$#" -ne 1 ] || [ -z "$1" ]; then
+    git checkout "$@"
+    return
+  fi
+  case "$1" in -*) git checkout "$@"; return ;; esac
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { git checkout "$@"; return; }
+
+  local query="$1" list hits n wp branch here rc
+
+  list=$(_wt_list)
+
+  if git show-ref --verify --quiet "refs/heads/$query"; then
+    # A real branch: checkout works unless a worktree already holds it.
+    hits=$(printf '%s\n' "$list" | awk -F'\t' -v q="$query" '$2 == q')
+    if [ -z "$hits" ]; then
+      git checkout "$query"
+      return
+    fi
+  else
+    # Not a branch — match a worktree by directory name (covers detached ones).
+    hits=$(printf '%s\n' "$list" | awk -F'\t' -v q="$query" \
+      '{ d = $1; sub(/.*\//, "", d); if (d == q) print }')
+  fi
+
+  n=$(printf '%s\n' "$hits" | grep -c .)
+
+  if [ "$n" -gt 1 ]; then
+    echo "go: '$query' matches $n worktrees:" >&2
+    printf '%s\n' "$hits" | awk -F'\t' '{ printf "  %-36s %s\n", $2, $1 }' >&2
+    return 1
+  fi
+
+  if [ "$n" -eq 1 ]; then
+    wp=$(printf '%s\n' "$hits" | cut -f1)
+    branch=$(printf '%s\n' "$hits" | cut -f2)
+    here=$(git rev-parse --show-toplevel 2>/dev/null)
+    if [ "$wp" = "$here" ]; then
+      echo "→ already here: $wp  [$branch]"
+      return 0
+    fi
+    cd "$wp" || return 1
+    echo "→ $(pwd)  [$branch]"
+    return 0
+  fi
+
+  # Nothing local matched — let git do remote-tracking DWIM, tags, SHAs and
+  # pathspecs, and print its own error when the name is simply wrong.
+  git checkout "$query"
+  rc=$?
+  [ "$rc" -eq 0 ] && return 0
+
+  # Wrong-but-close: surface fuzzy worktree matches that `wt` would have found.
+  hits=$(printf '%s\n' "$list" | awk -F'\t' -v q="$query" \
+    'BEGIN { q = tolower(q) } index(tolower($2), q) || index(tolower($1), q)')
+  if [ -n "$hits" ]; then
+    echo "go: worktrees matching '$query' — try 'wt $query':" >&2
+    printf '%s\n' "$hits" | awk -F'\t' '{ printf "  %-36s %s\n", $2, $1 }' >&2
+  fi
+  return $rc
+}
 
 ### TERRAFORM
 
