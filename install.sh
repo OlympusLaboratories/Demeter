@@ -275,10 +275,16 @@ main() {
         bold "  Linking $name/ entries..."
         link_directory_contents "$src" "$claude_dst/$name" "$machine"
       elif [[ "$name" == "settings.json" ]]; then
-        # settings.json is copied (not symlinked) so we can template paths
-        bold "  Installing $name (with path templating)..."
-        sed "s|__DEMETER_REPO__|$REPO_DIR|g" "$src" > "$claude_dst/$name"
-        success "Installed: $claude_dst/$name"
+        # Normally symlinked, so edits in ~/.claude land back in the repo and
+        # stay tracked. Only a profile that actually uses __DEMETER_REPO__ has
+        # to be copied, since templating cannot write through a symlink.
+        if grep -q '__DEMETER_REPO__' "$src"; then
+          bold "  Installing $name (with path templating)..."
+          sed "s|__DEMETER_REPO__|$REPO_DIR|g" "$src" > "$claude_dst/$name"
+          success "Installed: $claude_dst/$name"
+        else
+          link_file "$src" "$claude_dst/$name"
+        fi
       else
         link_file "$src" "$claude_dst/$name"
       fi

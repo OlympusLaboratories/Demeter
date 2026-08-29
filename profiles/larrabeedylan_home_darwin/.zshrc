@@ -396,6 +396,12 @@ alias iftop="sudo iftop"
 
 [ -f ~/.secrets ] && source ~/.secrets
 
+# Claude Code authenticates with ANTHROPIC_API_KEY if it is set, which bypasses
+# the Max subscription and bills a pay-as-you-go console account instead. The key
+# above is kept for other tooling; this shadows it for Claude Code only.
+claude() { env -u ANTHROPIC_API_KEY command claude "$@"; }
+
+
 # direnv
 eval "$(direnv hook zsh)"
 
