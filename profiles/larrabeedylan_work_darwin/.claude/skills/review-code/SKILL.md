@@ -168,6 +168,8 @@ Use this script verbatim (it encodes the review → adversarial-verify pipeline)
 
 **Always pass the script inline via `script`. Never invoke this skill's workflow with `scriptPath` or `resumeFromRunId`.** Every Workflow call snapshots its script to disk and offers that path back for cheap re-runs — but the snapshot is frozen at the moment it was taken. Reusing it silently replays whatever version of this pipeline was current *then*, discarding any correction made to this file since, while the run looks entirely normal. That has already happened once: a fixed skill was bypassed by a `scriptPath` pointing at the pre-fix snapshot from the run it was fixing. If you are re-running after a failed review — the exact moment the shortcut is most tempting — resend the script from this file.
 
+The one sanctioned exception is `/workflow-resume`, which rescues a run this skill lost to a spend limit or a kill. It pairs `resumeFromRunId` with the script re-read from **this** file rather than the snapshot, so the cache is reused and the fix is not discarded. Resuming any other way is the bug above.
+
 ````js
 export const meta = {
   name: 'review-code',
@@ -263,10 +265,18 @@ const changeLabel = (A.changeLabel && String(A.changeLabel).trim()) || 'proposed
 const context = `Default branch: ${A.defaultBranch}\nRepo root under review: ${repoRoot}${scopeRule}\n\nChanged files (name-status):\n${A.files}\n\nUnified diff of the ${changeLabel}:\n\n${A.diff}`
 
 // Files actually touched by the diff — the only legitimate finding locations.
+//
+// Do NOT filter on "looks like a filename" (an earlier version required a dot
+// in the path). Extensionless files are real review surface — Makefile,
+// Dockerfile, Jenkinsfile, a hack/ script — and dropping them here does not
+// stop reviewers seeing them in the diff, it just discards any finding they
+// raise about one, as an out-of-scope stray. The run then reports full
+// coverage having quietly excluded those files. Take every path git printed
+// and let inScope do the work.
 const changedFiles = new Set(
   A.files.split('\n')
     .map((l) => l.trim().split(/\s+/).pop() || '')
-    .filter((p) => p && p.includes('.'))
+    .filter((p) => p && p !== '/dev/null')
 )
 if (!changedFiles.size) {
   throw new Error(`review-code: could not parse any file path out of args.files:\n${A.files}\nRefusing to run with an unenforceable scope filter.`)
@@ -374,6 +384,17 @@ Then a short summary line: how many lenses ran, how many candidate findings were
 
 **Read the confirmed findings against EACH OTHER before presenting them.** Every finding is verified in isolation by its own panel, so nothing in the pipeline notices when two of them cannot both be true — one asserts a config value is ignored entirely, another asserts that same value changes behavior elsewhere, and both come back confirmed 3/3. Scan for pairs whose mechanisms are mutually exclusive, or where one finding's premise is the negation of another's. When you find such a pair, do not report both as fact: say which one the code actually supports (verify the load-bearing mechanism yourself — read the library source, run the command), and say plainly that the other's mechanism is wrong. Findings that are merely facets of one underlying defect should be grouped under it rather than listed as separate discoveries, and where finding B is a straightforward consequence of finding A, say so instead of counting it as independent evidence.
 
+**When findings agree on a premise that lives in ANOTHER repo, check that repo is current before believing any of them.** The scope filter only proves reviewers named a file from the diff; it says nothing about where they got their *semantics*. A config-only repo (Terraform, Helm, kustomize) rarely contains the engine that consumes it, so reviewers go read the sibling checkout — and a sibling checked out behind `origin/main` is a real, relevant, authoritative-looking file that is simply out of date. Every skeptic then confirms, because the stale code genuinely says what they claim.
+
+The tell is unanimity on a mechanism the diff itself does not contain: several lenses independently "confirming" the same external behavior, often quoting the same function. When you see it, before writing a single finding into the report:
+
+```bash
+git -C <sibling-repo> fetch origin --quiet
+git -C <sibling-repo> merge-base --is-ancestor <fix-sha> HEAD; echo "in local tree: exit=$?"
+```
+
+A non-zero exit means the reviewers read pre-fix code and the findings are void. Then **prove the current behavior by executing it** — find the test covering the claimed exploit and run it against `origin/main` in a throwaway worktree. A passing test named after the exact scenario settles it in a way that another file read never can, because reading is what produced the error. Report the run output, not your reasoning about it.
+
 Do not fix anything in this step — this skill reviews, it does not edit.
 
 ## Step 4b: Pin the Line Numbers (Incoming mode)
@@ -447,7 +468,7 @@ After the report, offer (as plain text, not `AskUserQuestion`):
 4. **Findings must be diff-scoped.** Pre-existing issues outside the proposed changes are out of scope unless the diff newly exposes them.
 5. **Verification is adversarial on purpose.** The skeptic panel defaults to "refuted"; that's what keeps the signal high. Don't loosen it.
 6. **Report honestly.** If the diff was truncated, a lens errored, or coverage was capped, say so.
-7. **Check that every finding names a file from the diff before reporting anything.** Both known failures of this skill produced complete, confident, adversarially-verified reports about files that were not in the diff. Cross-check `reviewedFiles` against the paths in `confirmed`; if they don't match, the run is void regardless of how good the findings look. Note that `discarded: 0` proves nothing on its own — it was 0 in a run where 100% of findings were out of scope, because the scope filter itself was disabled by the undefined-args bug.
+7. **Check `reviewedFiles` against the diff's own file list before reporting anything** — the count, not just the paths. A file git listed that is missing from `reviewedFiles` was excluded from the scope filter, so a finding about it would have been thrown away as a stray and the run would still report `discarded: 0`. Say which files were excluded, and read them yourself rather than letting the summary imply they were covered. **Also check that every finding names a file from the diff.** Both known failures of this skill produced complete, confident, adversarially-verified reports about files that were not in the diff. Cross-check `reviewedFiles` against the paths in `confirmed`; if they don't match, the run is void regardless of how good the findings look. Note that `discarded: 0` proves nothing on its own — it was 0 in a run where 100% of findings were out of scope, because the scope filter itself was disabled by the undefined-args bug.
 8. **Match the tool to the diff.** A one-file, few-dozen-line change does not need 27 agents. If the swarm's setup cost exceeds the change, say so and offer to read it yourself instead.
 9. **Incoming branches are read-only.** Never commit, amend, push, rebase, or force anything on somebody else's branch, and never check it out over the user's working tree — it gets a detached worktree or it does not get reviewed.
 10. **Never post a comment.** The pack is printed in chat for the user to paste, edit, and prune. Posting to the MR is their action, not yours, and it stays that way even if a tool is available that could do it.

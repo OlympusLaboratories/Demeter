@@ -79,6 +79,8 @@ Call the **Workflow** tool with the script below, passing `args` as a JSON objec
 
 Use this script verbatim. The one barrier (pattern synthesis) is deliberate — distilling the emergent architecture and merging cross-cutting duplicates genuinely needs every area's findings at once.
 
+**Always pass the script inline via `script`** — never the `scriptPath` a previous run snapshotted, which replays whatever version of this pipeline was current then. To rescue a run killed by a spend limit, use `/workflow-resume`: it pairs `resumeFromRunId` with the script re-read from this file.
+
 ````js
 export const meta = {
   name: 'review-kludge',

@@ -168,6 +168,8 @@ Use this script verbatim (it encodes the review → adversarial-verify pipeline)
 
 **Always pass the script inline via `script`. Never invoke this skill's workflow with `scriptPath` or `resumeFromRunId`.** Every Workflow call snapshots its script to disk and offers that path back for cheap re-runs — but the snapshot is frozen at the moment it was taken. Reusing it silently replays whatever version of this pipeline was current *then*, discarding any correction made to this file since, while the run looks entirely normal. That has already happened once: a fixed skill was bypassed by a `scriptPath` pointing at the pre-fix snapshot from the run it was fixing. If you are re-running after a failed review — the exact moment the shortcut is most tempting — resend the script from this file.
 
+The one sanctioned exception is `/workflow-resume`, which rescues a run this skill lost to a spend limit or a kill. It pairs `resumeFromRunId` with the script re-read from **this** file rather than the snapshot, so the cache is reused and the fix is not discarded. Resuming any other way is the bug above.
+
 ````js
 export const meta = {
   name: 'review-code',

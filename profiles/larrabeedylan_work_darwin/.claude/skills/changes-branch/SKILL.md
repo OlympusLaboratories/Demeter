@@ -21,6 +21,11 @@ git rev-parse --abbrev-ref HEAD
 git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@'
 ```
 
+Prefer the bare `git symbolic-ref refs/remotes/origin/HEAD` and strip the
+`refs/remotes/origin/` prefix from the output yourself. The `| sed` / `2>/dev/null` form
+above is frequently blocked by permission rules (pipes and redirects can't be verified),
+so it stalls on a prompt or gets rejected even outside a worktree.
+
 If `symbolic-ref` fails, fall back to checking whether `main` or `master` exists:
 
 ```bash

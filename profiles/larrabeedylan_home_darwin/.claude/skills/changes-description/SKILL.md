@@ -75,7 +75,7 @@ Call the **Workflow** tool with the script below, passing `args` as a **real JSO
 
 A JSON-encoded string makes every `args.x` lookup `undefined`; the script hard-throws on missing `diff` or `context` rather than letting four drafters write a description of nothing.
 
-**Always pass the script inline via `script`.** Never re-run this skill's workflow with `scriptPath` or `resumeFromRunId` — those replay a frozen snapshot of the script from the run they were taken in, silently discarding any fix made to this file since.
+**Always pass the script inline via `script`.** Never re-run this skill's workflow with `scriptPath` or `resumeFromRunId` — those replay a frozen snapshot of the script from the run they were taken in, silently discarding any fix made to this file since. The one sanctioned exception is `/workflow-resume`, which pairs `resumeFromRunId` with the script re-read from **this** file, so a run killed by a spend limit keeps its cache without replaying a stale script.
 
 ````js
 export const meta = {

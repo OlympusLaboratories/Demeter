@@ -25,6 +25,7 @@ Read the file `~/.claude/skills/reflect-week/slack-context.md` using the Read to
 
 - If the file is empty or only has the template header, that's fine — skip Slack context and proceed with GitLab + Linear data only.
 - **ALWAYS check whether the content is stale before using it.** Dylan does not always refresh this file between runs, and a leftover paste from a prior week will silently pollute the report with work that already got credited. Two checks: (a) do the in-thread dates ("Jul 22nd", "07/23", "Yesterday at 2:44 PM") fall inside this week's range? (b) `ls ~/.claude/skills/reflect-self/context/` — if the most recent report's date range matches the threads' dates, this content was already consumed. If stale: do **not** attribute it to this week, state the caveat at the top of the detailed report and in the chat response, and proceed with GitLab + Linear only.
+- **Staleness is usually partial, not total.** The common case is a file that carries this week's threads *plus* the tail of one long-running thread whose opening was already credited. Grep the most recent report for a distinguishing token from each thread (an MR number, a person's name, a ticket ID) rather than judging the file as a whole — then credit only the messages that postdate the prior report and say so explicitly in the caveat.
 - If it has content, parse the pasted threads for: incident responses, architecture decisions, cross-team coordination, deployment discussions, problem resolutions, or any other notable work items.
 - **Thread boundaries:** The pasted content contains multiple Slack threads concatenated together. Delineate thread boundaries by looking for recurring phrases like "Reply…Also send to" which appear at the end of each copied thread. Use the channel names in these markers (e.g., "Also send to platform-infra-team", "Also send to retail-eng") to identify the domain/team context for each thread.
 
@@ -65,6 +66,10 @@ For each MR, note the title, target project/repo name, and status.
 superseded approach as work-in-flight. Run `mr-info` on any MR number that came from Slack rather
 than from the two list commands, and check its `state`.
 
+`mr-info` returns `state` but **not** `merged_at` (it comes back null) and not `draft`. Use it for state and the full description; take merge dates from `merged-mrs` and draft status from `open-mrs`.
+
+The shell is **zsh**, which does not word-split unquoted parameters — `for spec in "proj iid"; do set -- $spec` silently leaves `$2` empty and every call fails with `parameter null or not set`. Write the pairs to a file and `while read -r proj iid` instead.
+
 `mr-discussions` prints one JSON object per thread on its own line — it is NOT a single JSON array, so `json.load()` on the whole stream fails. Parse line-by-line, or just `grep -o '"author": "[^"]*"' | sort | uniq -c` to get a participant tally quickly. Filter out the bots (`griddy-bot`, `gridmatic-releaser`, `gridmatic-linear`) when identifying human peers.
 
 IMPORTANT: Never use curl with API tokens directly. Always use the helper script.
@@ -87,6 +92,8 @@ Use `mcp__claude_ai_Linear__list_issues` to find issues assigned to Dylan that a
 - Assigned to Dylan
 
 **NOTE:** `state` is matched exactly, and Dylan's active tickets almost always sit in **"In Review"** (statusType `started`), not "In Progress" — the latter frequently returns empty. Always query **both** `state: "In Progress"` and `state: "In Review"` as separate `list_issues` calls (run them in parallel) so no active work is missed.
+
+**There is a third started state: "Approved".** Tickets whose MR is open and reviewed but not yet merged sit there, and they show up in *neither* the "In Progress" nor the "In Review" query — so open MRs appear in the GitLab data with no matching ticket and look untracked. Query `state: "Approved"` alongside the other two.
 
 For each in-progress ticket, note the identifier, title, description, and current status.
 

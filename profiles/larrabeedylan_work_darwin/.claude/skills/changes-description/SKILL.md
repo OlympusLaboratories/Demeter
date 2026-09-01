@@ -29,6 +29,17 @@ What that reader needs above all is a **story, not an inventory**. A list of tru
 
 ### 1a. Gather the diff
 
+> **Never launch with a stand-in `diff`.** The script's guard only rejects a missing or
+> empty string, so `"diff": "PLACEHOLDER"` (or a "…filled in below" note) sails straight
+> through and burns a full 15-agent run describing nothing. Assemble the real diff text
+> FIRST and paste it into `args` before you write the `context` digest — the digest is the
+> long part, and the temptation is to stub the diff and "come back to it". If the diff is
+> awkward to transcribe, inline the production files verbatim and pass a `[TRUNCATED: …]`
+> marker naming the omitted test file plus its path, so agents can `Read` it. Untracked new
+> files do NOT appear in `git diff`, so capture each with
+> `git diff --no-index /dev/null <path>` rather than staging them — a worktree-isolated
+> session should not touch the index just to build a description.
+
 ```bash
 DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
 [ -z "$DEFAULT_BRANCH" ] && DEFAULT_BRANCH=$(git branch -r | grep -E 'origin/(main|master)$' | head -1 | sed 's@.*origin/@@')
@@ -75,7 +86,7 @@ Call the **Workflow** tool with the script below, passing `args` as a **real JSO
 
 A JSON-encoded string makes every `args.x` lookup `undefined`; the script hard-throws on missing `diff` or `context` rather than letting four drafters write a description of nothing.
 
-**Always pass the script inline via `script`.** Never re-run this skill's workflow with `scriptPath` or `resumeFromRunId` — those replay a frozen snapshot of the script from the run they were taken in, silently discarding any fix made to this file since.
+**Always pass the script inline via `script`.** Never re-run this skill's workflow with `scriptPath` or `resumeFromRunId` — those replay a frozen snapshot of the script from the run they were taken in, silently discarding any fix made to this file since. The one sanctioned exception is `/workflow-resume`, which pairs `resumeFromRunId` with the script re-read from **this** file, so a run killed by a spend limit keeps its cache without replaying a stale script.
 
 ````js
 export const meta = {

@@ -22,10 +22,17 @@ Each skill is a subdirectory containing a `SKILL.md` file that defines the skill
 | `reflect-week` | Generate weekly engineering snippets |
 | `review-code` | Adversarial multi-agent review of proposed local changes, or of an incoming branch someone else pushed — the latter is fetched into a detached review worktree and comes back with a pack of ready-to-paste review comments (uses the Workflow tool; prints a `wf_…` run ID to watch live with `wfwatch <id>`) |
 | `review-kludge` | Adversarial swarm that reviews recent large features for accumulated kludge/AI-slop and proposes refactors (uses the Workflow tool; prints a `wf_…` run ID to watch live with `wfwatch <id>`) |
+| `workflow-resume` | Rescue a `Workflow` swarm that died mid-run — diagnoses why (spend limit, kill, API errors), then either resumes it from the on-disk agent cache or harvests the finished agents' results |
 
 ## Worktrees
 
 `fix-linear` and `fix-feedback` isolate each fix in its own git worktree by default (under `.claude/worktrees/<branch>`), entered via the `EnterWorktree` tool, so multiple non-blocking fixes can run in parallel — one session per worktree. They offer to install dependencies in the fresh worktree and leave cleanup manual (`git worktree remove`). Pass `in place` / `--here` / `no worktree` in the skill argument to fall back to an in-place checkout. `commit-msg` and `changes-description` operate on the current directory and need no worktree awareness. `review-code` does too in its default local mode, but when handed an incoming branch it creates a **detached** review worktree at `.claude/worktrees/review/<branch>` — never checking their branch out over yours — and leaves removal to you. Full guide: `WORKTREES.md` at the repo root.
+
+## Workflow Runs
+
+`changes-description`, `review-code`, and `review-kludge` orchestrate swarms through the **Workflow** tool. Each run leaves a manifest, a script snapshot, and a `journal.jsonl` agent cache under `~/.claude/projects/<slug>/<session>/`. `workflow-resume` reads all of it through `~/.claude/scripts/workflow-runs.py` (`list`, `show`, `args`, `script`, `link`, `merge`, `harvest`).
+
+Two facts those three skills depend on: a workflow reports `completed` even when agents died mid-run (`agent()` returns `null`, the script carries on), and the resume cache is a **prefix** — a hash chain over agent calls that stops replaying at the first agent with no recorded result. Neither is visible from the report a swarm prints.
 
 ## GitLab Data
 

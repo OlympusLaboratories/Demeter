@@ -258,6 +258,7 @@ Immediately after implementation is complete — do not wait for the user to com
 
 1. Invoke the `commit-msg` skill using the `Skill` tool to generate a commit message.
 2. **Immediately** invoke the `changes-description` skill using the `Skill` tool to generate an MR description. Do NOT wait for the user to respond to the commit message first — both outputs must be presented in the same turn, back-to-back. The `commit-msg` skill ends with a suggestion to run `/commit`, but you must continue and invoke `changes-description` before yielding to the user. Pass `--quick` unless the branch is large or the user asked for a thorough description — `changes-description` runs a multi-agent debate, and the full-length version is disproportionate for a routine ticket.
+3. **Re-print the commit message after the MR description, verbatim.** The `changes-description` output is long, so by the time it finishes the commit message from step 1 has scrolled far up the terminal. Close the turn by repeating it — unchanged from what `commit-msg` produced, no re-generation, no re-wording, no summary of it — in its own fenced block under a `Commit message` heading, so both blocks the user copies sit next to each other at the bottom. If the user corrected the commit message between step 1 and here, repeat the corrected version.
 
 ## Important Rules
 
