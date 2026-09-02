@@ -323,6 +323,16 @@ main() {
     done
   fi
 
+  # ── shared tools (e.g. worktree-sync editor extension) ─────────────────────
+  # Profile-independent projects that live at the repo root and are linked into
+  # ~/.claude/tools/. Linking only makes the source available — a tool that has
+  # to be built or installed into an editor still needs its own make target.
+  local tools_dir="$REPO_DIR/tools"
+  if [[ -d "$tools_dir" ]]; then
+    bold "Linking shared tools to $claude_dst/tools ..."
+    link_directory_contents "$tools_dir" "$claude_dst/tools" "$machine"
+  fi
+
   # ── clean stale skill symlinks ───────────────────────────────────────────
   # Remove symlinks in ~/.claude/skills that point into this repo but whose
   # target no longer exists (e.g. a skill was renamed or deleted). Iterate over

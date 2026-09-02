@@ -131,12 +131,13 @@ main() {
   fi
   echo ""
 
-  # ── clean up now-empty skill dirs left behind ────────────────────────────
-  if [[ -d "$claude_dst/skills" ]]; then
-    find "$claude_dst/skills" -mindepth 1 -type d -empty -delete 2>/dev/null || true
-    # remove skills/ itself if it ended up empty
-    rmdir "$claude_dst/skills" 2>/dev/null || true
-  fi
+  # ── clean up now-empty dirs left behind ──────────────────────────────────
+  for dir in "$claude_dst/skills" "$claude_dst/hooks" "$claude_dst/tools"; do
+    [[ -d "$dir" ]] || continue
+    find "$dir" -mindepth 1 -type d -empty -delete 2>/dev/null || true
+    # remove the directory itself if it ended up empty
+    rmdir "$dir" 2>/dev/null || true
+  done
 
   # ── offer to restore the most recent .claude backup ──────────────────────
   local latest_backup

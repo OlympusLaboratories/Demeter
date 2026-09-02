@@ -12,15 +12,19 @@ Demeter/
   _starter/               # Template for new contributors — copy to get started
     .bash_profile
   _vendor/                # Vendor packages (skills + tools) — linked/installed by installer
+  tools/                  # First-party projects shared by every profile
+    worktree-sync/        # VS Code extension, linked into ~/.claude/tools/
   profiles/               # One directory per machine profile
     <profile>/            # e.g. larrabeedylan_work_linux
       .zshrc
       .bash_profile
       .claude/
         CLAUDE.md         # global agent instructions, synced to ~/.claude/CLAUDE.md
+        settings.json     # permissions + hook registrations
         skills/           # Claude Code skills, synced to ~/.claude/skills/
           <skill-name>/
             SKILL.md
+        hooks/            # Hook scripts, synced to ~/.claude/hooks/
         scripts/          # Helper scripts used by skills
 ```
 
@@ -39,8 +43,9 @@ The installer does the following in order:
 5. Backs up existing `~/.claude` directory (timestamped copy)
 6. Symlinks `.claude/` contents individually (skills linked per-directory into `~/.claude/skills/`)
 7. Symlinks vendor skills from `_vendor/*/` into `~/.claude/skills/`
-8. Cleans stale skill symlinks (removes symlinks pointing to deleted repo paths)
-9. Creates data directories for skills that accumulate context
+8. Symlinks shared tools from `tools/*` into `~/.claude/tools/`
+9. Cleans stale skill symlinks (removes symlinks pointing to deleted repo paths)
+10. Creates data directories for skills that accumulate context
 
 Key behaviors:
 - Creates a full backup of `~/.claude` before modifying it
@@ -52,6 +57,8 @@ Key behaviors:
 - `settings.json` is copied (not symlinked) with `__DEMETER_REPO__` path templating
 - `settings.local.json` lives at `.claude/.claude/` and is symlinked normally
 - `.mcp.json` is NOT managed by the repo (contains tokens) — configure manually
+- `.claude/hooks/` is linked per-file into `~/.claude/hooks/` by the same `.claude/` directory loop; the hooks that run from there are registered in each profile's `settings.json`
+- `tools/` is profile-independent and linked per-directory into `~/.claude/tools/`. Linking only makes the source available — a tool that has to be built or installed into an editor keeps its own make targets
 - Idempotent — safe to re-run after pulling changes
 
 ## When Making Changes
@@ -71,3 +78,5 @@ Key behaviors:
 - **Skills**: Each skill gets its own directory under `.claude/skills/` with a `SKILL.md` file
 - **No comments in code**: `.claude/CLAUDE.md` forbids agent-written code comments globally. Any skill that writes or edits code must restate the rule in its own prompt — subagents spawned by a skill receive the skill's text, not the user's `CLAUDE.md`. The only sanctioned exception is `security-audit`'s PoC and verification tests, where the write-up is the deliverable
 - **Vendor packages**: Third-party skill sets go in `_vendor/<name>/` as git submodules
+- **Shared tools**: First-party projects that are not tied to one machine go in `tools/<name>/` at the repo root rather than being duplicated per profile. Build output (`node_modules/`, `dist/`, `*.vsix`) is ignored by the tool's own nested `.gitignore`
+- **Hooks**: One script per hook under `.claude/hooks/`, duplicated across profiles like `scripts/`. Register it in every profile's `settings.json` using `$HOME/.claude/hooks/<name>` so the path resolves on any machine

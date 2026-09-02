@@ -11,13 +11,17 @@ Demeter/
 ├── _starter/           # copy this to get started
 │   └── .bash_profile
 ├── _vendor/            # vendor packages — skills + tools (git submodules)
+├── tools/              # first-party projects, shared by every profile
+│   └── worktree-sync/  # VS Code extension, synced to ~/.claude/tools/
 └── profiles/           # one directory per machine profile
     └── <profile>/      # e.g. larrabeedylan_work_linux
         ├── .bash_profile
         ├── .zshrc
         └── .claude/
             ├── CLAUDE.md   # global instructions, synced to ~/.claude/CLAUDE.md
+            ├── settings.json  # permissions + hook registrations
             ├── skills/     # Claude Code skills, synced to ~/.claude/skills/
+            ├── hooks/      # hook scripts, synced to ~/.claude/hooks/
             └── scripts/    # helper scripts used by skills
 ```
 
@@ -43,6 +47,7 @@ The script will:
 - Back up `~/.claude` before modifying (timestamped copy)
 - Symlink `.claude/` contents (including skills) to `~/.claude/`
 - Symlink vendor skills from `_vendor/` into `~/.claude/skills/`
+- Symlink shared tools from `tools/` into `~/.claude/tools/`
 - Clean stale skill symlinks (e.g. after a skill is renamed or removed from the repo)
 - Create data directories for skills that accumulate context
 - Back up any existing real files before replacing them
@@ -98,3 +103,25 @@ Some skills accumulate user data (weekly reports, Slack context, the `plan-initi
 The `fix-linear` and `fix-feedback` skills set up each fix in its own **git worktree** by default, so you can work several non-blocking fixes in parallel (one terminal/session per worktree) without branch checkouts colliding. See **[WORKTREES.md](WORKTREES.md)** for the full guide — the mental model, switching between worktrees, dependency setup, and cleanup. Pass `in place` to a skill (e.g. `/fix-linear ENG-123 in place`) to fall back to a plain in-place checkout.
 
 Each profile's shell config also defines `go` (worktree-aware `git checkout` — `cd`s into the worktree when one holds that branch, checks out normally when it doesn't, and passes anything else like `go -b new` or `go .` straight to git), `wt` (jump to the worktree for a branch, creating it if needed), `wtl` (list worktrees with age, upstream state, and dirty flag), and `wtclean` (remove worktrees whose branch is gone from the remote or untouched for 90+ days — dry run unless `-y`).
+
+### Session Hook
+
+`.claude/hooks/` is linked into `~/.claude/hooks/`, and each profile's `settings.json` registers the hooks that run from there. One hook lives there today:
+
+**`link-worktree-session.py`** (`SessionStart`, `CwdChanged`, `Stop`) — a session started inside a worktree writes its transcript to that worktree's own `~/.claude/projects/<slug>/` directory, so `claude --resume` run from the main checkout cannot see it. The hook symlinks each worktree session's transcript back into the main checkout's project directory, which makes every worktree's history resumable and searchable from one place. Run it with `--backfill` to link transcripts recorded before the hook was installed:
+
+```bash
+~/.claude/hooks/link-worktree-session.py --backfill
+```
+
+### Worktree Sync Extension
+
+`tools/worktree-sync/` is a VS Code extension that keeps the active **Claude Code tab** and the active **terminal** on the same worktree in both directions, so you can't type a prompt into one worktree's session while running commands in another. It is shared by every profile — the installer only links the source into `~/.claude/tools/`; installing it into the editor is a separate step:
+
+```bash
+cd ~/.claude/tools/worktree-sync
+make setup      # npm install
+make install    # build, package, and install into VS Code
+```
+
+`make link` is the development alternative: it symlinks the source into `~/.vscode/extensions/` so a rebuild picks up on a window reload. `make check` runs typecheck, tests, and build. See [tools/worktree-sync/README.md](tools/worktree-sync/README.md) for how tabs and terminals are matched and which settings it exposes.

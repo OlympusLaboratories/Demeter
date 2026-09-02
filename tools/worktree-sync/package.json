@@ -1,0 +1,83 @@
+{
+  "name": "worktree-sync",
+  "displayName": "Worktree Sync",
+  "description": "Keeps the active Claude Code tab and the active terminal on the same git worktree.",
+  "version": "0.1.3",
+  "publisher": "dylanlarrabee",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "worktreeSync.toggle",
+        "title": "Worktree Sync: Toggle"
+      },
+      {
+        "command": "worktreeSync.diagnostics",
+        "title": "Worktree Sync: Show Diagnostics"
+      },
+      {
+        "command": "worktreeSync.rebuildIndex",
+        "title": "Worktree Sync: Rebuild Session Index"
+      }
+    ],
+    "configuration": {
+      "title": "Worktree Sync",
+      "properties": {
+        "worktreeSync.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep the active Claude Code tab and the active terminal on the same worktree."
+        },
+        "worktreeSync.direction": {
+          "type": "string",
+          "enum": [
+            "both",
+            "tabToTerminal",
+            "terminalToTab"
+          ],
+          "default": "both",
+          "enumDescriptions": [
+            "Sync in both directions.",
+            "Only reveal the matching terminal when the Claude tab changes (no focus bounce).",
+            "Only activate the matching Claude tab when the terminal changes."
+          ],
+          "description": "Which direction(s) to synchronize."
+        },
+        "worktreeSync.projectsDir": {
+          "type": "string",
+          "default": "~/.claude/projects",
+          "description": "Directory holding Claude Code session transcripts."
+        },
+        "worktreeSync.debounceMs": {
+          "type": "number",
+          "default": 50,
+          "description": "Debounce applied to tab and terminal change events."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.93.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}
