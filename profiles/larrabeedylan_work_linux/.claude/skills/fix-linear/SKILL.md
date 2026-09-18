@@ -61,6 +61,8 @@ If the merge has conflicts, stop and tell the user so they can resolve them befo
 
 ### 2c. Create and enter the worktree
 
+> **The base branch is not always the default branch, and only the ticket knows.** This step runs before Step 3 reads the ticket, so a ticket saying "branches off MR2" or "stacked on PLAT-1234" would get a worktree cut from the wrong base. When the ticket ID looks like part of a stack — an `MR<n>` title, a parent initiative that sequences MRs — **fetch the ticket (Step 3a) and its siblings (Step 3f) first**, then come back here knowing the base. Before assuming a named predecessor is unmerged, check whether it already landed: a squash-merge leaves `git merge-base --is-ancestor <branch> origin/<default>` false while the *commit subject* is present in `git log origin/<default>`, so grep the log for the ticket ID rather than trusting the ancestry test. If it landed, the default branch **is** the right base and no stacking is needed.
+
 Set `WORKTREE_PATH` to `.claude/worktrees/<BRANCH_NAME>` (relative to the repo root). Run these commands from the **main repo root**.
 
 1. Fetch the latest default branch:
@@ -105,6 +107,29 @@ A fresh worktree has no installed dependencies or build artifacts. Detect the pr
 - `go.mod` → `go mod download` · `Gemfile` → `bundle install` · `Cargo.toml` → `cargo fetch`
 
 If several match, prefer the one matching the lockfile present. If none match, or the user declines, note that dependencies are not installed and continue.
+
+**Never judge an install by a piped command's exit code.** `pnpm install 2>&1 | tail -25` exits with `tail`'s status, so a hard failure reports success. Run the installer bare, or check `${PIPESTATUS[0]}`.
+
+**In `gridmatic-dev`, `pnpm install` needs a live GAR token and often cannot get one.** npm resolves through the foundation Artifact Registry, and `make npm-auth` mints the token via `gcloud`. In a non-interactive session `gcloud` frequently needs a reauth it cannot prompt for, so both `make npm-auth` and any `pnpm install` that must fetch metadata fail (`ERR_PNPM_FETCH_403`, or `ERR_PNPM_NO_OFFLINE_META` with `--offline`). Note also that `pnpm` is not on `PATH` — it comes from mise, so invoke it as `mise exec -- pnpm`.
+
+When that happens, don't declare the change unverifiable. Borrow the main checkout's already-installed tree:
+
+```bash
+ln -s <MAIN_REPO>/apps/<app>/node_modules <WORKTREE>/apps/<app>/node_modules
+mise exec -- <WORKTREE>/apps/<app>/node_modules/.bin/vitest run <paths>
+```
+
+Tests and lint run correctly this way. **Type-checking does not** — the borrowed tree's generated `@gridmatic/*` workspace packages belong to whatever commit the main checkout sits on, so `tsc -b` emits phantom errors (`Cannot find module '@gridmatic/notify-api'`) that have nothing to do with the branch. Report the count and confirm none are in the changed files rather than presenting it as a clean type-check. Remove the symlink when done — left in place it silently resolves imports against another checkout — and tell the user to run `make npm-auth && pnpm install` once they've re-authed.
+
+**The symlink is required, not merely convenient, when the session is worktree-isolated.** A one-shot invocation of the binary by its absolute path in the main checkout — `mise exec -- /Users/…/gridmatic-dev/packages/<pkg>/ts/node_modules/.bin/openapi-typescript …` — is refused by the isolation guard ("too complex to verify that it stays inside the worktree"), and so is any command combining `cd`, a pipe, and an outside path. Create the symlink inside the worktree, invoke the binary through the *relative* `./node_modules/.bin/…` path, then delete it. The inner symlinks in a pnpm tree are relative to their real location, so they still resolve to the main checkout's store — this works.
+
+**The isolation guard also refuses `cd … && cat > file <<'EOF' … EOF` and any pipe-plus-`$PIPESTATUS` one-liner.** It is not only about paths outside the worktree — a *shape* it cannot statically verify gets refused too, so writing a whole file via heredoc and writing a lint invocation as `… | tail; echo ${PIPESTATUS[0]}` both fail. Use the Write tool for whole-file content and the Edit tool for patches (they are never refused, and Write is faster than a heredoc anyway), and run linters/test binaries bare so their real exit code surfaces.
+
+**The Bash working directory persists between calls, and a bare `cd` will strand you.** After `cd apps/portal`, a later `cd apps/portal` fails and a relative `ln -s packages/…` lands in the wrong place. Either issue every path absolutely, or re-`cd` to the worktree root as its own command before any step whose relative paths matter. `pwd` when a relative path fails unexpectedly.
+
+**A ticket whose scope spans two repos is still workable from one worktree-isolated session — use `git -C <abs path>`.** PLAT-2528 needed a tlaloc-env branch and a gridmatic-dev docs branch. `cd ~/gridmatic-dev && git status` is refused ("changes directory to a location computed at runtime before running git"), but `git -C /Users/…/gridmatic-dev status` is accepted, and so is `git -C <repo> worktree add -b <branch> <path> origin/main`. Read/Edit/Write against absolute paths in the other repo are not blocked either. So: create the second repo's worktree with `git -C`, edit through absolute paths, and check both trees with two separate `git -C … status --porcelain` calls. Ask the user early whether they want the second repo driven in the same session or left as a follow-up — it changes how much gets done here, and the Step 3 "Done when" list often names a file that lives in the other repo.
+
+**Two more shapes the isolation guard refuses, both hit on PLAT-2460.** A `for` loop over scenarios (`for m in a b c; do terraform … -var mode=$m; done`), and a compound `A; echo ---; B; echo ---; C` that merely *inspects* things outside the worktree (`tfenv list`, `cat ~/.config/…`). Neither touches git and neither writes outside, but the guard is static: any multi-command shape it cannot unroll gets refused. Issue them as separate plain calls — batch the independent ones into one message so they still run in parallel. Note `terraform -chdir=<abs path>` *is* accepted, which is how to drive a scratchpad harness without `cd`.
 
 ## Step 2-INPLACE: In-Place Branch Checkout (escape hatch only)
 
@@ -228,13 +253,33 @@ Do not treat a failed or empty tool call as "no context." If a call errors, retr
 
 Read this material the way you read the ticket itself: it defines the initiative this ticket belongs to, and the implementation should fit that larger design rather than solving the subtask in isolation.
 
+## Step 3g: Load Linked Notion Pages (MANDATORY when present)
+
+Linear tickets frequently link to a Notion doc (design spec, RFC, requirements) that holds the real detail behind a terse ticket. **This step is not optional when such a link exists** — implementing without reading the linked spec is a failure of this skill even if the code is correct.
+
+1. **Scan for Notion links.** Search the ticket **title, description, comments** (from Step 3c), and the ticket's **attachments/links/relations** (from the `includeRelations: true` result in Step 3a) for any Notion URL — patterns like `notion.so/...`, `www.notion.so/...`, or a workspace subdomain such as `<workspace>.notion.site/...`. Collect every distinct URL/page you find.
+
+2. **If NO Notion link is found:** state explicitly to the user — "No Notion pages linked in this ticket" — and continue to Step 4. Do not silently skip; say it.
+
+3. **If one or more Notion links are found**, load the Notion fetch tool via `ToolSearch` (query: `select:mcp__claude_ai_Notion__notion-fetch`; if that returns nothing, try `+Notion fetch`). If no Notion tool is available at all, tell the user the Notion MCP server appears unauthorized/unavailable and that the linked spec could not be loaded — then continue, noting the implementation is proceeding without it.
+
+4. **Fetch each linked page** with `mcp__claude_ai_Notion__notion-fetch`, passing the page URL (or its extracted page ID) as `id`. Read the full content into context.
+   - If a fetched page **references or links to further Notion pages** that are clearly part of the same spec (e.g. a sub-page for the exact feature this ticket implements), fetch those too — one level deep is usually enough. Don't chase the entire workspace; stay within what's relevant to this ticket.
+   - Do not treat a failed or empty fetch as "nothing there." If a call errors, retry once or try `notion-search` with the page title to locate it, and only move on once you've genuinely confirmed the content is unreachable.
+
+5. **Checkpoint — before entering plan mode, state to the user:** which Notion page(s) you loaded (title + URL) and a one-to-two-sentence summary of what each contributes to the implementation. If a link was found but could not be fetched, say so explicitly.
+
+Treat the Notion content as first-class context alongside the ticket description itself — where the ticket and the spec conflict, surface the discrepancy to the user rather than silently picking one.
+
+> **Other doc links:** If the ticket links a non-Notion doc (Google Docs/Drive, Confluence, etc.), try to load it via `ToolSearch` the same way (search for a matching MCP tool). If no tool is available or the server is unauthorized, tell the user which doc couldn't be loaded and continue — don't block the workflow on it.
+
 ## Step 4: Plan the Implementation
 
-**Gate: do not enter plan mode until the Step 3f checkpoint is satisfied** — either you have stated the parent/sibling/related context to the user, or you have confirmed the ticket has no parent. If you cannot yet do either, return to Step 3f before continuing.
+**Gate: do not enter plan mode until the Step 3f and Step 3g checkpoints are satisfied** — you have stated the parent/sibling/related context (or confirmed no parent), *and* you have loaded any linked Notion pages (or confirmed none are linked / could not be fetched). If you cannot yet do either, return to the relevant step before continuing.
 
 Now enter plan mode using `EnterPlanMode`. Use the ticket title, description, comments, the parent/sibling/related context from Step 3f, and any labels/context to:
 
-1. **Explore the codebase** — use Glob, Grep, and Read to understand relevant files, existing patterns, and architecture.
+1. **Explore the codebase** — use Glob, Grep, and Read to understand relevant files, existing patterns, and architecture. **Re-verify the ticket's own factual claims against the source rather than restating them.** A ticket written during research routinely overstates ("every row is wrong", "X carries no Y") or describes a pre-implementation design that shipped narrower. Both happened here: one table row was already correct, and a sibling MR shipped a stale-snapshot behavior the ticket described as absent. Restating an unchecked ticket claim puts it in the plan, the code, the commit message and the MR description, where a reviewer has to disprove it four times. Where ticket and code disagree, implement what the code says and say so explicitly.
 2. **Design an implementation approach** — identify which files need changes, what the changes are, and in what order.
 3. **Ask clarifying questions** — if the ticket description is ambiguous or missing details, use `AskUserQuestion` to clarify with the user before finalizing the plan.
 4. **Present the plan** for user approval via `ExitPlanMode`.
@@ -247,7 +292,14 @@ Execute the approved plan:
 - Use `TodoWrite` to track implementation tasks.
 - Write clean, minimal code that follows existing codebase patterns.
 - **Add no comments to the code you write or change.** No explanatory comments, no banners, no docstring on a symbol that did not have one, no `TODO`s, no commented-out code — and never a reference to the Linear ticket, task, or initiative (`# ENG-123`, `// per PLAT-1180`, `# for the X initiative`). A comment written alongside the code restates the line, goes stale, and makes the reviewer read past it to reach the change. Write the code so it does not need one, and put every explanation in the commit message and MR description instead. Exempt because they are program input rather than commentary: linter and type directives, build pragmas, codegen markers, required license headers, and any doc-comment CI fails without. Leave comments already in the file alone unless your change makes one untrue — then correct or delete it.
+
+  **A comment-dense file does not create an exception, and this is where the rule is most often broken.** Some files document the rationale behind every constant — `apps/iam/internal/workflows/reconcile.go` spends 25 lines explaining one retry policy's arithmetic. Writing the new code to match that density and stripping the comments afterwards wastes a full editing pass; decide before the first line that the new code carries none, and route the reasoning to the commit message and MR description as you go. Then say so in the summary, because the asymmetry is genuinely visible in review: a new timeout sitting silently beside a heavily-justified one looks like an oversight rather than a convention. Mention it in the MR description's context, and let the user reverse it in one word if they want the local convention honoured instead.
 - Run any relevant tests or linters if the project has them configured.
+- **When the real verification command needs credentials you cannot get, build an offline harness rather than shipping unverified logic.** In `tlaloc-env` the honest ceiling is usually `terraform validate` — `terraform plan` needs a gcloud ADC reauth this session cannot perform (`invalid_grant` / `invalid_rapt`), and `terraform/gridmatic-dev/iam` additionally needs `TEMPORAL_CLOUD_API_KEY`. `validate` type-checks but never *evaluates* a `precondition`, so a guard that passes validate can still crash at plan time. Copy the new locals into a provider-free config in the scratchpad and drive it with `terraform -chdir=<abs> apply -auto-approve -var mode=…`, outputting the guard lists: it needs no credentials and it tests the counterfactuals — the mis-ordered rule, the deleted rule, the bad value — which no real plan of a correct config ever exercises. On PLAT-2460 this caught a genuine bug: **HCL's `||` does not short-circuit**, so `length(xs) == 0 || i < xs[0]` throws `Invalid index` on an empty list instead of taking the left branch. Use a sentinel — `try([…][0], length(…))` — not a guarded index. Two harness caveats: `concat` of rule objects with differing attributes yields a *tuple*, so a `var.mode ? concatA : concatB` ternary fails on inconsistent types (use uniform stub objects, or select with a filtered list); and a `for` result expression like `rule.id` is only evaluated for elements passing the `if`, which is why the file's existing `allowed_roles` can safely read `rule.role_pattern` over deny rules that lack one.
+
+  **Get the terraform version from the module's own `.mise.toml`, not from a ticket's note.** Several modules now carry one (`terraform/gridmatic-dev/iam/.mise.toml` pins `1.11.4`) and that pin is what Atlantis uses, so it is the version a change must actually pass on. A `TFENV_TERRAFORM_VERSION=…` override mentioned in a sibling ticket may predate the pin and silently verify against a version nobody runs. `mise exec terraform@<pinned> -- terraform fmt -check` / `validate` is the check that counts; running the other version too is cheap and worth it, since `init` is the slow part and `fmt` needs none.
+- **Terraform renders long strings across lines, so parse what actually ships.** `yamlencode` folds a >80-column value onto continuation lines. That is valid YAML and round-trips correctly, but confirm it rather than assuming: render the exact values block and parse it. `python3` here has no `yaml` module — `ruby -ryaml` does, and `jq` is available.
+- **Clean up what `terraform init` leaves behind.** It drops a ~430 MB `.terraform/` in the module directory. It is gitignored (`terraform/.gitignore: **/.terraform*`) so `git status` stays clean and you will not notice — `rm -rf` it when done.
 - Mark each todo as completed as you finish it.
 
 After implementation is complete, give the user a summary of what was changed.
@@ -257,8 +309,8 @@ After implementation is complete, give the user a summary of what was changed.
 Immediately after implementation is complete — do not wait for the user to commit or ask for these:
 
 1. Invoke the `commit-msg` skill using the `Skill` tool to generate a commit message.
-2. **Immediately** invoke the `changes-description` skill using the `Skill` tool to generate an MR description. Do NOT wait for the user to respond to the commit message first — both outputs must be presented in the same turn, back-to-back. The `commit-msg` skill ends with a suggestion to run `/commit`, but you must continue and invoke `changes-description` before yielding to the user. Pass `--quick` unless the branch is large or the user asked for a thorough description — `changes-description` runs a multi-agent debate, and the full-length version is disproportionate for a routine ticket.
-3. **Re-print the commit message after the MR description, verbatim.** The `changes-description` output is long, so by the time it finishes the commit message from step 1 has scrolled far up the terminal. Close the turn by repeating it — unchanged from what `commit-msg` produced, no re-generation, no re-wording, no summary of it — in its own fenced block under a `Commit message` heading, so both blocks the user copies sit next to each other at the bottom. If the user corrected the commit message between step 1 and here, repeat the corrected version.
+2. **Immediately** invoke the `changes-description` skill using the `Skill` tool to generate an MR description. Do NOT wait for the user to respond to the commit message first — invoke it in the same turn, back-to-back with the commit message, so the debate is already running while they read the commit message. The `commit-msg` skill ends with a suggestion to run `/commit`, but you must continue and invoke `changes-description` before yielding to the user. Pass `--quick` unless the branch is large or the user asked for a thorough description — `changes-description` runs a multi-agent debate, and the full-length version is disproportionate for a routine ticket. That skill launches its debate as a background workflow, prints the run ID, and then yields the turn — that is correct, not a stall. Yield with it: the description arrives when the swarm's completion notification does, and blocking on it (`TaskOutput`, `Monitor`, a poll loop) only takes the user's prompt line away for the length of the run.
+3. **Re-print the commit message after the MR description, verbatim.** The `changes-description` output is long, so by the time it finishes the commit message from step 1 has scrolled far up the terminal. In the turn that presents the description — the one the swarm's completion notification wakes you into — close by repeating it — unchanged from what `commit-msg` produced, no re-generation, no re-wording, no summary of it — in its own fenced block under a `Commit message` heading, so both blocks the user copies sit next to each other at the bottom. If the user corrected the commit message between step 1 and here, repeat the corrected version.
 
 ## Important Rules
 

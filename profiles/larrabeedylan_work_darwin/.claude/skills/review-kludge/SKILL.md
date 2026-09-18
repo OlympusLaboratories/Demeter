@@ -233,7 +233,7 @@ return { proposals: survivors, patterns, areas: areas.map((a) => a.name), raw: r
 
 The **Workflow** tool runs the swarm in the background and its tool result includes a **run ID** (of the form `wf_…`). The user has a shell function, **`wfwatch`** (defined in their `.zshrc` / `.bashrc`), that live-tails a workflow's progress by that ID.
 
-**Immediately after launching the workflow — before waiting for it to finish — print the run ID to the user in a copyable form, with the exact command to watch it.** For example:
+**In the same turn that launches the workflow — before you yield — print the run ID to the user in a copyable form, with the exact command to watch it.** For example:
 
 ```
 🧹 review-kludge swarm launched — run ID: wf_ab12cd34
@@ -241,7 +241,9 @@ The **Workflow** tool runs the swarm in the background and its tool result inclu
    One-shot snapshot instead:          wfwatch wf_ab12cd34 --once
 ```
 
-Use the **actual** `runId` string from the Workflow tool result verbatim (do not fabricate or abbreviate it — `wfwatch` resolves the run's journal by exact ID). Then proceed to wait for the workflow to complete and continue with Step 4.
+Use the **actual** `runId` string from the Workflow tool result verbatim (do not fabricate or abbreviate it — `wfwatch` resolves the run's journal by exact ID).
+
+**Then end your turn — never block the session on the swarm.** The `Workflow` tool has already returned: the run continues in the background and a task notification re-invokes you when it finishes. So print the block above, say the sweep is running, and yield, which leaves the user free to keep submitting prompts for the whole run. Do not hold the turn open to wait for it — no `TaskOutput` on the workflow's task, no `Monitor`, no `ScheduleWakeup`, no reading the journal or running `wfwatch` yourself on a loop, no sleep, and no filler tool calls to pass the time. None of that makes the result arrive sooner, and all of it costs the user their session for the length of a full swarm. If they send other prompts meanwhile, answer them normally and stay responsive. The completion notification is the **only** thing that resumes this skill; when it arrives, continue with Step 4.
 
 ## Step 3c: Fallback when the Workflow tool isn't available
 

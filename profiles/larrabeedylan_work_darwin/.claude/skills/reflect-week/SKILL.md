@@ -19,6 +19,20 @@ date -u +%Y-%m-%d
 date -u -v-7d +%Y-%m-%d
 ```
 
+**Check the range against the previous report, and cover gaps explicitly.** `ls` the
+`reflect-self/context/` directory (Step 1 does this anyway) and compare the newest report's
+end date with the start date you are about to use. A user-supplied start date frequently does
+**not** abut it. Two cases, both of which belong in the report's header rather than being
+silently absorbed:
+- **A gap** (prior report ends 08-28, this run starts 09-01): days 08-29→08-31 are covered by
+  no report at all. Check whether anything completed in the seam — in the 2026-09-01→15 run,
+  PLAT-2409 and PLAT-2460 both completed on 08-31, and PLAT-2460 was the MR that turned the
+  entire Kubernetes RBAC feature on in production. Name what fell in the gap so it can be
+  back-filled.
+- **A longer-than-7-day range** (09-01→09-15 is 14 days): say so at the top of the report and
+  in the chat response. The snippet's 4-bullet-per-domain cap is calibrated for one week, so a
+  fortnight forces real consolidation — don't silently present two weeks as one.
+
 ## Step 1: Read Slack/Discussion Context
 
 Read the file `~/.claude/skills/reflect-week/slack-context.md` using the Read tool. This file contains Slack threads, discussions, and other context that Dylan has pasted before running this command.
@@ -85,6 +99,18 @@ Use `mcp__claude_ai_Linear__list_issues` to find issues assigned to Dylan that w
 - Assigned to Dylan
 
 The `list_issues` response already includes the `description` field — no need to call `get_issue` per ticket. For each completed ticket, note the identifier (e.g., TEAM-123), title, and description. Use the description to write more precise and informative snippet bullets.
+
+**`fields` rejects `identifier`.** The ticket ID field is named **`id`** (it returns
+`PLAT-2525`, not a UUID); passing `identifier` fails the whole call with an
+`InputValidationError` listing the valid options. A working set:
+`["id", "title", "description", "url", "priority", "status", "completedAt", "updatedAt"]`.
+
+**`updatedAt` filters on update, not completion — always re-filter client-side on
+`completedAt`.** A `state: "Done"` + `updatedAt: <start>` query returns every ticket *touched*
+in the range, including ones completed weeks or months earlier (a linked sub-issue closing, an
+MR merging, a comment). In the 2026-09-01→15 run, 7 of 20 returned tickets had completed
+before the window — one as far back as June. Request `completedAt` in `fields` and drop
+anything before the start date, exactly as you already do for `merged_at` on MRs.
 
 ### 3b. In-Progress Tickets
 Use `mcp__claude_ai_Linear__list_issues` to find issues assigned to Dylan that are currently in progress:
@@ -260,6 +286,8 @@ and any notable dynamics (mentoring, joint debugging, coordination).
 - **Be specific about Dylan's role.** The point is to capture what Dylan contributed to the relationship, not just that they were in the same thread.
 - **Skip if no peers found.** If the week's data has no clear peer interactions, skip this step entirely.
 - **When Slack context is missing or stale, MR review threads are the fallback peer source.** Run `mr-discussions` (Step 2) over the week's significant MRs and use the non-bot authors. Distinguish a substantive review (an inline question that changed the code) from a bare `lgtm` — write both up if they occurred, but say plainly which is which and note that a bare approval is thin evidence about a working relationship.
+- **The fallback often returns nothing at all, and that absence is itself a finding.** In the 2026-09-01→15 run, all twelve merged MRs had *zero* human participants — only `gridmatic-releaser`, `gridmatic-linear`, `griddy-bot` and `gridmatic-atlantis`. Don't quietly move on: a fortnight of production access-control code merging with no human reviewer is a bus-factor and review-coverage risk worth stating in Evidence Highlights, and it means every peer profile that week rests on Slack alone. Say so in the profiles rather than implying an MR-review relationship that didn't happen.
+- **Do not upgrade an assigned review into an observed one.** When Slack shows someone being *asked* to review (e.g. Mark asking Dylan to support Nell on `!906`), that is a commitment, not evidence the review occurred — check the MR's discussions and its state. If the MR is still open with no comments, write the commitment and the missing follow-through plainly, and flag it as something to confirm off-channel before it is cited as mentoring evidence.
 - **Keep it factual.** These profiles are raw evidence — save editorializing for the `reflect-peer` skill at review time.
 
 ## Step 5: Synthesize the Snippet
@@ -310,7 +338,14 @@ Example structure (as markdown in chat):
 
 ## Important Rules
 
-1. **Be concise.** Each bullet is ONE short sentence. No paragraphs.
+0. **Matter-of-fact tone. No embellishment.** The snippet is a status report Dylan posts
+   about his own work, so anything that reads as self-promotion reads badly. State what
+   shipped and what it does; do not characterize its value. Cut evaluative framing
+   ("surfaced", "closed three paths that left access live", "completing the series"),
+   severity adjectives, and counts used as achievement ("10-MR series", "three fixes").
+   Write "split `Verify` into drift and ownership", not "fixed a subtle bug where `Verify`
+   conflated two questions". The detailed report (Step 4) is where impact and significance
+   belong — keep that analysis out of the snippet entirely.
 2. **Deduplicate.** If an MR and a ticket refer to the same work, combine into a single bullet.
 3. **Prioritize.** List the most impactful items first within each section.
 4. **Be precise and verifiable.** Every claim must be directly traceable to an MR, ticket, or Slack message. Do not paraphrase loosely, guess at details (e.g. service names from truncated descriptions), or editorialize. If an MR description was truncated and you cannot confirm specifics, state only what you know. Prefer linking to the source over describing it. An engineer should be able to scrutinize every bullet and verify it.

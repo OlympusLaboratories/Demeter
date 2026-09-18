@@ -360,7 +360,7 @@ return { confirmed, dimensions: dimsRun, candidates: raw, votes: VOTES, discarde
 
 The **Workflow** tool runs the swarm in the background and its tool result includes a **run ID** (of the form `wf_…`). The user has a shell function, **`wfwatch`** (defined in their `.zshrc` / `.bashrc`), that live-tails a workflow's progress by that ID.
 
-**Immediately after launching the workflow — before waiting for it to finish — print the run ID to the user in a copyable form, with the exact command to watch it.** For example:
+**In the same turn that launches the workflow — before you yield — print the run ID to the user in a copyable form, with the exact command to watch it.** For example:
 
 ```
 🛰  review-code swarm launched — run ID: wf_ab12cd34
@@ -368,7 +368,9 @@ The **Workflow** tool runs the swarm in the background and its tool result inclu
    One-shot snapshot instead:          wfwatch wf_ab12cd34 --once
 ```
 
-Use the **actual** `runId` string from the Workflow tool result verbatim (do not fabricate or abbreviate it — `wfwatch` resolves the run's journal by exact ID). Then proceed to wait for the workflow to complete and continue with Step 4.
+Use the **actual** `runId` string from the Workflow tool result verbatim (do not fabricate or abbreviate it — `wfwatch` resolves the run's journal by exact ID).
+
+**Then end your turn — never block the session on the swarm.** The `Workflow` tool has already returned: the run continues in the background and a task notification re-invokes you when it finishes. So print the block above, say the review is running, and yield, which leaves the user free to keep submitting prompts for the whole run. Do not hold the turn open to wait for it — no `TaskOutput` on the workflow's task, no `Monitor`, no `ScheduleWakeup`, no reading the journal or running `wfwatch` yourself on a loop, no sleep, and no filler tool calls to pass the time. None of that makes the result arrive sooner, and all of it costs the user their session for the length of a full swarm. If they send other prompts meanwhile, answer them normally and stay responsive. The completion notification is the **only** thing that resumes this skill; when it arrives, continue with Step 4.
 
 ## Step 4: Present the Report
 
@@ -396,6 +398,28 @@ git -C <sibling-repo> merge-base --is-ancestor <fix-sha> HEAD; echo "in local tr
 A non-zero exit means the reviewers read pre-fix code and the findings are void. Then **prove the current behavior by executing it** — find the test covering the claimed exploit and run it against `origin/main` in a throwaway worktree. A passing test named after the exact scenario settles it in a way that another file read never can, because reading is what produced the error. Report the run output, not your reasoning about it.
 
 Do not fix anything in this step — this skill reviews, it does not edit.
+
+**This is a hard stop, and "I verified the finding by editing" is the way it gets broken.**
+Reproducing a finding is legitimate and encouraged — mutate a file, run the test, restore
+it. What is not legitimate is letting the *fix* follow in the same turn because the
+diagnosis is fresh and the edit is small. The user asked for a review. A review that
+silently rewrites the code it reviewed has taken a decision that was theirs, and it takes
+it at the worst possible moment: after they have read the report and before they have
+answered it.
+
+Concretely, in this step you may not call Edit or Write on any file in the diff, however
+obvious the fix. Not the one-line test assertion. Not the doc sentence the review found
+wrong. Not "while I was in there". The fixes go in Step 6 as an *offer*, and the user
+picks.
+
+**Check the branch state before reporting, and put it in the report.** Run
+`git log --oneline -1`, `git status --porcelain`, and `git ls-remote --heads origin <branch>`.
+Work you reviewed from the working tree may have been committed and pushed between the
+launch and the notification — the swarm takes minutes and the user is not idle. When the
+branch is pushed, say so in the report and frame every offered fix as a follow-up commit
+on an open MR, never as an edit to pending work. An unrequested edit on top of a pushed
+branch is worse than one on a dirty tree: it desynchronises the user's local checkout from
+the MR other people are already reading, and they find out from `git status`, not from you.
 
 ## Step 4b: Pin the Line Numbers (Incoming mode)
 
@@ -464,7 +488,7 @@ After the report, offer (as plain text, not `AskUserQuestion`):
 
 1. **Never fabricate or pad findings.** Report only what the workflow confirmed. An empty result is a valid, good outcome.
 2. **Scale to the change.** Don't summon `scale: 3` for a typo fix. Follow the table in Step 2.
-3. **Review only, by default.** Do not modify code, commit, push, or touch external state unless the user explicitly asks in Step 5.
+3. **Review only, by default.** Do not modify code, commit, push, or touch external state. The only sanctioned edit is one the user asks for *after* reading the report, in reply to the Step 6 offer — never in the turn that presents the findings, and never inferred from their having run the review at all. Running `/review-code` is a request to be told what is wrong, not permission to change it.
 4. **Findings must be diff-scoped.** Pre-existing issues outside the proposed changes are out of scope unless the diff newly exposes them.
 5. **Verification is adversarial on purpose.** The skeptic panel defaults to "refuted"; that's what keeps the signal high. Don't loosen it.
 6. **Report honestly.** If the diff was truncated, a lens errored, or coverage was capped, say so.

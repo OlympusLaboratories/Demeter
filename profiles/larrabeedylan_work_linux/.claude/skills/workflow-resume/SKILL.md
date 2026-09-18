@@ -123,6 +123,8 @@ Print the new run id and the watch command as soon as `Workflow` returns, the sa
    Watch it live:  wfwatch wf_…
 ```
 
+**Then end the turn and let the completion notification wake you**, exactly as the origin skills do — a resumed run is still a background swarm, and blocking on it (`TaskOutput`, `Monitor`, polling the journal) takes the user's prompt line for the rest of the run without making it finish sooner.
+
 When it finishes, **report how much actually replayed** — the new run's manifest marks replayed agents `cached: true`:
 
 ```bash

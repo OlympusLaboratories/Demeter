@@ -76,7 +76,7 @@ git diff --stat <MERGE_BASE>..HEAD
 
 Decide the split *before* running the diff, not after a result vanishes: `git diff --numstat <MERGE_BASE>..HEAD` gives per-file line counts, and `wc -c <path>` gives bytes for a new file. A file near 30KB is over the limit once diff prefixes and the `+++`/`@@` header are added, so treat ~28KB as the cutoff and halve it.
 
-**Edge case — no committed changes yet:** If `git rev-list --count <MERGE_BASE>..HEAD` returns `0` but `git status --short` shows modifications, the work-in-progress lives in the working tree, not in commits. Show `git diff HEAD` (or `git diff` plus `git diff --cached` if there are staged changes too) instead, and note in the summary that changes are uncommitted with 0 commits ahead. Do not stop — uncommitted work is the actual branch context in this case.
+**Edge case — no committed changes yet:** If `git rev-list --count <MERGE_BASE>..HEAD` returns `0` but `git status --short` shows modifications, the work-in-progress lives in the working tree, not in commits. Show `git diff HEAD` (or `git diff` plus `git diff --cached` if there are staged changes too) instead, and note in the summary that changes are uncommitted with 0 commits ahead. Do not stop — uncommitted work is the actual branch context in this case. Size the split with `git diff --numstat HEAD` in that case — the `<MERGE_BASE>..HEAD` form returns nothing when the branch is 0 commits ahead.
 
 ## Step 5: Summarize the Branch Context
 

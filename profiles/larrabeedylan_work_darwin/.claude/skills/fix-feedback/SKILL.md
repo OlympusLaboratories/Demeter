@@ -5,14 +5,14 @@ Work through review feedback on the current changes — present each item for se
 This skill runs in one of two **modes**, chosen automatically from the argument:
 
 - **Mode A — Merge request:** `$ARGUMENTS` is a GitLab merge request URL. Fetch the review discussion threads from that MR.
-- **Mode B — Local review output:** no argument is given. Pull the feedback from a **review agent's output earlier in this conversation** — e.g. the `review-code` swarm's confirmed findings, or any code review already produced in the chat. Nothing is fetched from GitLab; the changes are already local.
+- **Mode B — Feedback already in the conversation:** no argument is given. Pull the feedback from **every unaddressed source already in this conversation** — the `review-code` swarm's confirmed findings, any code review produced in the chat, *and* any MR threads fetched by an earlier Mode A run that the user has not yet worked through. Nothing new is fetched from GitLab; the changes are already local.
 
 **Parameter:** `$ARGUMENTS` — optionally, the full URL of a GitLab merge request (e.g., `https://gitlab.com/group/project/-/merge_requests/123`). Omit it to use Mode B.
 
 **Selecting the mode:**
 - `$ARGUMENTS` looks like a GitLab MR URL → **Mode A**: do Steps 1, 2, 2c, then continue from Step 3.
 - `$ARGUMENTS` is empty → **Mode B**: skip Steps 1, 2, and 2c; start at **Step 1B**, then continue from Step 4.
-- `$ARGUMENTS` is empty **and** there is no review output anywhere earlier in the conversation → tell the user there's nothing to work through (ask them to pass an MR URL or run a review first, e.g. `/review-code`) and stop.
+- `$ARGUMENTS` is empty **and** the conversation holds neither review output nor an unaddressed MR thread from an earlier Mode A run → tell the user there's nothing to work through (ask them to pass an MR URL or run a review first, e.g. `/review-code`) and stop. Check both before concluding this.
 
 ## Step 1: Parse the MR URL (Mode A)
 
@@ -65,22 +65,34 @@ Worktrees are cleaned up manually — remove with `git worktree remove <path>` o
 
 This ensures the local codebase matches the MR so that file reads and edits target the correct code.
 
-## Step 1B: Gather Feedback from Earlier Review Output (Mode B)
+## Step 1B: Gather Feedback from the Conversation (Mode B)
 
-When no MR URL was given, look back through the current conversation for output produced by a review agent or skill — for example the `review-code` adversarial swarm's confirmed findings, or any code-review comments generated earlier in the chat. Use the most recent such review if there are several.
+When no MR URL was given, sweep the whole conversation for feedback that is **still unaddressed**, and gather ALL of it into one queue. There are two kinds and you must collect both:
+
+1. **Review-agent output** — the `review-code` adversarial swarm's confirmed findings, or any code review produced in the chat. Use the most recent such review if there are several.
+2. **MR threads already fetched earlier in this conversation** — if an earlier Mode A run listed unresolved threads and the user never picked one, those threads are still open and belong in this queue. Do **not** re-fetch them; reuse what is already in context, discussion IDs included, so replies can still be posted in Step 7b.
+
+**Never present one source while silently dropping the other.** The user invoking this skill with no argument is saying "work through my feedback", not "work through one of the two piles you happen to be holding" — they should not have to name where a finding came from to get it fixed. A queue that omits live MR threads costs them a round trip to ask for the obvious, and risks the omitted threads being forgotten entirely. If an earlier Mode A run is in context, say in one line which of its threads are still open and fold them in.
+
+This matters most when the two sources **overlap**: a bot comment and a swarm finding about the same function want one fix and one test, not two. Say so when you see it, and order the queue so dependent items are adjacent.
+
+When Mode B carries MR threads, Steps 2c and 7b are **not** uniformly skipped — see the note after the field list.
 
 Treat each distinct review finding as one feedback "thread":
 - **File path and line** — from the finding's location.
 - **Comment body** — the finding's summary plus its failure scenario / rationale.
-- **Author** — the review source, for display only (e.g. `review-code: correctness`).
-- **Replies** — none (local findings have no thread history).
+- **Author** — the review source, for display only (e.g. `review-code: correctness`, or the bot/human handle for a carried-over MR thread).
+- **Replies** — none for a review-agent finding; a carried-over MR thread keeps whatever reply history was fetched.
+- **Discussion ID** — only for a carried-over MR thread, plus the project path and MR iid needed to reply. A review-agent finding has none, and that absence is what tells Step 7b which treatment the item gets.
 - **Resolved status** — always unresolved.
 
 Collect these into the same numbered structure used in Step 4. Keep findings that target the same file/line as separate items unless they are clearly duplicates. Then go straight to **Step 4** to display them.
 
-In Mode B there is no branch to check out (the changes are already local) and no external thread to post replies to, so **Steps 2c and 7b do not apply** — skip them. Everything else (critical evaluation, applying changes, drafting a reply for the user to reuse) works the same.
+In Mode B there is no branch to check out — the changes are already local — so **Step 2c never applies**.
 
-**Record the commit state before you edit anything.** Run `git log --oneline -3` and `git status --porcelain` and note which of the reviewed changes are committed. The user may have committed between turns — the reviewed work then lives in `HEAD` and a later `git status` shows those files clean, which reads exactly like an edit that silently failed to apply. Establish the baseline up front so you don't misdiagnose it, and diff against the branch's merge-base rather than the working tree when you need to see the whole change.
+**Step 7b applies per item, not per mode.** An item that came from a review agent has no external thread: present its reply in chat and stop. An item that came from an MR thread carried over from an earlier Mode A run still has a live discussion ID, so it takes the full Step 7b treatment — offer to post, and post only on an explicit yes. Deciding this once for the whole run is the bug: it either strands MR replies in the chat or offers to post a swarm finding that has nowhere to go.
+
+**Record the commit state before you edit anything.** Run `git log --oneline -3` and `git status --porcelain` and note which of the reviewed changes are committed. **Check whether the branch is pushed in the same breath** — `git rev-list --left-right --count origin/<branch>...HEAD` — and do it BEFORE you recommend anything, not after the user accepts. A finding about a name, a message, or a typo invites "amend the commit too", and that recommendation is only safe on unpublished work; offering it and then withdrawing it costs the user a decision they already made. When the branch is pushed, the fix is a follow-up commit, and a wrong commit subject that GitLab has not yet turned into an MR title is a field the user edits at MR-creation time rather than anything to force-push over. The user may have committed between turns — the reviewed work then lives in `HEAD` and a later `git status` shows those files clean, which reads exactly like an edit that silently failed to apply. Establish the baseline up front so you don't misdiagnose it, and diff against the branch's merge-base rather than the working tree when you need to see the whole change.
 
 ## Step 3: Filter and Enumerate Threads (Mode A)
 
@@ -104,7 +116,9 @@ For each remaining thread, extract:
 
 ## Step 4: Display the Threads
 
-Print a numbered summary of all unresolved items. In **Mode A** use the MR heading below; in **Mode B** use a heading like `## Review Feedback on Local Changes` and list the findings gathered in Step 1B (there are no reply counts for local findings — omit the 💬 line).
+Print a numbered summary of all unresolved items. In **Mode A** use the MR heading below; in **Mode B** use a heading like `## Review Feedback on Local Changes` and list everything gathered in Step 1B (omit the 💬 line for review-agent findings, which have no thread history).
+
+**One numbered list, whatever the sources.** When a Mode B queue mixes review-agent findings with carried-over MR threads, do not split it into two lists — the user picks by number and should not have to think about provenance to do it. Tag each item's source inline instead (`— @griddy-bot, !965` vs `— review-code: tests`), order by what a reviewer would fix together rather than by source, and note any overlap in one line under the list. Splitting the list re-creates exactly the problem this mode exists to avoid.
 
 ```
 ## Unresolved Comment Threads on !IID — "MR Title"
@@ -127,7 +141,7 @@ Enter a number to address that comment, or "all" to work through them sequential
 
 **Do NOT use `AskUserQuestion` here.** Simply print the numbered list above and stop. Wait for the user to reply in chat with a number (e.g., `2`) or `all`. This is faster and less intrusive than a modal prompt.
 
-If there are **no unresolved threads** (Mode A) or no findings in the review output (Mode B), tell the user there's nothing to work through and stop.
+If there are **no unresolved threads** (Mode A), or neither a review output nor a carried-over MR thread anywhere in the conversation (Mode B), tell the user there's nothing to work through and stop. In Mode B, say which sources you checked — "no review output and no unaddressed MR threads in this conversation" — so an empty queue reads as a search that came up empty rather than a source you forgot to look at.
 
 ## Step 5: Load Full Context for the Selected Thread
 
@@ -150,6 +164,7 @@ Consider and present your analysis to the user:
 - **Is it the best approach?** Even if the reviewer's concern is valid, is their proposed solution the best one? Are there better alternatives?
 - **What are the trade-offs?** Would applying this change affect performance, readability, consistency with the rest of the codebase, or other code?
 - **Is it subjective?** Is this a matter of style/preference, or a genuine correctness/quality concern?
+- **Does it depend on a repo you cannot reach?** A worktree-isolated session refuses `git -C <other-repo>`, so a finding whose truth lives in a sibling checkout cannot be settled from here. Say so explicitly and convert it into a named pre-merge check rather than leaving it as an open question or softening the code to route around the gap — the docs or code are usually right and the verification is what is missing.
 
 ### 6b. Present your assessment
 
@@ -188,8 +203,10 @@ If the user chooses "Discuss", continue the dialogue — ask clarifying question
 
 1. Make the code changes using `Edit` tool. **Add no comments while doing it** — not the reviewer's point, not why the code now looks this way; that goes in the drafted reply, not the source.
    - **When the change is to a test, re-prove the test.** A green run says nothing about whether an assertion still fires. Temporarily reintroduce the defect the test guards, confirm it fails, then restore — and if the finding was that the assertion was weak or vacuous, also demonstrate the assertion now executes (flip the guard to its negation and read the real count out of the failure message). Report both results; "tests pass" alone is the weakest possible evidence for a change whose entire purpose is making a test stronger.
+   - **Never `cd` inside a Bash call.** The working directory persists between calls, so a `cd sub/dir && …` leaves every later command resolving paths against that subdirectory, and the next one fails with a bare "No such file or directory" that reads like a missing file. Use repo-relative paths from where the session already is.
 2. Show the user what was changed.
-3. If the change was modified from the original suggestion, draft a reply for the comment thread explaining what was done differently and why.
+3. **Run the repo's own checker for whatever you touched** before reporting done — a docs change that adds cross-page links can break an anchor checker that CI runs (in this repo, `node apps/portal/scripts/check-docs-links.mjs`). Prefer invoking the underlying tool directly: `pnpm`/`npx` are often not on `PATH` in this shell, while `mise exec -- node …` is.
+4. If the change was modified from the original suggestion, draft a reply for the comment thread explaining what was done differently and why.
 
 ### If rejecting the feedback:
 
@@ -229,7 +246,7 @@ Then proceed to **Step 7b** to offer posting the reply.
 
 ### Step 7b: Offer to Post the Reply (Mode A only)
 
-In Mode B there is no external thread to post to — skip this step and simply present the drafted reply in chat for the user to reuse if they want.
+**This step is decided per item, by whether the item carries a discussion ID** (Step 1B records it). A review-agent finding has none: there is nothing to post to, so present the drafted reply in chat for the user to reuse and move on. An MR thread — reached through Mode A, or carried into a Mode B queue from an earlier Mode A run — does have one, and gets the full treatment below regardless of which mode is running.
 
 After drafting a reply (for **Reject** or **Modify** decisions), ask the user:
 
@@ -244,6 +261,15 @@ Use the `gitlab-api.sh` script to reply directly to the discussion thread:
 ```
 
 The `discussion_id` is the thread ID from the discussions fetched in Step 2. Make sure to properly escape/quote the reply text — pass it as a single shell argument.
+
+**Quote the reply in SINGLE quotes, and write the draft so it contains no apostrophe.**
+A good reply names identifiers, so it is full of backticks — inside double quotes the
+shell runs everything between them as a command substitution, which mangles the reply or
+executes something. Single quotes are the only safe wrapper, and they cannot contain an
+apostrophe, so decide that at drafting time: prefer "you would" to "you'd", "it is" to
+"it's". If the drafted text already has one, reword it rather than escaping, and say so
+when you confirm the post — the user approved an exact string and is entitled to know
+the posted one differs, however trivially.
 
 After posting, confirm to the user that the reply was posted successfully and show the note ID.
 

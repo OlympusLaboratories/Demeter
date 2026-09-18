@@ -29,7 +29,7 @@ Each skill is a subdirectory containing a `SKILL.md` file that defines the skill
 
 ## Workflow Runs
 
-`changes-description`, `review-code`, and `review-kludge` orchestrate swarms through the **Workflow** tool. Each run leaves a manifest, a script snapshot, and a `journal.jsonl` agent cache under `~/.claude/projects/<slug>/<session>/`. `workflow-resume` reads all of it through `~/.claude/scripts/workflow-runs.py` (`list`, `show`, `args`, `script`, `link`, `merge`, `harvest`).
+`changes-description`, `review-code`, and `review-kludge` orchestrate swarms through the **Workflow** tool. Each run leaves a manifest, a script snapshot, and a `journal.jsonl` agent cache under `~/.claude/projects/<slug>/<session>/`. All three **launch and yield**: the tool returns a `wf_…` run id immediately, the skill prints it with the `wfwatch` command, ends the turn, and resumes on the run's completion notification. None of them may hold the session open waiting on a swarm — no `TaskOutput`, `Monitor`, `ScheduleWakeup`, or polling — so the user keeps a free prompt line for the whole run. `workflow-resume` reads all of it through `~/.claude/scripts/workflow-runs.py` (`list`, `show`, `args`, `script`, `link`, `merge`, `harvest`).
 
 Two facts those three skills depend on: a workflow reports `completed` even when agents died mid-run (`agent()` returns `null`, the script carries on), and the resume cache is a **prefix** — a hash chain over agent calls that stops replaying at the first agent with no recorded result. Neither is visible from the report a swarm prints.
 

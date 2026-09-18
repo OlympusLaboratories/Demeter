@@ -29,6 +29,17 @@ What that reader needs above all is a **story, not an inventory**. A list of tru
 
 ### 1a. Gather the diff
 
+> **Never launch with a stand-in `diff`.** The script's guard only rejects a missing or
+> empty string, so `"diff": "PLACEHOLDER"` (or a "…filled in below" note) sails straight
+> through and burns a full 15-agent run describing nothing. Assemble the real diff text
+> FIRST and paste it into `args` before you write the `context` digest — the digest is the
+> long part, and the temptation is to stub the diff and "come back to it". If the diff is
+> awkward to transcribe, inline the production files verbatim and pass a `[TRUNCATED: …]`
+> marker naming the omitted test file plus its path, so agents can `Read` it. Untracked new
+> files do NOT appear in `git diff`, so capture each with
+> `git diff --no-index /dev/null <path>` rather than staging them — a worktree-isolated
+> session should not touch the index just to build a description.
+
 ```bash
 DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
 [ -z "$DEFAULT_BRANCH" ] && DEFAULT_BRANCH=$(git branch -r | grep -E 'origin/(main|master)$' | head -1 | sed 's@.*origin/@@')
@@ -938,7 +949,7 @@ return {
 
 The **Workflow** tool runs the debate in the background and its tool result includes a **run ID** (`wf_…`). The user has a shell function, **`wfwatch`** (defined in their `.zshrc` / `.bashrc`), that live-tails a workflow's progress by that ID — the debate is worth watching, since the round-by-round objections show exactly which persona forced which sentence.
 
-**Immediately after launching the workflow — before waiting for it to finish — print the run ID in a copyable form with the exact command:**
+**In the same turn that launches the workflow — before you yield — print the run ID in a copyable form with the exact command:**
 
 ```
 🥊  changes-description debate launched — run ID: wf_ab12cd34
@@ -946,7 +957,9 @@ The **Workflow** tool runs the debate in the background and its tool result incl
     One-shot snapshot instead:          wfwatch wf_ab12cd34 --once
 ```
 
-Use the **actual** `runId` from the Workflow tool result verbatim — `wfwatch` resolves the journal by exact ID. Then wait for the workflow and continue to Step 3.
+Use the **actual** `runId` from the Workflow tool result verbatim — `wfwatch` resolves the journal by exact ID.
+
+**Then end your turn — never block the session on the swarm.** The `Workflow` tool has already returned: the run continues in the background and a task notification re-invokes you when it finishes. So print the block above, say the debate is running, and yield, which leaves the user free to keep submitting prompts for the whole run. Do not hold the turn open to wait for it — no `TaskOutput` on the workflow's task, no `Monitor`, no `ScheduleWakeup`, no reading the journal or running `wfwatch` yourself on a loop, no sleep, and no filler tool calls to pass the time. None of that makes the result arrive sooner, and all of it costs the user their session for the length of a full swarm. If they send other prompts meanwhile, answer them normally and stay responsive. The completion notification is the **only** thing that resumes this skill; when it arrives, continue with Step 3.
 
 ## Step 3: Present the Result
 

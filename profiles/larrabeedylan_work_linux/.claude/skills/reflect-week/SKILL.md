@@ -17,11 +17,27 @@ date -u +%Y-%m-%d
 date -u -d "7 days ago" +%Y-%m-%d
 ```
 
+**Check the range against the previous report, and cover gaps explicitly.** `ls` the
+`reflect-self/context/` directory (Step 1 does this anyway) and compare the newest report's
+end date with the start date you are about to use. A user-supplied start date frequently does
+**not** abut it. Two cases, both of which belong in the report's header rather than being
+silently absorbed:
+- **A gap** (prior report ends 08-28, this run starts 09-01): days 08-29→08-31 are covered by
+  no report at all. Check whether anything completed in the seam — in the 2026-09-01→15 run,
+  PLAT-2409 and PLAT-2460 both completed on 08-31, and PLAT-2460 was the MR that turned the
+  entire Kubernetes RBAC feature on in production. Name what fell in the gap so it can be
+  back-filled.
+- **A longer-than-7-day range** (09-01→09-15 is 14 days): say so at the top of the report and
+  in the chat response. The snippet's 4-bullet-per-domain cap is calibrated for one week, so a
+  fortnight forces real consolidation — don't silently present two weeks as one.
+
 ## Step 1: Read Slack/Discussion Context
 
 Read the file `~/.claude/skills/reflect-week/slack-context.md` using the Read tool. This file contains Slack threads, discussions, and other context that Dylan has pasted before running this command.
 
 - If the file is empty or only has the template header, that's fine — skip Slack context and proceed with GitLab + Linear data only.
+- **ALWAYS check whether the content is stale before using it.** Dylan does not always refresh this file between runs, and a leftover paste from a prior week will silently pollute the report with work that already got credited. Two checks: (a) do the in-thread dates ("Jul 22nd", "07/23", "Yesterday at 2:44 PM") fall inside this week's range? (b) `ls ~/.claude/skills/reflect-self/context/` — if the most recent report's date range matches the threads' dates, this content was already consumed. If stale: do **not** attribute it to this week, state the caveat at the top of the detailed report and in the chat response, and proceed with GitLab + Linear only.
+- **Staleness is usually partial, not total.** The common case is a file that carries this week's threads *plus* the tail of one long-running thread whose opening was already credited. Grep the most recent report for a distinguishing token from each thread (an MR number, a person's name, a ticket ID) rather than judging the file as a whole — then credit only the messages that postdate the prior report and say so explicitly in the caveat.
 - If it has content, parse the pasted threads for: incident responses, architecture decisions, cross-team coordination, deployment discussions, problem resolutions, or any other notable work items.
 - **Thread boundaries:** The pasted content contains multiple Slack threads concatenated together. Delineate thread boundaries by looking for recurring phrases like "Reply…Also send to" which appear at the end of each copied thread. Use the channel names in these markers (e.g., "Also send to platform-infra-team", "Also send to retail-eng") to identify the domain/team context for each thread.
 
@@ -42,6 +58,32 @@ Use the helper script at `~/.claude/scripts/gitlab-api.sh`. This script reads th
 
 For each MR, note the title, target project/repo name, and status.
 
+**`merged-mrs` does NOT filter by merge date.** It returns MRs updated since the start date, so the list will include MRs merged weeks or even years earlier. Always filter client-side on the `merged_at` field and discard anything before the start date.
+
+**Descriptions from `merged-mrs`/`open-mrs` are truncated to ~200 chars.** For the detailed report (Step 4), fetch full descriptions with `mr-info` for the MRs that matter.
+
+```bash
+# Full MR description — NOTE: project path must be URL-encoded (%2F for every slash).
+# Passing a raw path (gridmatic/foundation/gridmatic-dev) returns empty and throws a
+# JSONDecodeError traceback, which is easy to misread as "the MR doesn't exist".
+~/.claude/scripts/gitlab-api.sh mr-info gridmatic%2Ffoundation%2Fgridmatic-dev 557
+
+# Review threads — same URL-encoding requirement. Use this to find peers for Step 4.5:
+# reviewer usernames are the strongest signal available when Slack context is missing.
+~/.claude/scripts/gitlab-api.sh mr-discussions gridmatic%2Ftlaloc-env 2829
+```
+
+**An MR named in Slack may have been closed, not merged.** `open-mrs` lists only open MRs and
+`merged-mrs` only merged ones, so an abandoned MR appears in neither and it is easy to report a
+superseded approach as work-in-flight. Run `mr-info` on any MR number that came from Slack rather
+than from the two list commands, and check its `state`.
+
+`mr-info` returns `state` but **not** `merged_at` (it comes back null) and not `draft`. Use it for state and the full description; take merge dates from `merged-mrs` and draft status from `open-mrs`.
+
+The shell is **zsh**, which does not word-split unquoted parameters — `for spec in "proj iid"; do set -- $spec` silently leaves `$2` empty and every call fails with `parameter null or not set`. Write the pairs to a file and `while read -r proj iid` instead.
+
+`mr-discussions` prints one JSON object per thread on its own line — it is NOT a single JSON array, so `json.load()` on the whole stream fails. Parse line-by-line, or just `grep -o '"author": "[^"]*"' | sort | uniq -c` to get a participant tally quickly. Filter out the bots (`griddy-bot`, `gridmatic-releaser`, `gridmatic-linear`) when identifying human peers.
+
 IMPORTANT: Never use curl with API tokens directly. Always use the helper script.
 
 ## Step 3: Gather Linear Ticket Data
@@ -56,12 +98,26 @@ Use `mcp__claude_ai_Linear__list_issues` to find issues assigned to Dylan that w
 
 The `list_issues` response already includes the `description` field — no need to call `get_issue` per ticket. For each completed ticket, note the identifier (e.g., TEAM-123), title, and description. Use the description to write more precise and informative snippet bullets.
 
+**`fields` rejects `identifier`.** The ticket ID field is named **`id`** (it returns
+`PLAT-2525`, not a UUID); passing `identifier` fails the whole call with an
+`InputValidationError` listing the valid options. A working set:
+`["id", "title", "description", "url", "priority", "status", "completedAt", "updatedAt"]`.
+
+**`updatedAt` filters on update, not completion — always re-filter client-side on
+`completedAt`.** A `state: "Done"` + `updatedAt: <start>` query returns every ticket *touched*
+in the range, including ones completed weeks or months earlier (a linked sub-issue closing, an
+MR merging, a comment). In the 2026-09-01→15 run, 7 of 20 returned tickets had completed
+before the window — one as far back as June. Request `completedAt` in `fields` and drop
+anything before the start date, exactly as you already do for `merged_at` on MRs.
+
 ### 3b. In-Progress Tickets
 Use `mcp__claude_ai_Linear__list_issues` to find issues assigned to Dylan that are currently in progress:
 - Status: "In Progress" or "In Review"
 - Assigned to Dylan
 
 **NOTE:** `state` is matched exactly, and Dylan's active tickets almost always sit in **"In Review"** (statusType `started`), not "In Progress" — the latter frequently returns empty. Always query **both** `state: "In Progress"` and `state: "In Review"` as separate `list_issues` calls (run them in parallel) so no active work is missed.
+
+**There is a third started state: "Approved".** Tickets whose MR is open and reviewed but not yet merged sit there, and they show up in *neither* the "In Progress" nor the "In Review" query — so open MRs appear in the GitLab data with no matching ticket and look untracked. Query `state: "Approved"` alongside the other two.
 
 For each in-progress ticket, note the identifier, title, description, and current status.
 
@@ -74,6 +130,10 @@ Load the Notion tools via `ToolSearch` (query: `+notion search`) if not already 
 3. Cache the OKRs in memory for use in Steps 4 and 5.
 
 **Quarter calculation:** Q1 = Jan–Mar, Q2 = Apr–Jun, Q3 = Jul–Sep, Q4 = Oct–Dec. Derive from the current date.
+
+**Verify the quarter before using the page.** Several "Platform Infrastructure" OKR pages exist with identical titles, one per quarter, and `notion-search` ranks the wrong quarter first even when the query names the right one. After `notion-fetch`, check the `<ancestor-path>` in the response — it shows `<parent-page ... title="2026 Q3"/>`. If the parent is the wrong quarter, fetch a different result. The Q3 2026 Platform Infrastructure page is `4ca6763b-19a6-82d9-9500-01278c1935ae`; its parent quarter page is `3736763b-19a6-806a-b114-fa9024254282`.
+
+**These OKRs are objective/bullet lists, not per-person KRs.** Map Dylan's work to the objective bullets that fit (e.g. Security → "rollout gridmatic.dev IAM widely, revoke legacy IAM access"; Dev + Infra Platform → "Rollout rdev to all of eng"). Don't expect a KR with Dylan's name on it.
 
 **If no OKRs are found:** Note it briefly and continue — OKR mapping is optional enrichment, not a blocker.
 
@@ -223,6 +283,9 @@ and any notable dynamics (mentoring, joint debugging, coordination).
 - **Only include peers with meaningful interaction.** A drive-by emoji reaction doesn't count. Look for substantive collaboration: discussion, review, joint problem-solving, coordination.
 - **Be specific about Dylan's role.** The point is to capture what Dylan contributed to the relationship, not just that they were in the same thread.
 - **Skip if no peers found.** If the week's data has no clear peer interactions, skip this step entirely.
+- **When Slack context is missing or stale, MR review threads are the fallback peer source.** Run `mr-discussions` (Step 2) over the week's significant MRs and use the non-bot authors. Distinguish a substantive review (an inline question that changed the code) from a bare `lgtm` — write both up if they occurred, but say plainly which is which and note that a bare approval is thin evidence about a working relationship.
+- **The fallback often returns nothing at all, and that absence is itself a finding.** In the 2026-09-01→15 run, all twelve merged MRs had *zero* human participants — only `gridmatic-releaser`, `gridmatic-linear`, `griddy-bot` and `gridmatic-atlantis`. Don't quietly move on: a fortnight of production access-control code merging with no human reviewer is a bus-factor and review-coverage risk worth stating in Evidence Highlights, and it means every peer profile that week rests on Slack alone. Say so in the profiles rather than implying an MR-review relationship that didn't happen.
+- **Do not upgrade an assigned review into an observed one.** When Slack shows someone being *asked* to review (e.g. Mark asking Dylan to support Nell on `!906`), that is a commitment, not evidence the review occurred — check the MR's discussions and its state. If the MR is still open with no comments, write the commitment and the missing follow-through plainly, and flag it as something to confirm off-channel before it is cited as mentoring evidence.
 - **Keep it factual.** These profiles are raw evidence — save editorializing for the `reflect-peer` skill at review time.
 
 ## Step 5: Synthesize the Snippet
@@ -273,7 +336,14 @@ Example structure (as markdown in chat):
 
 ## Important Rules
 
-1. **Be concise.** Each bullet is ONE short sentence. No paragraphs.
+0. **Matter-of-fact tone. No embellishment.** The snippet is a status report Dylan posts
+   about his own work, so anything that reads as self-promotion reads badly. State what
+   shipped and what it does; do not characterize its value. Cut evaluative framing
+   ("surfaced", "closed three paths that left access live", "completing the series"),
+   severity adjectives, and counts used as achievement ("10-MR series", "three fixes").
+   Write "split `Verify` into drift and ownership", not "fixed a subtle bug where `Verify`
+   conflated two questions". The detailed report (Step 4) is where impact and significance
+   belong — keep that analysis out of the snippet entirely.
 2. **Deduplicate.** If an MR and a ticket refer to the same work, combine into a single bullet.
 3. **Prioritize.** List the most impactful items first within each section.
 4. **Be precise and verifiable.** Every claim must be directly traceable to an MR, ticket, or Slack message. Do not paraphrase loosely, guess at details (e.g. service names from truncated descriptions), or editorialize. If an MR description was truncated and you cannot confirm specifics, state only what you know. Prefer linking to the source over describing it. An engineer should be able to scrutinize every bullet and verify it.

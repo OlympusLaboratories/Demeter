@@ -949,7 +949,7 @@ return {
 
 The **Workflow** tool runs the debate in the background and its tool result includes a **run ID** (`wf_…`). The user has a shell function, **`wfwatch`** (defined in their `.zshrc` / `.bashrc`), that live-tails a workflow's progress by that ID — the debate is worth watching, since the round-by-round objections show exactly which persona forced which sentence.
 
-**Immediately after launching the workflow — before waiting for it to finish — print the run ID in a copyable form with the exact command:**
+**In the same turn that launches the workflow — before you yield — print the run ID in a copyable form with the exact command:**
 
 ```
 🥊  changes-description debate launched — run ID: wf_ab12cd34
@@ -957,7 +957,9 @@ The **Workflow** tool runs the debate in the background and its tool result incl
     One-shot snapshot instead:          wfwatch wf_ab12cd34 --once
 ```
 
-Use the **actual** `runId` from the Workflow tool result verbatim — `wfwatch` resolves the journal by exact ID. Then wait for the workflow and continue to Step 3.
+Use the **actual** `runId` from the Workflow tool result verbatim — `wfwatch` resolves the journal by exact ID.
+
+**Then end your turn — never block the session on the swarm.** The `Workflow` tool has already returned: the run continues in the background and a task notification re-invokes you when it finishes. So print the block above, say the debate is running, and yield, which leaves the user free to keep submitting prompts for the whole run. Do not hold the turn open to wait for it — no `TaskOutput` on the workflow's task, no `Monitor`, no `ScheduleWakeup`, no reading the journal or running `wfwatch` yourself on a loop, no sleep, and no filler tool calls to pass the time. None of that makes the result arrive sooner, and all of it costs the user their session for the length of a full swarm. If they send other prompts meanwhile, answer them normally and stay responsive. The completion notification is the **only** thing that resumes this skill; when it arrives, continue with Step 3.
 
 ## Step 3: Present the Result
 
