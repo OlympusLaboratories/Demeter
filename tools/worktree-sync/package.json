@@ -2,7 +2,7 @@
   "name": "worktree-sync",
   "displayName": "Worktree Sync",
   "description": "Keeps the active Claude Code tab and the active terminal on the same git worktree.",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "publisher": "dylanlarrabee",
   "license": "MIT",
   "private": true,

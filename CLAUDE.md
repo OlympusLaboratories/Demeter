@@ -42,16 +42,16 @@ The installer does the following in order:
 2. Detects machine type (macOS = `mac`, Linux = `linux`)
 3. Initializes git submodules if `.gitmodules` exists
 4. Symlinks dotfiles from `profiles/<profile>/` to `~/` (skipping `.claude/`)
-5. Backs up existing `~/.claude` directory (timestamped copy)
-6. Symlinks `.claude/` contents individually (skills linked per-directory into `~/.claude/skills/`)
-7. Symlinks vendor skills from `_vendor/*/` into `~/.claude/skills/`
-8. Symlinks shared tools from `tools/*` into `~/.claude/tools/`
+5. Symlinks `.claude/` contents individually (skills linked per-directory into `~/.claude/skills/`)
+6. Symlinks vendor skills from `_vendor/*/` into `~/.claude/skills/`
+7. Symlinks shared tools from `tools/*` into `~/.claude/tools/`
+8. Prompts to build and install shared tools exposing an `install` target in their Makefile. Runs through `mise exec` when the tool has a `.mise.toml`, so a pinned toolchain resolves in a non-interactive shell. Skipped without prompting when no `code`/`codium` CLI is present. Honours `SKIP_LIST` by tool directory name.
 9. Symlinks `vscode/settings.json` over VS Code's user settings, on every editor user directory that already exists
 10. Cleans stale skill symlinks (removes symlinks pointing to deleted repo paths)
 11. Creates data directories for skills that accumulate context
 
 Key behaviors:
-- Creates a full backup of `~/.claude` before modifying it
+- Never copies `~/.claude` aside; it only replaces symlinks, leaving your session data in place
 - Backs up existing real files before replacing
 - Skips already-correct symlinks
 - Removes stale skill symlinks that point into the repo but whose target no longer exists
@@ -61,7 +61,7 @@ Key behaviors:
 - `settings.local.json` lives at `.claude/.claude/` and is symlinked normally
 - `.mcp.json` is NOT managed by the repo (contains tokens) — configure manually
 - `.claude/hooks/` is linked per-file into `~/.claude/hooks/` by the same `.claude/` directory loop; the hooks that run from there are registered in each profile's `settings.json`
-- `tools/` is profile-independent and linked per-directory into `~/.claude/tools/`. Linking only makes the source available — a tool that has to be built or installed into an editor keeps its own make targets
+- `tools/` is profile-independent and linked per-directory into `~/.claude/tools/`. Linking only makes the source available, so a tool exposing a Makefile `install` target is then offered a build (step 8) — the symlink alone gives no signal that an installed artefact is older than the source
 - `vscode/settings.json` is profile-independent and symlinked **wholesale** over the editor's user settings (`~/Library/Application Support/Code/User/` on mac, `~/.config/Code/User/` on linux, plus Insiders and VSCodium when present). Because it is a symlink, VS Code writes UI changes back into the repo — machine-specific keys (`window.zoomLevel`, `claudemeter.debugLogFile`) are kept last in the file so they stand out in a diff. `vscode_user_dirs()` resolves the paths; `should_skip "vscode" "$machine"` opts a platform out
 - Idempotent — safe to re-run after pulling changes
 

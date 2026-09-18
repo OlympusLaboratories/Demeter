@@ -165,7 +165,7 @@ export class Syncer {
     }
     const previous = this.lastActive;
     this.lastActive = { tab: current, label: current.label };
-    if (previous && previous.tab === current && previous.label === current.label) {
+    if (previous && previous.tab === current) {
       return undefined;
     }
     this.log.info(
@@ -210,6 +210,10 @@ export class Syncer {
   }
 
   async syncTabToTerminal(tab: vscode.Tab): Promise<void> {
+    if (this.activeClaudeTab() !== tab) {
+      this.log.info(`"${tab.label}" is no longer the active tab — not moving the terminal`);
+      return;
+    }
     const key = await this.keyForTab(tab);
     if (!key) {
       this.log.info(`tab "${tab.label}" — no worktree resolved, skipping`);
@@ -223,6 +227,10 @@ export class Syncer {
     const target = this.mostRecent(matches);
     if (!target) {
       this.log.info(`tab "${tab.label}" → ${key} — no terminal open for that worktree`);
+      return;
+    }
+    if (this.activeClaudeTab() !== tab) {
+      this.log.info(`"${tab.label}" stopped being active while resolving — not moving the terminal`);
       return;
     }
     this.log.info(`tab "${tab.label}" → terminal in ${key}`);

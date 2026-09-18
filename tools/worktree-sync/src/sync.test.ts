@@ -367,6 +367,39 @@ describe('background session activity', () => {
     expect(state.showCalls).toEqual(['zsh 2406:preserveFocus=true']);
   });
 
+  it('does not move the terminal when a finished session regenerates the active tab title', async () => {
+    activateTab(f.tab2401);
+    onDidChangeTabs.fire({});
+    await settle();
+    state.showCalls = [];
+
+    // The user has not switched tabs. Claude regenerates the title on the tab
+    // they are sitting on, and it now happens to name another worktree.
+    f.tab2401.label = 'PLAT-2405';
+    onDidChangeTabs.fire({});
+    await settle();
+
+    expect(state.showCalls).toEqual([]);
+  });
+
+  it('does not act on a tab that stopped being active before the debounce elapsed', async () => {
+    activateTab(f.tab2401);
+    onDidChangeTabs.fire({});
+    await settle();
+    state.showCalls = [];
+    state.config.debounceMs = 120;
+
+    // A transient blip marks another session's tab active; it settles back
+    // before the debounce fires, with no further event.
+    f.group.activeTab = f.tab2406;
+    onDidChangeTabs.fire({});
+    await sleep(30);
+    f.group.activeTab = f.tab2401;
+    await sleep(500);
+
+    expect(state.showCalls).toEqual([]);
+  });
+
   it('does not re-sync when the active tab only regenerates its title', async () => {
     activateTab(f.tab2401);
     onDidChangeTabs.fire({});

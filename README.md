@@ -46,10 +46,10 @@ The script will:
 - Install the profile you selected (by argument, auto-detected, or chosen from the menu)
 - Detect whether you're on macOS or Linux
 - Symlink each dotfile to `~/`
-- Back up `~/.claude` before modifying (timestamped copy)
 - Symlink `.claude/` contents (including skills) to `~/.claude/`
 - Symlink vendor skills from `_vendor/` into `~/.claude/skills/`
 - Symlink shared tools from `tools/` into `~/.claude/tools/`
+- Offer to build and install any shared tool that has an `install` target (prompted, skippable)
 - Symlink `vscode/settings.json` over VS Code's user settings (see [Editor Settings](#editor-settings))
 - Clean stale skill symlinks (e.g. after a skill is renamed or removed from the repo)
 - Create data directories for skills that accumulate context
@@ -71,9 +71,8 @@ The script will:
 - Remove the templated `~/.claude/settings.json` copy (prompts first)
 - Remove the VS Code `settings.json` symlink and offer to restore the backup taken at install time
 - Clean up now-empty skill directories left behind
-- Optionally restore the most recent `~/.claude.bak.*` backup that `install.sh` created
 
-Your repo files are never touched, and existing backups and skill data directories are left in place.
+Your repo files are never touched, and skill data directories are left in place.
 
 ## Adding Your Dotfiles
 
@@ -194,12 +193,16 @@ Each profile's shell config also defines `go` (worktree-aware `git checkout` —
 
 ### Worktree Sync Extension
 
-`tools/worktree-sync/` is a VS Code extension that keeps the active **Claude Code tab** and the active **terminal** on the same worktree in both directions, so you can't type a prompt into one worktree's session while running commands in another. It is shared by every profile — the installer only links the source into `~/.claude/tools/`; installing it into the editor is a separate step:
+`tools/worktree-sync/` is a VS Code extension that keeps the active **Claude Code tab** and the active **terminal** on the same worktree in both directions, so you can't type a prompt into one worktree's session while running commands in another. It is shared by every profile.
+
+`install.sh` links the source into `~/.claude/tools/` and then offers to build and install it. Answer yes and there is nothing else to do; the prompt exists because the build takes a couple of minutes. To do it by hand, or after editing the source:
 
 ```bash
-cd ~/.claude/tools/worktree-sync
-make setup      # npm install
-make install    # build, package, and install into VS Code
+make -C ~/.claude/tools/worktree-sync install
 ```
+
+The build runs through `mise exec` when the tool has a `.mise.toml`, so it works from a shell where the pinned toolchain isn't activated.
+
+A VS Code extension installs into `~/.vscode/extensions`, which every **profile** on the machine shares — but each profile chooses whether to enable it, so enable it once per profile. On Linux the installer skips the build when no `code` CLI is on PATH: over Remote-SSH the extension belongs on the client machine.
 
 `make link` is the development alternative: it symlinks the source into `~/.vscode/extensions/` so a rebuild picks up on a window reload. `make check` runs typecheck, tests, and build. See [tools/worktree-sync/README.md](tools/worktree-sync/README.md) for how tabs and terminals are matched and which settings it exposes.

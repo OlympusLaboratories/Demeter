@@ -213,6 +213,26 @@ link_directory_contents() {
   done
 }
 
+tool_has_install_target() {
+  local tool_dir="$1"
+  [[ -f "$tool_dir/Makefile" ]] && grep -qE '^install[[:space:]]*:' "$tool_dir/Makefile"
+}
+
+run_tool_install() {
+  local tool_dir="$1"
+  if [[ -f "$tool_dir/.mise.toml" ]] && command -v mise >/dev/null 2>&1; then
+    ( cd "$tool_dir" && mise exec -- make install )
+  else
+    ( cd "$tool_dir" && make install )
+  fi
+}
+
+editor_cli_available() {
+  command -v code >/dev/null 2>&1 \
+    || command -v codium >/dev/null 2>&1 \
+    || [[ -x "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" ]]
+}
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 main() {
@@ -272,14 +292,6 @@ main() {
   # ── .claude setup ──────────────────────────────────────────────────────────
   local claude_src="$user_dir/.claude"
   local claude_dst="$home/.claude"
-
-  # Back up existing .claude before modifying
-  if [[ -d "$claude_dst" ]]; then
-    local backup_dir="${claude_dst}.bak.$(date +%Y%m%d%H%M%S)"
-    info "Backing up $claude_dst to $backup_dir ..."
-    cp -a "$claude_dst" "$backup_dir"
-    success "Backup created: $backup_dir"
-  fi
 
   if [[ -d "$claude_src" ]]; then
     bold "Linking .claude contents to $claude_dst ..."
@@ -345,12 +357,44 @@ main() {
 
   # ── shared tools (e.g. worktree-sync editor extension) ─────────────────────
   # Profile-independent projects that live at the repo root and are linked into
-  # ~/.claude/tools/. Linking only makes the source available — a tool that has
-  # to be built or installed into an editor still needs its own make target.
+  # ~/.claude/tools/. Linking only makes the source available, so a tool that
+  # exposes an `install` target is then offered a build: the symlink gives no
+  # signal that an already-installed artefact is older than the source.
   local tools_dir="$REPO_DIR/tools"
   if [[ -d "$tools_dir" ]]; then
     bold "Linking shared tools to $claude_dst/tools ..."
     link_directory_contents "$tools_dir" "$claude_dst/tools" "$machine"
+
+    local buildable=()
+    for tool_path in "$tools_dir"/*/; do
+      [[ -d "$tool_path" ]] || continue
+      local tool_name
+      tool_name="$(basename "$tool_path")"
+      should_skip "$tool_name" "$machine" && continue
+      tool_has_install_target "$tool_path" && buildable+=("$tool_name")
+    done
+
+    if [[ "${#buildable[@]}" -gt 0 ]]; then
+      echo ""
+      if ! editor_cli_available; then
+        warn "No VS Code CLI found — not installing: ${buildable[*]+${buildable[*]}}"
+        [[ "$machine" == "linux" ]] && \
+          info "  Over Remote-SSH, editor extensions install on the client machine."
+      elif ask "Build and install shared tools into the editor (${buildable[*]+${buildable[*]}})?"; then
+        for tool_name in "${buildable[@]+"${buildable[@]}"}"; do
+          bold "Installing $tool_name ..."
+          if run_tool_install "$tools_dir/$tool_name"; then
+            success "Installed $tool_name"
+          else
+            warn "Failed to install $tool_name"
+            info "  Retry with: make -C $tools_dir/$tool_name install"
+          fi
+        done
+        info "Reload VS Code (Developer: Reload Window) to pick up the new build."
+      else
+        info "Skipped. Install later with: make -C $tools_dir/<tool> install"
+      fi
+    fi
   fi
 
   # ── vscode settings ────────────────────────────────────────────────────────

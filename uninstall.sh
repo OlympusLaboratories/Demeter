@@ -7,8 +7,7 @@
 # — it reverses whatever install.sh linked, regardless of which profile was used.
 #
 # It also removes the templated settings.json copy and the VS Code settings
-# symlink (which lives outside both scanned trees), and can optionally restore
-# the most recent backup that install.sh created for either.
+# symlink, which lives outside both scanned trees.
 
 set -euo pipefail
 
@@ -172,26 +171,9 @@ main() {
     rmdir "$dir" 2>/dev/null || true
   done
 
-  # ── offer to restore the most recent .claude backup ──────────────────────
-  local latest_backup
-  latest_backup="$(ls -dt "${claude_dst}".bak.* 2>/dev/null | head -n1 || true)"
-  if [[ -n "$latest_backup" && -d "$latest_backup" ]]; then
-    bold "Found backup: $latest_backup"
-    if ask "Restore this backup over $claude_dst?" "n"; then
-      # Move current (mostly-unlinked) .claude aside, then restore the backup.
-      if [[ -d "$claude_dst" ]]; then
-        local aside="${claude_dst}.uninstall.$(date +%Y%m%d%H%M%S)"
-        mv "$claude_dst" "$aside"
-        warn "Moved current $claude_dst to $aside"
-      fi
-      cp -a "$latest_backup" "$claude_dst"
-      success "Restored $claude_dst from backup"
-    fi
-  fi
-
   echo ""
   success "Done. Removed $removed symlink(s)/file(s); kept $kept."
-  info "Backups (~/.claude.bak.*) and skill data directories were left in place."
+  info "Skill data directories were left in place."
   info "You may need to restart your shell for changes to take effect."
 }
 
