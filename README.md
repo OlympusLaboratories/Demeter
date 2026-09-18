@@ -13,6 +13,8 @@ Demeter/
 ├── _vendor/            # vendor packages — skills + tools (git submodules)
 ├── tools/              # first-party projects, shared by every profile
 │   └── worktree-sync/  # VS Code extension, synced to ~/.claude/tools/
+├── vscode/             # editor settings, shared by every profile
+│   └── settings.json   # symlinked over VS Code's user settings.json
 └── profiles/           # one directory per machine profile
     └── <profile>/      # e.g. larrabeedylan_work_linux
         ├── .bash_profile
@@ -48,6 +50,7 @@ The script will:
 - Symlink `.claude/` contents (including skills) to `~/.claude/`
 - Symlink vendor skills from `_vendor/` into `~/.claude/skills/`
 - Symlink shared tools from `tools/` into `~/.claude/tools/`
+- Symlink `vscode/settings.json` over VS Code's user settings (see [Editor Settings](#editor-settings))
 - Clean stale skill symlinks (e.g. after a skill is renamed or removed from the repo)
 - Create data directories for skills that accumulate context
 - Back up any existing real files before replacing them
@@ -66,6 +69,7 @@ To un-symlink everything and start fresh:
 The script will:
 - Remove every symlink in `~/` and `~/.claude` whose target points back into this repo (layout-agnostic — it reverses whatever was linked)
 - Remove the templated `~/.claude/settings.json` copy (prompts first)
+- Remove the VS Code `settings.json` symlink and offer to restore the backup taken at install time
 - Clean up now-empty skill directories left behind
 - Optionally restore the most recent `~/.claude.bak.*` backup that `install.sh` created
 
@@ -89,6 +93,80 @@ SKIP_LIST=(
   "some-file:mac"         # skip on mac, link on linux only
 )
 ```
+
+## Editor Settings
+
+`vscode/settings.json` is profile-independent, like `tools/`, and is symlinked
+**wholesale** over VS Code's user settings so every machine renders identically:
+
+| Platform | Link target |
+| --- | --- |
+| macOS | `~/Library/Application Support/Code/User/settings.json` |
+| Linux | `~/.config/Code/User/settings.json` |
+
+Insiders and VSCodium are linked too when their directories already exist. A
+directory is only created by the editor's first launch, so on a fresh machine
+launch VS Code once and re-run the installer. To opt a machine out entirely, add
+`"vscode:linux"` (or `:mac`) to `SKIP_LIST`.
+
+Two consequences of linking wholesale are worth knowing:
+
+- **VS Code writes through the symlink.** Changing the zoom level or picking a
+  theme from the UI edits the repo file, and shows up as a tracked diff. Commit
+  it or `git checkout` it, but don't be surprised by it.
+- **Machine-specific keys are shared.** `window.zoomLevel` and
+  `claudemeter.debugLogFile` are the two that genuinely differ per machine. They
+  are kept last in the file so they're easy to spot in a diff.
+
+Over Remote-SSH the theme comes from the **client** machine, so linking on a
+Linux dev box has no effect on how the editor looks — install on the laptop you
+actually sit in front of.
+
+### Why the color settings are there
+
+VS Code's High Contrast themes signal state with borders rather than background
+fills, so the registry leaves many background colors as `null` (the CSS variable
+is never emitted) or as solid black. Webviews that paint backgrounds — the Claude
+Code panel among them — then render those elements with no background at all:
+the selected row in the slash-command list, backtick badges, and fenced code
+blocks all disappear. `workbench.colorTheme` is pinned to Default Dark Modern,
+and `window.autoDetectHighContrast` is off so an OS contrast setting can't drag
+the editor back into an unrepaired High Contrast theme.
+
+The `workbench.colorCustomizations` blocks pin the specific tokens the Claude
+Code webview consumes (`list.activeSelection*`, `textPreformat.*`,
+`textCodeBlock.background`, `badge.*`, `editorSuggestWidget.*`) to matching
+values in each theme, so light and dark differ in palette but not in which
+elements are visible.
+
+`window.autoDetectColorScheme` is **off**, because it and manual theme switching
+are mutually exclusive: the *Toggle between Light/Dark Themes* command bails out
+with "Cannot toggle between light and dark themes when `window.autoDetectColorScheme`
+is enabled in settings" whenever it's on.
+
+With it off, that command reads `workbench.preferredLightColorTheme` and
+`workbench.preferredDarkColorTheme` — the two keys pinned above — so toggling
+flips between Default Light Modern and Default Dark Modern and nothing else.
+Turn `autoDetectColorScheme` back on only if you'd rather the OS appearance drive
+the theme and you give up the toggle.
+
+### Peacock
+
+Peacock colors the title bar per repo, but it only ever writes
+`commandCenter.foreground` and `commandCenter.border` — never
+`commandCenter.background` — and it picks its foreground from two hardcoded
+values by a luminance threshold. On mid-tone colors the repo name in the title
+bar ends up unreadable.
+
+The fix is `peacock.excludedSettings`, which Peacock documents as keys it must
+never modify or delete. Every `commandCenter.*` key is listed there, and they're
+pinned instead in `workbench.colorCustomizations` to white text on a 65% black
+scrim — readable over any hue Peacock picks, in either theme.
+
+Peacock writes into a repo's **workspace** `.vscode/settings.json`, which
+outranks user settings. A repo colored before this change still carries stale
+`commandCenter.*` keys; run `Peacock: Remove All Colors` and re-apply the color
+to clear them.
 
 ## Claude Skills
 

@@ -6,8 +6,9 @@
 # target points back into this repo, then removing them. This is layout-agnostic
 # — it reverses whatever install.sh linked, regardless of which profile was used.
 #
-# It also removes the templated settings.json copy, and can optionally restore
-# the most recent ~/.claude backup that install.sh created.
+# It also removes the templated settings.json copy and the VS Code settings
+# symlink (which lives outside both scanned trees), and can optionally restore
+# the most recent backup that install.sh created for either.
 
 set -euo pipefail
 
@@ -129,6 +130,38 @@ main() {
   else
     info "No ~/.claude directory found; skipping."
   fi
+  echo ""
+
+  # ── vscode settings ──────────────────────────────────────────────────────
+  # Editor settings live outside $HOME's dotfiles and ~/.claude, so the scans
+  # above never reach them. Check every path install.sh knows about, on both
+  # platforms — a path that does not exist is simply skipped.
+  bold "Removing VS Code settings symlinks ..."
+  for editor_dir in \
+    "$home/Library/Application Support/Code/User" \
+    "$home/Library/Application Support/Code - Insiders/User" \
+    "$home/Library/Application Support/VSCodium/User" \
+    "$home/.config/Code/User" \
+    "$home/.config/Code - Insiders/User" \
+    "$home/.config/VSCodium/User" \
+  ; do
+    [[ -d "$editor_dir" ]] || continue
+    local settings_link="$editor_dir/settings.json"
+    [[ -L "$settings_link" ]] && points_into_repo "$settings_link" || continue
+    remove_if_ours "$settings_link"
+
+    # install.sh backs the original up alongside it as settings.json.bak.<ts>.
+    local latest_settings
+    latest_settings="$(ls -dt "$settings_link".bak.* 2>/dev/null | head -n1 || true)"
+    if [[ -n "$latest_settings" && -f "$latest_settings" ]]; then
+      if ask "Restore $latest_settings over $settings_link?"; then
+        cp "$latest_settings" "$settings_link"
+        success "Restored: $settings_link"
+      else
+        ((kept++)) || true
+      fi
+    fi
+  done
   echo ""
 
   # ── clean up now-empty dirs left behind ──────────────────────────────────

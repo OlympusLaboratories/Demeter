@@ -144,6 +144,26 @@ should_skip() {
   return 1
 }
 
+# ── vscode ────────────────────────────────────────────────────────────────────
+# Editor user-settings directories, most-preferred first. Only ones that already
+# exist get linked: the directory is created on an editor's first launch, and a
+# dev box driven over Remote-SSH keeps its UI settings on the client machine.
+
+vscode_user_dirs() {
+  local machine="$1"
+  if [[ "$machine" == "mac" ]]; then
+    printf '%s\n' \
+      "$HOME/Library/Application Support/Code/User" \
+      "$HOME/Library/Application Support/Code - Insiders/User" \
+      "$HOME/Library/Application Support/VSCodium/User"
+  else
+    printf '%s\n' \
+      "$HOME/.config/Code/User" \
+      "$HOME/.config/Code - Insiders/User" \
+      "$HOME/.config/VSCodium/User"
+  fi
+}
+
 # ── symlinking ────────────────────────────────────────────────────────────────
 
 link_file() {
@@ -331,6 +351,35 @@ main() {
   if [[ -d "$tools_dir" ]]; then
     bold "Linking shared tools to $claude_dst/tools ..."
     link_directory_contents "$tools_dir" "$claude_dst/tools" "$machine"
+  fi
+
+  # ── vscode settings ────────────────────────────────────────────────────────
+  # Profile-independent, like tools/. settings.json is symlinked wholesale so
+  # every machine renders identically. VS Code writes through the symlink, so
+  # a setting changed from the UI lands in the repo as a tracked diff.
+  local vscode_src="$REPO_DIR/vscode/settings.json"
+  if [[ -f "$vscode_src" ]] && ! should_skip "vscode" "$machine"; then
+    bold "Linking VS Code settings ..."
+    # Collect the paths up front. link_file prompts on its own stdin, so it must
+    # not run inside a loop that is itself being fed from a redirect.
+    local editor_dirs=()
+    while IFS= read -r editor_dir; do
+      [[ -d "$editor_dir" ]] && editor_dirs+=("$editor_dir")
+    done < <(vscode_user_dirs "$machine")
+
+    local linked_editor=false
+    for editor_dir in "${editor_dirs[@]+"${editor_dirs[@]}"}"; do
+      link_file "$vscode_src" "$editor_dir/settings.json"
+      linked_editor=true
+    done
+
+    if [[ "$linked_editor" == false ]]; then
+      warn "No editor settings directory found — launch VS Code once, then re-run."
+      if [[ "$machine" == "linux" ]]; then
+        info "  Over Remote-SSH the theme comes from the client machine, not this one."
+      fi
+    fi
+    echo ""
   fi
 
   # ── clean stale skill symlinks ───────────────────────────────────────────
