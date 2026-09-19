@@ -1,6 +1,5 @@
 {
-    "workbench.colorTheme": "Plasma Theme", // currently set theme
-    "workbench.preferredDarkColorTheme": "Plasma Theme", // change for dark mode
+    "workbench.preferredDarkColorTheme": "Dark Horizon", // change for dark mode
     "workbench.preferredLightColorTheme": "Pastel Sky Bright Theme", // change for light mode
     "workbench.preferredHighContrastColorTheme": "Dark Modern",
     "workbench.preferredHighContrastLightColorTheme": "Light Modern",
@@ -127,5 +126,6 @@
 
     "window.zoomLevel": 4,
     "claudemeter.debugLogFile": "/Users/dylanlarrabee/Library/Application Support/claudemeter/debug.log",
-    "chat.titleBar.signIn.enabled": false
+    "chat.titleBar.signIn.enabled": false,
+    "workbench.colorTheme": "Dark Horizon"
 }

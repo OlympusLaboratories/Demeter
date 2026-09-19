@@ -1,14 +1,16 @@
 4ops.terraform
 alkemic-studio.tailwind-pastel
 anthropic.claude-code
+azemoh.theme-onedark
 docker.docker
 eamodio.gitlens
 eclipter.plasma-theme
 golang.go
 hashicorp.terraform
-hypersec.claudemeter
 johnpapa.vscode-peacock
+k3a.theme-dark-plus-contrast
 mathematic.vscode-pdf
+mcagampan.dark-horizon
 mechatroner.rainbow-csv
 ms-azuretools.vscode-containers
 ms-azuretools.vscode-docker
@@ -30,6 +32,8 @@ ms-vscode.makefile-tools
 ms-vscode.remote-explorer
 ms-vscode.remote-server
 peterj.proto
+romanrei.material-dark
+sallar.vscode-duotone-dark
 shira.pastel-forest-theme
 shira.pastel-sky-theme
 svelte.svelte-vscode
