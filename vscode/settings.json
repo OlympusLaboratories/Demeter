@@ -1,5 +1,5 @@
 {
-    "workbench.colorTheme": "Pastel Sky Bright Theme", // currently set theme
+    "workbench.colorTheme": "Plasma Theme", // currently set theme
     "workbench.preferredDarkColorTheme": "Plasma Theme", // change for dark mode
     "workbench.preferredLightColorTheme": "Pastel Sky Bright Theme", // change for light mode
     "workbench.preferredHighContrastColorTheme": "Dark Modern",
@@ -121,7 +121,7 @@
     "claudeCode.allowDangerouslySkipPermissions": true,
     "claudeCode.hideOnboarding": true,
     "chat.titleBar.openInAgentsWindow.enabled": false,
-    "chat.agentSessions.showExternal": "all",
+    "chat.agentSessions.showExternal": "last30Days",
     "github.copilot.chat.claudeAgent.allowAutoPermissions": true,
     "github.copilot.chat.claudeAgent.allowDangerouslySkipPermissions": true,
 
