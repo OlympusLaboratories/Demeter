@@ -127,5 +127,6 @@
     "window.zoomLevel": 4,
     "claudemeter.debugLogFile": "/Users/dylanlarrabee/Library/Application Support/claudemeter/debug.log",
     "chat.titleBar.signIn.enabled": false,
-    "workbench.colorTheme": "Dark Horizon"
+    "workbench.colorTheme": "Dark Horizon",
+    "terminal.integrated.initialHint": false
 }
