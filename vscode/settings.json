@@ -1,5 +1,5 @@
 {
-    "workbench.colorTheme": "Pastel Sky Bright Theme", // currently set theme
+    "workbench.colorTheme": "Plasma Theme", // currently set theme
     "workbench.preferredDarkColorTheme": "Plasma Theme", // change for dark mode
     "workbench.preferredLightColorTheme": "Pastel Sky Bright Theme", // change for light mode
     "workbench.preferredHighContrastColorTheme": "Dark Modern",
@@ -126,5 +126,6 @@
     "github.copilot.chat.claudeAgent.allowDangerouslySkipPermissions": true,
 
     "window.zoomLevel": 4,
-    "claudemeter.debugLogFile": "/Users/dylanlarrabee/Library/Application Support/claudemeter/debug.log"
+    "claudemeter.debugLogFile": "/Users/dylanlarrabee/Library/Application Support/claudemeter/debug.log",
+    "chat.titleBar.signIn.enabled": false
 }
