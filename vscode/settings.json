@@ -1,6 +1,6 @@
 {
-    "workbench.colorTheme": "Plasma Theme", // change for dark mode
-    "workbench.preferredDarkColorTheme": "Dark Modern",
+    "workbench.colorTheme": "Pastel Sky Bright Theme", // currently set theme
+    "workbench.preferredDarkColorTheme": "Plasma Theme", // change for dark mode
     "workbench.preferredLightColorTheme": "Pastel Sky Bright Theme", // change for light mode
     "workbench.preferredHighContrastColorTheme": "Dark Modern",
     "workbench.preferredHighContrastLightColorTheme": "Light Modern",
