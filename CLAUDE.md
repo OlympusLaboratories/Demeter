@@ -16,6 +16,8 @@ Demeter/
     worktree-sync/        # VS Code extension, linked into ~/.claude/tools/
   vscode/                 # Editor settings shared by every profile
     settings.json         # symlinked over VS Code's user settings.json
+    extensions.txt        # extension ids the installer keeps present
+    sync-extensions.sh    # rewrites extensions.txt from the current machine
   profiles/               # One directory per machine profile
     <profile>/            # e.g. larrabeedylan_work_linux
       .zshrc
@@ -47,8 +49,9 @@ The installer does the following in order:
 7. Symlinks shared tools from `tools/*` into `~/.claude/tools/`
 8. Prompts to build and install shared tools exposing an `install` target in their Makefile. Runs through `mise exec` when the tool has a `.mise.toml`, so a pinned toolchain resolves in a non-interactive shell. Skipped without prompting when no `code`/`codium` CLI is present. Honours `SKIP_LIST` by tool directory name.
 9. Symlinks `vscode/settings.json` over VS Code's user settings, on every editor user directory that already exists
-10. Cleans stale skill symlinks (removes symlinks pointing to deleted repo paths)
-11. Creates data directories for skills that accumulate context
+10. Prompts to install any extension in `vscode/extensions.txt` missing from the editor
+11. Cleans stale skill symlinks (removes symlinks pointing to deleted repo paths)
+12. Creates data directories for skills that accumulate context
 
 Key behaviors:
 - Never copies `~/.claude` aside; it only replaces symlinks, leaving your session data in place
@@ -62,6 +65,7 @@ Key behaviors:
 - `.mcp.json` is NOT managed by the repo (contains tokens) — configure manually
 - `.claude/hooks/` is linked per-file into `~/.claude/hooks/` by the same `.claude/` directory loop; the hooks that run from there are registered in each profile's `settings.json`
 - `tools/` is profile-independent and linked per-directory into `~/.claude/tools/`. Linking only makes the source available, so a tool exposing a Makefile `install` target is then offered a build (step 8) — the symlink alone gives no signal that an installed artefact is older than the source
+- `vscode/extensions.txt` is the companion to `settings.json`: a theme named in settings does nothing until its extension exists, and VS Code falls back silently. The installer only ever **adds** — a locally-installed extension missing from the list is left alone. `vscode/sync-extensions.sh` writes the list back from a machine; it excludes extension ids published from `tools/*/package.json`, which are not on the Marketplace and are installed by their own make target. `editor_cli()` resolves the CLI (PATH, then the macOS app bundle) and `read_extension_list()` parses the file (`#` comments and blanks ignored)
 - `vscode/settings.json` is profile-independent and symlinked **wholesale** over the editor's user settings (`~/Library/Application Support/Code/User/` on mac, `~/.config/Code/User/` on linux, plus Insiders and VSCodium when present). Because it is a symlink, VS Code writes UI changes back into the repo — machine-specific keys (`window.zoomLevel`, `claudemeter.debugLogFile`) are kept last in the file so they stand out in a diff. `vscode_user_dirs()` resolves the paths; `should_skip "vscode" "$machine"` opts a platform out
 - Idempotent — safe to re-run after pulling changes
 
@@ -83,5 +87,6 @@ Key behaviors:
 - **No comments in code**: `.claude/CLAUDE.md` forbids agent-written code comments globally. Any skill that writes or edits code must restate the rule in its own prompt — subagents spawned by a skill receive the skill's text, not the user's `CLAUDE.md`. The only sanctioned exception is `security-audit`'s PoC and verification tests, where the write-up is the deliverable
 - **Vendor packages**: Third-party skill sets go in `_vendor/<name>/` as git submodules
 - **Shared tools**: First-party projects that are not tied to one machine go in `tools/<name>/` at the repo root rather than being duplicated per profile. Build output (`node_modules/`, `dist/`, `*.vsix`) is ignored by the tool's own nested `.gitignore`
+- **Theme ids**: `workbench.colorTheme`, the `workbench.preferred*ColorTheme` keys, and the `[Theme Name]` scopes in `workbench.colorCustomizations` all take a theme's **settingsId** — `contributes.themes[].id` falling back to `label`, which is often not the display name (`Dark Modern`, not `Default Dark Modern`; only the High Contrast themes carry the `Default` prefix). A wrong id fails silently: the scope matches nothing, and the light/dark toggle no-ops. Scopes match by exact id or a `*` glob at either or both ends, on the name only — there is no scope for "every dark theme"
 - **Editor settings**: `vscode/` holds one shared `settings.json`, not a per-profile copy — the point is an identical editor everywhere. Color fixes belong in its `workbench.colorCustomizations` (theme-scoped, so light and dark each get correct values), never in a per-repo `.vscode/settings.json`. Anything Peacock also writes must be listed in `peacock.excludedSettings`, or Peacock's workspace-level write will outrank the user-level pin. See the Editor Settings section of `README.md` for why the High Contrast themes broke the Claude Code webview
 - **Hooks**: One script per hook under `.claude/hooks/`, duplicated across profiles like `scripts/`. Register it in every profile's `settings.json` using `$HOME/.claude/hooks/<name>` so the path resolves on any machine

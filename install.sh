@@ -227,10 +227,29 @@ run_tool_install() {
   fi
 }
 
+# PATH first, then the macOS app bundle — present even when the user never ran
+# "Shell Command: Install 'code' command in PATH".
+editor_cli() {
+  if command -v code >/dev/null 2>&1; then
+    command -v code
+  elif command -v codium >/dev/null 2>&1; then
+    command -v codium
+  elif [[ -x "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" ]]; then
+    echo "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
+  else
+    return 1
+  fi
+}
+
 editor_cli_available() {
-  command -v code >/dev/null 2>&1 \
-    || command -v codium >/dev/null 2>&1 \
-    || [[ -x "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" ]]
+  editor_cli >/dev/null 2>&1
+}
+
+# One extension id per line; `#` comments and blank lines are ignored.
+read_extension_list() {
+  local list_file="$1"
+  [[ -f "$list_file" ]] || return 0
+  sed -e 's/#.*//' -e 's/[[:space:]]//g' "$list_file" | grep -v '^$' || true
 }
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -424,6 +443,62 @@ main() {
       fi
     fi
     echo ""
+  fi
+
+  # ── vscode extensions ──────────────────────────────────────────────────────
+  # settings.json can name a theme, but a theme only exists once its extension
+  # is installed — VS Code falls back silently otherwise. Installing is additive:
+  # an extension missing from the list is never removed from the machine.
+  # Refresh the list from a machine with `vscode/sync-extensions.sh`.
+  local ext_list="$REPO_DIR/vscode/extensions.txt"
+  if [[ -f "$ext_list" ]] && ! should_skip "vscode" "$machine"; then
+    local wanted=()
+    while IFS= read -r wanted_ext; do
+      wanted+=("$wanted_ext")
+    done < <(read_extension_list "$ext_list")
+
+    if [[ "${#wanted[@]}" -gt 0 ]]; then
+      bold "Checking VS Code extensions ..."
+      if ! editor_cli_available; then
+        warn "No VS Code CLI found — skipping ${#wanted[@]} extension(s)."
+        info "  Enable it with \"Shell Command: Install 'code' command in PATH\"."
+        if [[ "$machine" == "linux" ]]; then
+          info "  Over Remote-SSH, UI extensions install on the client machine."
+        fi
+      else
+        local editor_bin installed_exts missing_exts=()
+        editor_bin="$(editor_cli)"
+        installed_exts="$("$editor_bin" --list-extensions 2>/dev/null | tr '[:upper:]' '[:lower:]')"
+
+        for wanted_ext in "${wanted[@]}"; do
+          if ! grep -qxF "$(echo "$wanted_ext" | tr '[:upper:]' '[:lower:]')" <<<"$installed_exts"; then
+            missing_exts+=("$wanted_ext")
+          fi
+        done
+
+        if [[ "${#missing_exts[@]}" -eq 0 ]]; then
+          success "All ${#wanted[@]} extension(s) already installed."
+        else
+          echo ""
+          printf '  %s\n' "${missing_exts[@]}"
+          echo ""
+          if ask "Install ${#missing_exts[@]} missing extension(s)?"; then
+            for wanted_ext in "${missing_exts[@]}"; do
+              if "$editor_bin" --install-extension "$wanted_ext" --force >/dev/null 2>&1; then
+                success "Installed $wanted_ext"
+              else
+                warn "Failed to install $wanted_ext"
+                info "  Retry with: $(basename "$editor_bin") --install-extension $wanted_ext"
+              fi
+            done
+            info "Reload VS Code (Developer: Reload Window) to pick them up."
+          else
+            info "Skipped."
+          fi
+        fi
+      fi
+      echo ""
+    fi
   fi
 
   # ── clean stale skill symlinks ───────────────────────────────────────────

@@ -14,7 +14,9 @@ Demeter/
 ├── tools/              # first-party projects, shared by every profile
 │   └── worktree-sync/  # VS Code extension, synced to ~/.claude/tools/
 ├── vscode/             # editor settings, shared by every profile
-│   └── settings.json   # symlinked over VS Code's user settings.json
+│   ├── settings.json   # symlinked over VS Code's user settings.json
+│   ├── extensions.txt  # extensions the installer keeps present
+│   └── sync-extensions.sh  # refresh that list from this machine
 └── profiles/           # one directory per machine profile
     └── <profile>/      # e.g. larrabeedylan_work_linux
         ├── .bash_profile
@@ -51,6 +53,7 @@ The script will:
 - Symlink shared tools from `tools/` into `~/.claude/tools/`
 - Offer to build and install any shared tool that has an `install` target (prompted, skippable)
 - Symlink `vscode/settings.json` over VS Code's user settings (see [Editor Settings](#editor-settings))
+- Install any extensions in `vscode/extensions.txt` that are missing (prompts first)
 - Clean stale skill symlinks (e.g. after a skill is renamed or removed from the repo)
 - Create data directories for skills that accumulate context
 - Back up any existing real files before replacing them
@@ -148,6 +151,37 @@ With it off, that command reads `workbench.preferredLightColorTheme` and
 flips between Default Light Modern and Default Dark Modern and nothing else.
 Turn `autoDetectColorScheme` back on only if you'd rather the OS appearance drive
 the theme and you give up the toggle.
+
+### Extensions
+
+`settings.json` can *name* a theme, but the theme only exists once its extension
+is installed — VS Code falls back silently otherwise, which is how a shared
+settings file still ends up looking different on two machines. `vscode/extensions.txt`
+closes that gap: one extension id per line, and the installer offers to install
+whatever is missing.
+
+Installing is **additive**. An extension you have locally but that isn't in the
+list is never removed, so a machine can keep its own extras.
+
+After installing something from the Marketplace that you want everywhere:
+
+```bash
+vscode/sync-extensions.sh     # rewrites extensions.txt from this machine
+git commit -am 'add <extension>'
+```
+
+The script shows what it's about to add or drop and asks before writing. If an
+entry is in the list but not installed here it warns before removing it, since
+that would stop your *other* machines getting it — run `./install.sh` first if
+you simply haven't installed it on this machine yet.
+
+Extensions built from `tools/` are excluded automatically. They aren't on the
+Marketplace, so asking to install them by id would fail; their own `make install`
+target handles them. The exclusion is derived from each tool's `package.json`,
+so a new tool needs no change to the script.
+
+The editor CLI is resolved from `PATH` first, then from the macOS app bundle, so
+it works even without running *Shell Command: Install 'code' command in PATH*.
 
 ### Peacock
 

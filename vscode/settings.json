@@ -1,7 +1,7 @@
 {
-    "workbench.colorTheme": "Dark Modern",
+    "workbench.colorTheme": "Plasma Theme", // change for dark mode
     "workbench.preferredDarkColorTheme": "Dark Modern",
-    "workbench.preferredLightColorTheme": "Light Modern",
+    "workbench.preferredLightColorTheme": "Pastel Sky Bright Theme", // change for light mode
     "workbench.preferredHighContrastColorTheme": "Dark Modern",
     "workbench.preferredHighContrastLightColorTheme": "Light Modern",
     "window.autoDetectColorScheme": false,
@@ -17,7 +17,7 @@
         "commandCenter.activeBorder": "#FFFFFF66",
         "commandCenter.inactiveBorder": "#FFFFFF26",
 
-        "[Default Dark Modern]": {
+        "[Dark Modern]": {
             "list.activeSelectionBackground": "#04395E",
             "list.activeSelectionForeground": "#FFFFFF",
             "list.focusHighlightForeground": "#2AAAFF",
@@ -42,7 +42,7 @@
             "chat.slashCommandForeground": "#40A6FF"
         },
 
-        "[Default Light Modern]": {
+        "[Light Modern]": {
             "list.activeSelectionBackground": "#CDE3F8",
             "list.activeSelectionForeground": "#000000",
             "list.focusHighlightForeground": "#0F4A85",
