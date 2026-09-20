@@ -1,3 +1,4 @@
+import * as fs from 'node:fs/promises';
 import * as vscode from 'vscode';
 import type { Logger } from './log';
 import type { SessionIndex } from './sessionIndex';
@@ -24,6 +25,15 @@ export function isClaudeTab(tab: vscode.Tab): boolean {
   return input instanceof vscode.TabInputWebview && input.viewType.includes(CLAUDE_VIEW_TYPE);
 }
 
+async function sessionWriteAgeMs(file: string): Promise<number | undefined> {
+  try {
+    const stats = await fs.stat(file);
+    return Math.max(0, Date.now() - stats.mtimeMs);
+  } catch {
+    return undefined;
+  }
+}
+
 export function claudeTabs(): vscode.Tab[] {
   return vscode.window.tabGroups.all.flatMap((group) => group.tabs.filter(isClaudeTab));
 }
@@ -36,6 +46,9 @@ export class Syncer {
   private lastActive: { tab: vscode.Tab; label: string } | undefined;
   private tabTimer: NodeJS.Timeout | undefined;
   private terminalTimer: NodeJS.Timeout | undefined;
+  private lastTerminalTouchAt = 0;
+  private lastTabSwitchAt = 0;
+  private pendingReveal: { tab: vscode.Tab; at: number } | undefined;
 
   constructor(
     private readonly index: SessionIndex,
@@ -56,6 +69,7 @@ export class Syncer {
       enabled: cfg.get<boolean>('enabled', true),
       direction: cfg.get<Direction>('direction', 'both'),
       debounceMs: cfg.get<number>('debounceMs', 50),
+      revealSettleMs: cfg.get<number>('revealSettleMs', 250),
     };
   }
 
@@ -103,11 +117,39 @@ export class Syncer {
     return entry?.worktreePath;
   }
 
-  onTabsChanged(): void {
+  private describeTabState(): string {
+    const activeColumn = vscode.window.tabGroups.activeTabGroup?.viewColumn;
+    return vscode.window.tabGroups.all
+      .map((group) => {
+        const mark = group.viewColumn === activeColumn ? '*' : ' ';
+        const active = group.activeTab;
+        const kind = active ? (isClaudeTab(active) ? 'claude' : 'other') : 'none';
+        return `${mark}col${group.viewColumn}=${active ? `"${active.label}"[${kind}]` : '(none)'}`;
+      })
+      .join('  ');
+  }
+
+  onTabsChanged(event?: { changed?: readonly vscode.Tab[] }): void {
     if (this.guard > 0) {
       this.deferred = 'tabs';
       return;
     }
+    this.log.info(`tab event | ${this.describeTabState()}`);
+
+    const pending = this.pendingReveal;
+    if (pending) {
+      if (this.activeClaudeTab() !== pending.tab) {
+        this.pendingReveal = undefined;
+      } else if (event?.changed?.includes(pending.tab)) {
+        this.log.info(`"${pending.tab.label}" changed while still active — re-checking whether to follow it`);
+        clearTimeout(this.tabTimer);
+        this.tabTimer = setTimeout(() => {
+          void this.syncTabToTerminal(pending.tab);
+        }, this.config().debounceMs);
+        return;
+      }
+    }
+
     const changed = this.diffTabs();
     const { enabled, direction, debounceMs } = this.config();
     if (!enabled || direction === 'terminalToTab' || !changed) {
@@ -128,6 +170,7 @@ export class Syncer {
       this.deferred = 'terminal';
       return;
     }
+    this.lastTerminalTouchAt = Date.now();
     const { enabled, direction, debounceMs } = this.config();
     if (!enabled || direction === 'tabToTerminal') {
       return;
@@ -209,16 +252,32 @@ export class Syncer {
     return terminals[0];
   }
 
-  async syncTabToTerminal(tab: vscode.Tab): Promise<void> {
-    if (this.activeClaudeTab() !== tab) {
+  async syncTabToTerminal(tab: vscode.Tab, force = false): Promise<void> {
+    if (!force && this.activeClaudeTab() !== tab) {
       this.log.info(`"${tab.label}" is no longer the active tab — not moving the terminal`);
       return;
     }
-    const key = await this.keyForTab(tab);
+    const entry = await this.index.lookupLabel(tab.label);
+    const key = entry?.worktreePath;
     if (!key) {
       this.log.info(`tab "${tab.label}" — no worktree resolved, skipping`);
       return;
     }
+    const busyFor = await sessionWriteAgeMs(entry.file);
+    const settleMs = this.config().revealSettleMs;
+    const workingInTerminal = this.lastTerminalTouchAt > this.lastTabSwitchAt;
+    const looksLikeReveal = busyFor !== undefined && busyFor < settleMs;
+    if (looksLikeReveal && workingInTerminal && !force) {
+      this.log.info(
+        `tab "${tab.label}" became active ${Math.round(busyFor)}ms after its session last wrote ` +
+          `and you were last working in a terminal — leaving the terminal alone ` +
+          `(run "Worktree Sync: Follow Active Tab" to override)`,
+      );
+      this.pendingReveal = { tab, at: Date.now() };
+      return;
+    }
+    this.pendingReveal = undefined;
+    this.lastTabSwitchAt = Date.now();
     const matches = await this.terminalsForKey(key);
     const active = vscode.window.activeTerminal;
     if (active && matches.includes(active)) {
@@ -287,6 +346,16 @@ export class Syncer {
       return undefined;
     }
     return matches[0];
+  }
+
+  async followActiveTab(): Promise<void> {
+    const tab = this.activeClaudeTab();
+    if (!tab) {
+      void vscode.window.showInformationMessage('Worktree Sync: no Claude tab is active.');
+      return;
+    }
+    this.lastTabSwitchAt = Date.now();
+    await this.syncTabToTerminal(tab, true);
   }
 
   async diagnostics(): Promise<string[]> {

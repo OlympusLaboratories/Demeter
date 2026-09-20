@@ -79,10 +79,15 @@ Run diagnostics first whenever sync goes quiet — it names the reason.
 
 ## Settings
 
+**`direction` defaults to `terminalToTab`, so the terminal never moves on its own.** That
+asymmetry is deliberate: a Claude tab switching under you is visible and harmless, while a
+terminal switching under you gets commands run — and committed — on the wrong branch, often
+mid-keystroke. Set it to `both` only once you've watched the tab→terminal direction behave.
+
 | Setting | Default | |
 |---|---|---|
 | `worktreeSync.enabled` | `true` | |
-| `worktreeSync.direction` | `both` | `both`, `tabToTerminal`, `terminalToTab` |
+| `worktreeSync.direction` | `terminalToTab` | `both`, `tabToTerminal`, `terminalToTab` |
 | `worktreeSync.projectsDir` | `~/.claude/projects` | |
 | `worktreeSync.debounceMs` | `50` | |
 

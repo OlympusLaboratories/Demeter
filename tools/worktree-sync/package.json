@@ -2,7 +2,7 @@
   "name": "worktree-sync",
   "displayName": "Worktree Sync",
   "description": "Keeps the active Claude Code tab and the active terminal on the same git worktree.",
-  "version": "0.1.4",
+  "version": "0.1.12",
   "publisher": "dylanlarrabee",
   "license": "MIT",
   "private": true,
@@ -29,6 +29,10 @@
       {
         "command": "worktreeSync.rebuildIndex",
         "title": "Worktree Sync: Rebuild Session Index"
+      },
+      {
+        "command": "worktreeSync.followActiveTab",
+        "title": "Worktree Sync: Follow Active Tab"
       }
     ],
     "configuration": {
@@ -63,9 +67,21 @@
           "type": "number",
           "default": 50,
           "description": "Debounce applied to tab and terminal change events."
+        },
+        "worktreeSync.revealSettleMs": {
+          "type": "number",
+          "default": 250,
+          "description": "When a Claude tab becomes active within this many ms of its session last writing to its transcript AND you were last working in a terminal, treat it as the session revealing itself on completion rather than a click, and leave the terminal alone. Set to 0 to always follow."
         }
       }
-    }
+    },
+    "keybindings": [
+      {
+        "command": "worktreeSync.followActiveTab",
+        "key": "ctrl+alt+t",
+        "mac": "cmd+alt+t"
+      }
+    ]
   },
   "scripts": {
     "build": "node esbuild.mjs",

@@ -409,7 +409,14 @@ main() {
             info "  Retry with: make -C $tools_dir/$tool_name install"
           fi
         done
-        info "Reload VS Code (Developer: Reload Window) to pick up the new build."
+        if pgrep -f "MacOS/Code$|/usr/share/code/code|Code Helper" >/dev/null 2>&1; then
+          echo ""
+          warn "VS Code is RUNNING. It loads extensions only at window start, so the"
+          warn "build you just installed is NOT active in any open window."
+          warn "Run 'Developer: Reload Window' in each window, or it changes nothing."
+        else
+          info "Reload VS Code (Developer: Reload Window) to pick up the new build."
+        fi
       else
         info "Skipped. Install later with: make -C $tools_dir/<tool> install"
       fi

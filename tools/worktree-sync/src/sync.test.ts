@@ -46,9 +46,20 @@ async function writeSession(
   await fs.mkdir(target, { recursive: true });
   const file = path.join(target, `${sessionId}.jsonl`);
   await fs.writeFile(file, lines.join('\n'), 'utf8');
-  if (mtime) {
-    await fs.utimes(file, mtime, mtime);
-  }
+  const stamp = mtime ?? new Date(Date.now() - 60_000);
+  await fs.utimes(file, stamp, stamp);
+}
+
+async function touchSession(dir: string, sessionId: string): Promise<void> {
+  const file = path.join(root, 'projects', dir, `${sessionId}.jsonl`);
+  const now = new Date();
+  await fs.utimes(file, now, now);
+}
+
+async function ageSession(dir: string, sessionId: string): Promise<void> {
+  const file = path.join(root, 'projects', dir, `${sessionId}.jsonl`);
+  const old = new Date(Date.now() - 60_000);
+  await fs.utimes(file, old, old);
 }
 
 beforeAll(async () => {
@@ -180,6 +191,7 @@ describe('activation', () => {
   it('registers its commands and builds the index', () => {
     expect([...state.registered.keys()].sort()).toEqual([
       'worktreeSync.diagnostics',
+      'worktreeSync.followActiveTab',
       'worktreeSync.rebuildIndex',
       'worktreeSync.toggle',
     ]);
@@ -308,6 +320,125 @@ describe('terminal to Claude tab', () => {
 });
 
 describe('background session activity', () => {
+  it('does not move the terminal when a finishing session reveals its own tab', async () => {
+    activateTab(f.tab2405);
+    onDidChangeTabs.fire({});
+    await settle();
+    state.showCalls = [];
+
+    // The user is working in a terminal, not clicking tabs.
+    state.activeTerminal = f.t2405;
+    onDidChangeActiveTerminal.fire(f.t2405);
+    await settle();
+    state.showCalls = [];
+    state.commandCalls = [];
+
+    // PLAT-2401 finishes: it writes to its transcript and reveals its panel, so
+    // VS Code reports its tab as active without the user having clicked it.
+    await touchSession('wt-2401', 's2401');
+    activateTab(f.tab2401);
+    onDidChangeTabs.fire({});
+    await settle();
+
+    expect(state.showCalls).toEqual([]);
+    expect(state.logLines.some((l) => l.includes('leaving the terminal alone'))).toBe(true);
+  });
+
+  it('follows a reveal when the user was last clicking tabs, not using a terminal', async () => {
+    activateTab(f.tab2405);
+    onDidChangeTabs.fire({});
+    await settle();
+    state.showCalls = [];
+
+    await touchSession('wt-2401', 's2401');
+    activateTab(f.tab2401);
+    onDidChangeTabs.fire({});
+    await settle();
+
+    expect(state.showCalls).toEqual(['zsh 2401:preserveFocus=true']);
+  });
+
+  it('follows the active tab on demand even when the guard would block it', async () => {
+    activateTab(f.tab2405);
+    onDidChangeTabs.fire({});
+    await settle();
+    state.activeTerminal = f.t2405;
+    onDidChangeActiveTerminal.fire(f.t2405);
+    await settle();
+    state.showCalls = [];
+
+    await touchSession('wt-2401', 's2401');
+    activateTab(f.tab2401);
+    onDidChangeTabs.fire({});
+    await settle();
+    expect(state.showCalls).toEqual([]);
+
+    await state.registered.get('worktreeSync.followActiveTab')?.();
+    await settle();
+    expect(state.showCalls).toEqual(['zsh 2401:preserveFocus=true']);
+  });
+
+  it('recovers automatically: reveal is ignored, then clicking that tab follows it', async () => {
+    // You are working in the PLAT-2405 terminal.
+    activateTab(f.tab2405);
+    onDidChangeTabs.fire({ changed: [f.tab2405] });
+    await settle();
+    state.activeTerminal = f.t2405;
+    onDidChangeActiveTerminal.fire(f.t2405);
+    await settle();
+    state.showCalls = [];
+
+    // PLAT-2401 finishes and reveals its own tab. Terminal must not move.
+    await touchSession('wt-2401', 's2401');
+    activateTab(f.tab2401);
+    onDidChangeTabs.fire({ changed: [f.tab2401] });
+    await settle();
+    expect(state.showCalls).toEqual([]);
+
+    // You then click that already-active tab. Claude clears its "done" icon,
+    // which fires a change event naming the tab. The session is quiet by now.
+    await ageSession('wt-2401', 's2401');
+    onDidChangeTabs.fire({ changed: [f.tab2401] });
+    await settle();
+    expect(state.showCalls).toEqual(['zsh 2401:preserveFocus=true']);
+  });
+
+  it('a different session finishing does not un-stick the pending tab', async () => {
+    activateTab(f.tab2405);
+    onDidChangeTabs.fire({ changed: [f.tab2405] });
+    await settle();
+    state.activeTerminal = f.t2405;
+    onDidChangeActiveTerminal.fire(f.t2405);
+    await settle();
+    state.showCalls = [];
+
+    await touchSession('wt-2401', 's2401');
+    activateTab(f.tab2401);
+    onDidChangeTabs.fire({ changed: [f.tab2401] });
+    await settle();
+    expect(state.showCalls).toEqual([]);
+
+    // PLAT-2406 finishes in the background: names a different tab, so ignored.
+    await ageSession('wt-2401', 's2401');
+    onDidChangeTabs.fire({ changed: [f.tab2406] });
+    await settle();
+    expect(state.showCalls).toEqual([]);
+  });
+
+  it('still follows a click on a session that has been idle', async () => {
+    await ageSession('wt-2401', 's2401');
+    activateTab(f.tab2405);
+    onDidChangeTabs.fire({});
+    await settle();
+    state.showCalls = [];
+
+    activateTab(f.tab2401);
+    onDidChangeTabs.fire({});
+    await settle();
+
+    expect(state.showCalls).toEqual(['zsh 2401:preserveFocus=true']);
+  });
+
   it('does not move the terminal when a background tab gains a dot', async () => {
     activateTab(f.tab2401);
     onDidChangeTabs.fire({});
