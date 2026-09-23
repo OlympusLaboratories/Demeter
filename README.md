@@ -12,6 +12,7 @@ Demeter/
 │   └── .bash_profile
 ├── _vendor/            # vendor packages — skills + tools (git submodules)
 ├── tools/              # first-party projects, shared by every profile
+│   ├── claude-usage/   # VS Code extension, synced to ~/.claude/tools/
 │   └── worktree-sync/  # VS Code extension, synced to ~/.claude/tools/
 ├── vscode/             # editor settings, shared by every profile
 │   ├── settings.json   # symlinked over VS Code's user settings.json
@@ -225,11 +226,27 @@ Each profile's shell config also defines `go` (worktree-aware `git checkout` —
 ~/.claude/hooks/link-worktree-session.py --backfill
 ```
 
+### Claude Usage Extension
+
+`tools/claude-usage/` is a VS Code extension that shows your Claude session and weekly quota in the status bar, so you don't have to run the usage skill to find out how close you are to a limit:
+
+```
+Session ●●○○○○ 33% 1h20m   Weekly ●●●○○○ 53% 5d20h   ⟳ now
+```
+
+Each meter is a label, a bar, the percent used, and the time until that window resets. Bar glyphs are configurable — run **Claude Usage: Choose Bar Style** to preview them live, since the status bar is drawn in the UI font and which glyphs look right depends on it. The chip on the end is the age of the reading; it turns yellow with a retry countdown when a fetch is failing or rate limited, so a percentage that has quietly stopped moving is obvious rather than silently wrong. It reads `https://api.anthropic.com/api/oauth/usage` — the endpoint behind Claude Code's `/usage` — once a minute while the window is focused, and not at all while it isn't.
+
+That is once a minute *in total*, not per window. Every window runs its own copy of the extension, so they coordinate through a cache in `~/Library/Caches/claude-usage/` (`$XDG_CACHE_HOME/claude-usage/` on Linux): whichever window is due first takes a lock file and fetches, the rest read what it wrote and update together through a directory watch. Six open windows still make one request a minute.
+
+By default it borrows the login Claude Code already has: the `Claude Code-credentials` keychain item on macOS, `~/.claude/.credentials.json` elsewhere. That read is one-way — it never writes to or refreshes Claude Code's token, so it can't disturb your CLI session. Claude Code's access token only lasts a day, though, and only Claude Code renews it. If you'd rather the meters not depend on that, run **Claude Usage: Sign In With Browser** once: the extension does its own PKCE login in your real default browser (never a webview, so Okta SSO works), keeps the tokens in VS Code's `SecretStorage`, and refreshes them itself.
+
+Installed the same way as any tool here, and configurable down to the bar glyphs. See [tools/claude-usage/README.md](tools/claude-usage/README.md) for the full settings table and the copy-paste sign-in fallback.
+
 ### Worktree Sync Extension
 
 `tools/worktree-sync/` is a VS Code extension that keeps the active **Claude Code tab** and the active **terminal** on the same worktree in both directions, so you can't type a prompt into one worktree's session while running commands in another. It is shared by every profile.
 
-`install.sh` links the source into `~/.claude/tools/` and then offers to build and install it. Answer yes and there is nothing else to do; the prompt exists because the build takes a couple of minutes. To do it by hand, or after editing the source:
+`install.sh` links every tool's source into `~/.claude/tools/` and then offers to build and install the ones exposing a Makefile `install` target. Answer yes and there is nothing else to do; the prompt exists because the build takes a couple of minutes. To do one by hand, or after editing the source:
 
 ```bash
 make -C ~/.claude/tools/worktree-sync install

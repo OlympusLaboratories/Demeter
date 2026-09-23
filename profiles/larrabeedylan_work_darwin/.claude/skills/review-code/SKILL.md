@@ -158,7 +158,11 @@ for l in open(d):
     m=(json.loads(l).get('message') or {})
     if m.get('role')!='user': continue
     c=m.get('content'); t=c if isinstance(c,str) else ' '.join(x.get('text','') for x in c if isinstance(x,dict))
-    i=t.find('Unified diff'); print(t[i:i+300] if i>=0 else 'NO DIFF SECTION'); break
+    i=t.find('Unified diff')
+    if i<0: continue          # the FIRST user message is a harness preamble, not the task
+    print(t[i:i+300]); break
+else:
+    print('NO DIFF SECTION IN ANY USER MESSAGE')
 PY
 ```
 

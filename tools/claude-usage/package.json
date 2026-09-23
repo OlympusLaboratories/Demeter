@@ -1,0 +1,196 @@
+{
+  "name": "claude-usage",
+  "displayName": "Claude Usage",
+  "description": "Shows Claude session and weekly quota usage as bars in the status bar.",
+  "version": "0.4.0",
+  "publisher": "dylanlarrabee",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "claudeUsage.refresh",
+        "title": "Claude Usage: Refresh Now"
+      },
+      {
+        "command": "claudeUsage.signIn",
+        "title": "Claude Usage: Sign In With Browser"
+      },
+      {
+        "command": "claudeUsage.signOut",
+        "title": "Claude Usage: Sign Out (Forget Browser Login)"
+      },
+      {
+        "command": "claudeUsage.showDetails",
+        "title": "Claude Usage: Show Details"
+      },
+      {
+        "command": "claudeUsage.pickBarStyle",
+        "title": "Claude Usage: Choose Bar Style"
+      }
+    ],
+    "configuration": {
+      "title": "Claude Usage",
+      "properties": {
+        "claudeUsage.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Claude quota usage in the status bar."
+        },
+        "claudeUsage.pollSeconds": {
+          "type": "number",
+          "default": 60,
+          "minimum": 15,
+          "description": "How often to refresh usage, in seconds. The extension backs off automatically on errors and skips polling while the window is not focused."
+        },
+        "claudeUsage.credentials": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "claudeCode",
+            "browser"
+          ],
+          "default": "auto",
+          "enumDescriptions": [
+            "Use the Claude Code login when it has a usable token, otherwise use the browser login stored by this extension.",
+            "Only use the Claude Code login. Never prompt to sign in.",
+            "Only use this extension's own browser login."
+          ],
+          "description": "Where to get the access token."
+        },
+        "claudeUsage.show": {
+          "type": "array",
+          "default": [
+            "session",
+            "weekly"
+          ],
+          "items": {
+            "type": "string",
+            "enum": [
+              "session",
+              "weekly",
+              "scoped",
+              "spend"
+            ]
+          },
+          "uniqueItems": true,
+          "description": "Which meters to show: the 5-hour session window, the 7-day window, per-model 7-day windows, and extra-usage spend."
+        },
+        "claudeUsage.labelStyle": {
+          "type": "string",
+          "enum": [
+            "long",
+            "short"
+          ],
+          "default": "long",
+          "enumDescriptions": [
+            "Session, Weekly, Credits.",
+            "5h, 7d, $."
+          ],
+          "description": "How each meter is labelled. Short labels take less room in the status bar."
+        },
+        "claudeUsage.age": {
+          "type": "string",
+          "enum": [
+            "always",
+            "whenStale",
+            "never"
+          ],
+          "default": "always",
+          "enumDescriptions": [
+            "Always show how long ago the reading was taken.",
+            "Only show it once the reading is overdue or a backoff is in effect.",
+            "Never show it; the tooltip still has it."
+          ],
+          "description": "Show a chip with the age of the reading, which turns into a warning with a retry countdown while backing off."
+        },
+        "claudeUsage.barWidth": {
+          "type": "number",
+          "default": 6,
+          "minimum": 0,
+          "maximum": 20,
+          "description": "Number of cells in each bar. Set to 0 to show percentages without a bar."
+        },
+        "claudeUsage.barStyle": {
+          "type": "string",
+          "enum": [
+            "dots",
+            "squares",
+            "bars",
+            "blocks",
+            "shaded",
+            "line",
+            "ascii"
+          ],
+          "default": "dots",
+          "description": "Glyphs used to draw the bars. Run \"Claude Usage: Choose Bar Style\" to preview these live in your status bar.",
+          "enumDescriptions": [
+            "\u25cf\u25cf\u25cb\u25cb\u25cb\u25cb \u2014 circles, the most widely drawn shapes in UI fonts.",
+            "\u25a0\u25a0\u25a1\u25a1\u25a1\u25a1 \u2014 squares.",
+            "\u25ae\u25ae\u25af\u25af\u25af\u25af \u2014 upright bars.",
+            "\u2588\u2588\u2591\u2591\u2591\u2591 \u2014 block elements; solid but often font-fallback, so cells can mismatch.",
+            "\u25b0\u25b0\u25b1\u25b1\u25b1\u25b1 \u2014 parallelograms.",
+            "\u2501\u2501\u2500\u2500\u2500\u2500 \u2014 a continuous rule.",
+            "##---- \u2014 plain ASCII, guaranteed to render anywhere."
+          ]
+        },
+        "claudeUsage.showReset": {
+          "type": "boolean",
+          "default": true,
+          "description": "Append the time remaining until each window resets."
+        },
+        "claudeUsage.warnAtPercent": {
+          "type": "number",
+          "default": 75,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Colour a meter as a warning at or above this percentage."
+        },
+        "claudeUsage.criticalAtPercent": {
+          "type": "number",
+          "default": 90,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Colour a meter as critical at or above this percentage."
+        },
+        "claudeUsage.alignment": {
+          "type": "string",
+          "enum": [
+            "left",
+            "right"
+          ],
+          "default": "right",
+          "description": "Which side of the status bar to place the meters on."
+        },
+        "claudeUsage.priority": {
+          "type": "number",
+          "default": 100,
+          "description": "Status bar priority. Higher numbers sit further left within the chosen side."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.93.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}
