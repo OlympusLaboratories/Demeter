@@ -2,7 +2,7 @@
   "name": "claude-usage",
   "displayName": "Claude Usage",
   "description": "Shows Claude session and weekly quota usage as bars in the status bar.",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "publisher": "dylanlarrabee",
   "license": "MIT",
   "private": true,
@@ -51,7 +51,19 @@
           "type": "number",
           "default": 60,
           "minimum": 15,
-          "description": "How often to refresh usage, in seconds. The extension backs off automatically on errors and skips polling while the window is not focused."
+          "description": "How often to refresh while the numbers are still moving, in seconds. The extension eases off toward claudeUsage.idlePollSeconds once readings stop changing, shares one request across every editor window, skips polling while the window is not focused, and backs off on errors."
+        },
+        "claudeUsage.idlePollSeconds": {
+          "type": "number",
+          "default": 600,
+          "minimum": 15,
+          "description": "Slowest refresh interval, used once the numbers have been steady for a while. Set it equal to claudeUsage.pollSeconds to poll at a fixed rate."
+        },
+        "claudeUsage.steadyAfter": {
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "description": "How many identical readings in a row before the extension starts easing off."
         },
         "claudeUsage.credentials": {
           "type": "string",

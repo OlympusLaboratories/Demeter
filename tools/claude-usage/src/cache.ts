@@ -11,6 +11,7 @@ export interface CacheRecord {
   source?: string;
   notice?: string;
   retryUntil?: number;
+  intervalMs?: number;
 }
 
 export function defaultCacheDir(
@@ -73,6 +74,9 @@ export function parseRecord(text: string): CacheRecord | undefined {
   }
   if (typeof record['retryUntil'] === 'number') {
     result.retryUntil = record['retryUntil'] as number;
+  }
+  if (typeof record['intervalMs'] === 'number') {
+    result.intervalMs = record['intervalMs'] as number;
   }
   return result;
 }

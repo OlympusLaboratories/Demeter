@@ -46,8 +46,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const syncer = new Syncer(index, log);
 
   log.info('activated');
-  void warnIfStaleBuildIsRunning(log);
-  void index.ensureFresh(true);
+  warnIfStaleBuildIsRunning(log).catch((error) => log.info(`stale build check failed: ${String(error)}`));
+  index.ensureFresh(true).catch((error) => log.info(`initial session scan failed: ${String(error)}`));
 
   context.subscriptions.push(
     log,

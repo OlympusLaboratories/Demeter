@@ -82,7 +82,7 @@ export function formatRemaining(ms: number): string {
   }
   const totalMinutes = Math.floor(ms / 60_000);
   if (totalMinutes < 1) {
-    return '<1m';
+    return `${Math.floor(ms / 1000)}s`;
   }
   const days = Math.floor(totalMinutes / 1440);
   const hours = Math.floor((totalMinutes % 1440) / 60);

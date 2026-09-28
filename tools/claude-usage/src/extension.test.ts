@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -263,6 +264,66 @@ describe('activate', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     await stub.state.commands.get('claudeUsage.refresh')!();
     expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('eases off once readings stop changing, and snaps back when they move', async () => {
+    let percent = 40;
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        jsonResponse({
+          limits: [
+            {
+              kind: 'session',
+              percent,
+              severity: 'normal',
+              resets_at: new Date(Date.now() + 3_600_000).toISOString(),
+            },
+          ],
+        }),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    stub.state.config['pollSeconds'] = 60;
+    stub.state.config['idlePollSeconds'] = 600;
+    stub.state.config['steadyAfter'] = 2;
+
+    activate(context as never);
+    await settle();
+
+    const interval = async () => {
+      const raw = await fsp.readFile(path.join(cacheDir, 'usage.json'), 'utf8');
+      return (JSON.parse(raw) as { intervalMs: number }).intervalMs;
+    };
+    const refresh = () => stub.state.commands.get('claudeUsage.refresh')!();
+
+    expect(await interval()).toBe(60_000);
+
+    await refresh();
+    expect(await interval()).toBe(60_000);
+    await refresh();
+    expect(await interval()).toBe(120_000);
+    await refresh();
+    expect(await interval()).toBe(240_000);
+    await refresh();
+    expect(await interval()).toBe(480_000);
+    await refresh();
+    expect(await interval()).toBe(600_000);
+    await refresh();
+    expect(await interval()).toBe(600_000);
+
+    percent = 41;
+    await refresh();
+    expect(await interval()).toBe(60_000);
+  });
+
+  it('shares the eased-off interval with other windows through the cache', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(payload())));
+    vi.stubGlobal('fetch', fetchMock);
+    activate(context as never);
+    await settle();
+
+    const raw = await fsp.readFile(path.join(cacheDir, 'usage.json'), 'utf8');
+    expect(JSON.parse(raw).intervalMs).toBeGreaterThanOrEqual(60_000);
   });
 
   it('registers the commands it contributes', async () => {

@@ -58,8 +58,12 @@ export const state = {
   commandCalls: [] as string[],
   showCalls: [] as string[],
   infoMessages: [] as string[],
+  warningMessages: [] as string[],
+  warningChoice: undefined as string | undefined,
   registered: new Map<string, (...args: unknown[]) => unknown>(),
   logLines: [] as string[],
+  extensionId: 'dylanlarrabee.worktree-sync',
+  extension: undefined as { packageJSON?: { version?: string }; extensionPath?: string } | undefined,
   config: {
     enabled: true,
     direction: 'both',
@@ -85,6 +89,10 @@ export const window = {
   showInformationMessage: (message: string) => {
     state.infoMessages.push(message);
     return Promise.resolve(undefined);
+  },
+  showWarningMessage: (message: string) => {
+    state.warningMessages.push(message);
+    return Promise.resolve(state.warningChoice);
   },
   get terminals() {
     return state.terminals;
@@ -115,6 +123,10 @@ export const workspace = {
       return Promise.resolve();
     },
   }),
+};
+
+export const extensions = {
+  getExtension: (id: string) => (id === state.extensionId ? state.extension : undefined),
 };
 
 export const commands = {
@@ -165,8 +177,11 @@ export function resetState(): void {
   state.commandCalls = [];
   state.showCalls = [];
   state.infoMessages = [];
+  state.warningMessages = [];
+  state.warningChoice = undefined;
   state.registered = new Map();
   state.logLines = [];
+  state.extension = undefined;
   state.config = {
     enabled: true,
     direction: 'both',

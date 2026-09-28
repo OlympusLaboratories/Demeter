@@ -87,7 +87,8 @@ describe('formatRemaining', () => {
   });
 
   it('degrades gracefully near and past the reset', () => {
-    expect(formatRemaining(30_000)).toBe('<1m');
+    expect(formatRemaining(45_000)).toBe('45s');
+    expect(formatRemaining(30_000)).toBe('30s');
     expect(formatRemaining(0)).toBe('now');
     expect(formatRemaining(-5_000)).toBe('now');
     expect(formatRemaining(Number.NaN)).toBe('now');

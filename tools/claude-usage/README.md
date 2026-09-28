@@ -77,13 +77,54 @@ and `auto` mode quietly falls back to the browser login.
 
 ## Polling, and why it is one request no matter how many windows you have
 
-Every `claudeUsage.pollSeconds` (default 60), and immediately when the window
-regains focus. Timer polls are skipped entirely while the window is unfocused,
+Every `claudeUsage.pollSeconds` (default 60) while the numbers are moving, and
+immediately when the window regains focus. Timer polls are skipped entirely while the window is unfocused,
 so a backgrounded editor makes no requests. Failures back off exponentially from
 1 minute to 15 minutes, and a `429` honours `Retry-After`. The reset countdowns
 re-render every 30 seconds without hitting the network.
 
-Every editor window runs its own copy of the extension, so without coordination
+You are not the only thing reading this endpoint. Claude Code itself polls
+`/api/oauth/usage` from **every running session** — that is where its own
+`/usage` numbers come from — and the rate limit is per account, so the CLI and
+this extension spend the same budget. Two things keep this extension's share
+small.
+
+**It only asks when the answer can have changed.** Your quota moves when you are
+running Claude and is perfectly flat when you are not, so a fixed one-minute poll
+spends most of its requests re-reading identical numbers. Each reading is
+compared with the one before it; after `claudeUsage.steadyAfter` identical
+readings in a row (default 2) the interval doubles each time, up to
+`claudeUsage.idlePollSeconds` (default 600). Any movement in any percentage
+resets it to `claudeUsage.pollSeconds` immediately.
+
+```
+identical readings:  0     1     2      3      4      5+
+interval:           60s   60s   120s   240s   480s   600s
+```
+
+So an idle editor settles at one request per ten minutes, while an editor where
+you are actively burning quota stays at one a minute. The tooltip says which rate
+is in force. Set `idlePollSeconds` equal to `pollSeconds` to switch this off and
+poll at a fixed rate.
+
+**Easing off never delays a reset.** The countdowns do not need the network at
+all: `resets_at` is an absolute timestamp, so the time remaining is recomputed
+locally and stays exact no matter how slow the polling is. Only the percentage
+goes stale. But the reset itself matters — that is the moment the percentage
+drops and a new window opens, and it is exactly when you are watching — so the
+next poll is never scheduled past the soonest reset. However relaxed the pacing
+has become, a window resetting in three minutes is fetched in three minutes, not
+in ten. Inside the last two minutes the display also ticks every second rather
+than every ten, so the final countdown runs smoothly:
+
+```
+Session ●●●●●● 100% 1m     one fetch, then
+Session ●●●●●● 100% 35s    rendered locally
+Session ●●●●●● 100% 5s     no network
+Session ●●●●●● 100% now    → poll fires here, new window picked up at once
+```
+
+**And it asks once for all of your windows.** Every editor window runs its own copy of the extension, so without coordination
 six open windows would mean six requests a minute — enough to get rate limited,
 which is exactly what happened the first time this shipped. Instead the windows
 share one reading through a small cache on disk:
@@ -113,7 +154,9 @@ except while a shared rate-limit backoff is in effect.
 | Setting | Default | What it does |
 | --- | --- | --- |
 | `claudeUsage.enabled` | `true` | Show the meters at all. |
-| `claudeUsage.pollSeconds` | `60` | Refresh interval, minimum 15. |
+| `claudeUsage.pollSeconds` | `60` | Refresh interval while readings keep changing, minimum 15. |
+| `claudeUsage.idlePollSeconds` | `600` | Slowest interval, used once readings go steady. Equal to `pollSeconds` disables easing off. |
+| `claudeUsage.steadyAfter` | `2` | Identical readings in a row before easing off starts. |
 | `claudeUsage.credentials` | `auto` | `auto`, `claudeCode`, or `browser`. |
 | `claudeUsage.show` | `["session","weekly"]` | Any of `session`, `weekly`, `scoped`, `spend`. |
 | `claudeUsage.labelStyle` | `long` | `long` gives `Session`/`Weekly`/`Credits`, `short` gives `5h`/`7d`/`$`. |

@@ -197,6 +197,42 @@ describe('activation', () => {
     ]);
     expect(state.logLines.some((line) => line.includes('indexed'))).toBe(true);
   });
+
+  it('activates cleanly against the whole vscode surface it touches', async () => {
+    const extRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'worktree-sync-ext-'));
+    await fs.mkdir(path.join(extRoot, 'dylanlarrabee.worktree-sync-0.1.12'));
+    state.extension = {
+      packageJSON: { version: '0.1.12' },
+      extensionPath: path.join(extRoot, 'dylanlarrabee.worktree-sync-0.1.12'),
+    };
+    state.logLines = [];
+
+    activate({ subscriptions: [] } as never);
+    await settle();
+
+    expect(state.logLines.some((line) => line.includes('newest installed'))).toBe(true);
+    expect(state.warningMessages).toEqual([]);
+  });
+
+  it('warns when a newer build is installed than the one running', async () => {
+    const extRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'worktree-sync-ext-'));
+    await fs.mkdir(path.join(extRoot, 'dylanlarrabee.worktree-sync-0.1.12'));
+    await fs.mkdir(path.join(extRoot, 'dylanlarrabee.worktree-sync-0.2.0'));
+    state.extension = {
+      packageJSON: { version: '0.1.12' },
+      extensionPath: path.join(extRoot, 'dylanlarrabee.worktree-sync-0.1.12'),
+    };
+    state.warningChoice = 'Reload Window';
+    state.logLines = [];
+    state.commandCalls = [];
+
+    activate({ subscriptions: [] } as never);
+    await settle();
+
+    expect(state.logLines.some((line) => line.includes('reload required'))).toBe(true);
+    expect(state.warningMessages.join(' ')).toContain('0.2.0');
+    expect(state.commandCalls).toContain('workbench.action.reloadWindow');
+  });
 });
 
 describe('Claude tab to terminal', () => {

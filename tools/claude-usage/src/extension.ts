@@ -19,6 +19,7 @@ import {
   renderBar,
 } from './format';
 import { Logger } from './log';
+import { clockInterval, nextInterval, pollDelay, readingOf } from './pacing';
 import { CacheRecord, UsageCache } from './cache';
 import { UsageFailure, UsageSnapshot, fetchUsage } from './usage';
 
@@ -31,6 +32,8 @@ const FRESH_FRACTION = 0.9;
 interface Settings {
   enabled: boolean;
   pollMs: number;
+  idlePollMs: number;
+  steadyAfter: number;
   credentials: CredentialMode;
   show: MeterGroup[];
   alignment: vscode.StatusBarAlignment;
@@ -45,6 +48,8 @@ function readSettings(): Settings {
   return {
     enabled: config.get<boolean>('enabled', true),
     pollMs: Math.max(15, config.get<number>('pollSeconds', 60)) * 1000,
+    idlePollMs: Math.max(15, config.get<number>('idlePollSeconds', 600)) * 1000,
+    steadyAfter: Math.max(1, config.get<number>('steadyAfter', 2)),
     credentials: config.get<CredentialMode>('credentials', 'auto'),
     show: GROUP_ORDER.filter((group) => show.includes(group)),
     alignment:
@@ -90,6 +95,9 @@ class UsageController {
   private lastSource: ResolvedToken['source'] | undefined;
   private adoptedAt = 0;
   private stylePreview: BarStyle | undefined;
+  private unchanged = 0;
+  private lastReading = '';
+  private clockMs = 0;
   private updatedAt: number | undefined;
   private cacheWatch: { dispose(): void } | undefined;
 
@@ -125,17 +133,53 @@ class UsageController {
       clearTimeout(this.timer);
       this.timer = undefined;
     }
-    if (this.clock) {
-      clearInterval(this.clock);
-      this.clock = undefined;
-    }
     if (!this.settings.enabled) {
+      if (this.clock) {
+        clearInterval(this.clock);
+        this.clock = undefined;
+        this.clockMs = 0;
+      }
       return;
     }
-    const base = Math.max(this.settings.pollMs, this.backoffMs);
-    const delay = base + Math.floor(Math.random() * Math.min(5_000, base * 0.1));
+    const base = Math.max(this.effectiveIntervalMs(), this.backoffMs);
+    const jittered = base + Math.floor(Math.random() * Math.min(5_000, base * 0.1));
+    const delay = pollDelay({ intervalMs: jittered, resetTimes: this.resetTimes(), now: Date.now() });
     this.timer = setTimeout(() => void this.poll('timer'), delay);
-    this.clock = setInterval(() => this.render(), 10_000);
+    this.startClock();
+  }
+
+  private resetTimes(): number[] {
+    return (this.snapshot?.meters ?? [])
+      .map((meter) => meter.resetsAt)
+      .filter((resetsAt): resetsAt is number => resetsAt !== undefined);
+  }
+
+  private startClock(): void {
+    const wanted = clockInterval(this.resetTimes(), Date.now());
+    if (this.clock !== undefined && wanted === this.clockMs) {
+      return;
+    }
+    if (this.clock) {
+      clearInterval(this.clock);
+    }
+    this.clockMs = wanted;
+    this.clock = setInterval(() => this.tick(), wanted);
+  }
+
+  private tick(): void {
+    this.render();
+    if (clockInterval(this.resetTimes(), Date.now()) !== this.clockMs) {
+      this.startClock();
+    }
+  }
+
+  private effectiveIntervalMs(): number {
+    return nextInterval({
+      activeMs: this.settings.pollMs,
+      idleMs: this.settings.idlePollMs,
+      unchanged: this.unchanged,
+      steadyAfter: this.settings.steadyAfter,
+    });
   }
 
   async refreshNow(): Promise<void> {
@@ -180,6 +224,9 @@ class UsageController {
           this.backoffMs = 0;
           this.retryUntil = undefined;
           this.updatedAt = result.snapshot.fetchedAt;
+          const reading = readingOf(result.snapshot.meters);
+          this.unchanged = reading === this.lastReading ? this.unchanged + 1 : 0;
+          this.lastReading = reading;
           this.logger.info(
             `Usage refreshed via ${token.source} (${reason}): ${result.snapshot.meters
               .map((meter) => `${meter.label} ${formatPercent(meter.percent)}`)
@@ -213,7 +260,8 @@ class UsageController {
     if (reason === 'manual') {
       return false;
     }
-    return cached.snapshot !== undefined && now - cached.updatedAt < this.settings.pollMs * FRESH_FRACTION;
+    const interval = Math.max(cached.intervalMs ?? this.settings.pollMs, this.settings.pollMs);
+    return cached.snapshot !== undefined && now - cached.updatedAt < interval * FRESH_FRACTION;
   }
 
   private adopt(cached: CacheRecord): void {
@@ -224,6 +272,11 @@ class UsageController {
       this.lastSource = cached.source;
     }
     this.updatedAt = cached.snapshot?.fetchedAt ?? cached.updatedAt;
+    const reading = readingOf(cached.snapshot?.meters);
+    if (reading !== this.lastReading) {
+      this.unchanged = 0;
+      this.lastReading = reading;
+    }
     this.retryUntil = cached.retryUntil;
     if (cached.retryUntil !== undefined) {
       this.backoffMs = Math.max(0, cached.retryUntil - Date.now());
@@ -237,6 +290,7 @@ class UsageController {
       source: this.lastSource,
       notice: this.notice,
       retryUntil: this.retryUntil,
+      intervalMs: this.effectiveIntervalMs(),
     });
   }
 
@@ -354,7 +408,7 @@ class UsageController {
       updatedAt: this.updatedAt,
       retryUntil: this.retryUntil,
       now,
-      pollMs: this.settings.pollMs,
+      pollMs: this.effectiveIntervalMs(),
       mode: this.settings.age,
     });
     if (chip && (meters.length > 0 || this.snapshot !== undefined)) {
@@ -398,7 +452,12 @@ class UsageController {
       if (this.retryUntil !== undefined && this.retryUntil > now) {
         md.appendMarkdown(` · backing off, next try in ${formatRemaining(this.retryUntil - now)}`);
       }
-      md.appendMarkdown(` · source: ${this.lastSource === 'browser' ? 'browser login' : 'Claude Code login'}\n`);
+      md.appendMarkdown(` · source: ${this.lastSource === 'browser' ? 'browser login' : 'Claude Code login'}`);
+      md.appendMarkdown(` · checking every ${formatRemaining(this.effectiveIntervalMs())}`);
+      if (this.unchanged >= this.settings.steadyAfter) {
+        md.appendMarkdown(' (eased off while the numbers are steady)');
+      }
+      md.appendMarkdown('\n');
     }
 
     if (this.notice) {
