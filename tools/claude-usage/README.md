@@ -139,7 +139,11 @@ share one reading through a small cache on disk:
   fetches; the rest read what it wrote. A lock left behind by a crashed window is
   broken after 60 seconds.
 - The winner's write is picked up by every other window through a directory
-  watch, so they all update together rather than drifting a minute apart.
+  watch, so they all update together rather than drifting a minute apart. That
+  watch is best effort — `fs.watch` is silently useless on some filesystems, and
+  Linux refuses new watches once `fs.inotify.max_user_watches` is exhausted — so
+  it is backed by a cheap `stat` of the cache file every few seconds. Delivery is
+  guaranteed by the `stat`; `fs.watch` only makes it instant.
 - Rate-limit backoff is shared too: one window's `429` parks all of them until
   the retry time, instead of each discovering the limit separately.
 

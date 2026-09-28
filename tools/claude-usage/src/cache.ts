@@ -81,6 +81,8 @@ export function parseRecord(text: string): CacheRecord | undefined {
   return result;
 }
 
+export const DEFAULT_WATCH_POLL_MS = 5_000;
+
 export class UsageCache {
   private readonly file: string;
   private readonly lockFile: string;
@@ -144,30 +146,66 @@ export class UsageCache {
     }
   }
 
-  watch(onChange: () => void): { dispose(): void } {
+  watch(onChange: () => void, options: { pollMs?: number } = {}): { dispose(): void } {
+    const pollMs = options.pollMs ?? DEFAULT_WATCH_POLL_MS;
     let watcher: fs.FSWatcher | undefined;
-    let timer: NodeJS.Timeout | undefined;
+    let debounce: NodeJS.Timeout | undefined;
+    let stamp = this.stampOf();
+
+    const fire = () => {
+      const next = this.stampOf();
+      if (next === stamp) {
+        return;
+      }
+      stamp = next;
+      onChange();
+    };
+
+    const schedule = () => {
+      if (debounce) {
+        clearTimeout(debounce);
+      }
+      debounce = setTimeout(fire, 50);
+      debounce.unref?.();
+    };
+
     try {
       fs.mkdirSync(this.dir, { recursive: true });
       watcher = fs.watch(this.dir, (_event, filename) => {
         if (filename !== null && !filename.toString().startsWith('usage.json')) {
           return;
         }
-        if (timer) {
-          clearTimeout(timer);
-        }
-        timer = setTimeout(onChange, 150);
+        schedule();
+      });
+      watcher.on('error', () => {
+        watcher?.close();
+        watcher = undefined;
       });
     } catch {
       watcher = undefined;
     }
+
+    const ticker = setInterval(fire, pollMs);
+    ticker.unref?.();
+
     return {
       dispose() {
-        if (timer) {
-          clearTimeout(timer);
+        if (debounce) {
+          clearTimeout(debounce);
         }
+        clearInterval(ticker);
         watcher?.close();
+        watcher = undefined;
       },
     };
+  }
+
+  private stampOf(): string {
+    try {
+      const stats = fs.statSync(this.file);
+      return `${stats.mtimeMs}:${stats.size}`;
+    } catch {
+      return '';
+    }
   }
 }

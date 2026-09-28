@@ -2,7 +2,25 @@ import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const watchControl = vi.hoisted(() => ({ throwEnospc: false }));
+
+vi.mock('node:fs', async (importActual) => {
+  const actual = await importActual<typeof import('node:fs')>();
+  return {
+    ...actual,
+    default: actual,
+    watch: (...args: Parameters<typeof actual.watch>) => {
+      if (watchControl.throwEnospc) {
+        throw Object.assign(new Error('ENOSPC: System limit for number of file watchers reached'), {
+          code: 'ENOSPC',
+        });
+      }
+      return actual.watch(...args);
+    },
+  };
+});
 import { UsageCache, defaultCacheDir, parseRecord } from './cache';
 
 const snapshot = {
@@ -113,19 +131,93 @@ describe('UsageCache', () => {
     expect(await cache.withLock(60_000, async () => 'recovered')).toBe('recovered');
   });
 
-  it('notifies a watcher when another instance writes', async () => {
+  it('notifies a watcher when another instance writes, without relying on inotify', async () => {
     const watcher = new UsageCache(dir);
     const writer = new UsageCache(dir);
     let fired = 0;
     const subscription = watcher.watch(() => {
       fired += 1;
-    });
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    await writer.write({ updatedAt: 1, snapshot });
-    for (let attempt = 0; attempt < 40 && fired === 0; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
+    }, { pollMs: 20 });
+
+    try {
+      await writer.write({ updatedAt: 1, snapshot });
+      for (let attempt = 0; attempt < 100 && fired === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(fired).toBeGreaterThan(0);
+    } finally {
+      subscription.dispose();
     }
+  });
+
+  it('does not fire for a write that changes nothing', async () => {
+    const cache = new UsageCache(dir);
+    await cache.write({ updatedAt: 1, snapshot });
+    let fired = 0;
+    const subscription = cache.watch(() => {
+      fired += 1;
+    }, { pollMs: 20 });
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(fired).toBe(0);
+    } finally {
+      subscription.dispose();
+    }
+  });
+
+  it('still delivers when inotify is exhausted and fs.watch throws ENOSPC', async () => {
+    watchControl.throwEnospc = true;
+    const watcher = new UsageCache(dir);
+    const writer = new UsageCache(dir);
+    let fired = 0;
+    const subscription = watcher.watch(() => {
+      fired += 1;
+    }, { pollMs: 20 });
+
+    try {
+      await writer.write({ updatedAt: 7, snapshot });
+      for (let attempt = 0; attempt < 100 && fired === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(fired).toBeGreaterThan(0);
+    } finally {
+      subscription.dispose();
+      watchControl.throwEnospc = false;
+    }
+  });
+
+  it('keeps working when the directory cannot be watched', async () => {
+    const missing = path.join(dir, 'no', 'such', 'place');
+    const cache = new UsageCache(missing);
+    let fired = 0;
+    const subscription = cache.watch(() => {
+      fired += 1;
+    }, { pollMs: 20 });
+
+    try {
+      await cache.write({ updatedAt: 2, snapshot });
+      for (let attempt = 0; attempt < 100 && fired === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(fired).toBeGreaterThan(0);
+    } finally {
+      subscription.dispose();
+    }
+  });
+
+  it('stops notifying once disposed, and tolerates a second dispose', async () => {
+    const cache = new UsageCache(dir);
+    let fired = 0;
+    const subscription = cache.watch(() => {
+      fired += 1;
+    }, { pollMs: 20 });
     subscription.dispose();
-    expect(fired).toBeGreaterThan(0);
+    subscription.dispose();
+
+    await cache.write({ updatedAt: 3, snapshot });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(fired).toBe(0);
   });
 });
+
