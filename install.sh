@@ -144,6 +144,15 @@ should_skip() {
   return 1
 }
 
+is_rdev_managed() {
+  local rel="$1" manifest="$HOME/.rdev-managed.json" managed
+  [[ -f "$manifest" ]] || return 1
+  while IFS= read -r managed; do
+    [[ "$managed" == "$rel" ]] && return 0
+  done < <(sed -n 's/^[[:space:]]*"\([^"]*\)"[[:space:]]*:.*/\1/p' "$manifest")
+  return 1
+}
+
 # ── vscode ────────────────────────────────────────────────────────────────────
 # Editor user-settings directories, most-preferred first. Only ones that already
 # exist get linked: the directory is created on an editor's first launch, and a
@@ -302,6 +311,7 @@ main() {
     [[ "$name" == ".claude" ]] && continue
 
     should_skip "$name" "$machine" && { warn "Skipping $name (machine=$machine)"; continue; }
+    is_rdev_managed "$name" && { warn "Skipping $name (managed by rdev, rewritten on image updates)"; continue; }
 
     link_file "$src" "$home/$name"
   done

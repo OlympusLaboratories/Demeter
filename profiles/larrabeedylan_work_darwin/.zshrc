@@ -73,7 +73,7 @@ alias f='freshen'
 alias gol='command go'
 
 ### GIT WORKTREES
-# Portable across bash and zsh — keep these three profiles' copies identical.
+# Portable across bash and zsh — keep every copy identical.
 # (zsh note: never name a local `path` — it shadows $PATH. Hence `wp`.)
 
 # Where `wt` creates new worktrees, relative to the main working tree.

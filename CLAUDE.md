@@ -44,7 +44,7 @@ The installer does the following in order:
 1. Selects the profile to install — from the first CLI argument (a `profiles/` subdirectory name or a path), else auto if only one profile exists, else prompts. `install.sh --help` lists available profiles.
 2. Detects machine type (macOS = `mac`, Linux = `linux`)
 3. Initializes git submodules if `.gitmodules` exists
-4. Symlinks dotfiles from `profiles/<profile>/` to `~/` (skipping `.claude/`)
+4. Symlinks dotfiles from `profiles/<profile>/` to `~/` (skipping `.claude/`, and any path listed in `~/.rdev-managed.json` on an rdev box)
 5. Symlinks `.claude/` contents individually (skills linked per-directory into `~/.claude/skills/`)
 6. Symlinks vendor skills from `_vendor/*/` into `~/.claude/skills/`
 7. Symlinks shared tools from `tools/*` into `~/.claude/tools/`
@@ -84,6 +84,7 @@ Key behaviors:
 - **Dotfiles only**: Files in profile directories should be dotfiles (prefixed with `.`) or inside `.claude/`
 - **No secrets in repo**: Sensitive values (API keys, tokens) belong in `~/.secrets` or similar, sourced from shell config — never committed
 - **Machine-specific skipping**: Use the `SKIP_LIST` array in `install.sh` to control per-platform linking
+- **rdev boxes**: rdev regenerates `~/.zshrc` and `~/.tmux.conf` from its image and lists them in `~/.rdev-managed.json`; `is_rdev_managed` keeps the installer from linking over them. The login shell there is zsh, so `.bashrc` is never read — a profile customizes rdev through `~/.zshrc.local` (sourced near the end of rdev's `.zshrc`, in login and non-login shells alike, unlike `~/.zlogin`), `~/.zshrc.pre` (before `compinit`), and `~/.tmux.conf.local`. `larrabeedylan_work_linux/.zshrc.local` is the zsh port of its `.bashrc`; it leaves history, completion, direnv, mise and the starship prompt to rdev
 - **Skills**: Each skill gets its own directory under `.claude/skills/` with a `SKILL.md` file
 - **No comments in code**: `.claude/CLAUDE.md` forbids agent-written code comments globally. Any skill that writes or edits code must restate the rule in its own prompt — subagents spawned by a skill receive the skill's text, not the user's `CLAUDE.md`. The only sanctioned exception is `security-audit`'s PoC and verification tests, where the write-up is the deliverable
 - **Vendor packages**: Third-party skill sets go in `_vendor/<name>/` as git submodules

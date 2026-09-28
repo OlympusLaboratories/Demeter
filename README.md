@@ -22,6 +22,7 @@ Demeter/
     └── <profile>/      # e.g. larrabeedylan_work_linux
         ├── .bash_profile
         ├── .zshrc
+        ├── .zshrc.local  # rdev: sourced by rdev's managed ~/.zshrc
         └── .claude/
             ├── CLAUDE.md   # global instructions, synced to ~/.claude/CLAUDE.md
             ├── settings.json  # permissions + hook registrations
@@ -49,6 +50,7 @@ The script will:
 - Install the profile you selected (by argument, auto-detected, or chosen from the menu)
 - Detect whether you're on macOS or Linux
 - Symlink each dotfile to `~/`
+- On an rdev box, skip anything rdev manages (`~/.rdev-managed.json`, e.g. `~/.zshrc`, `~/.tmux.conf`) — customize those through `~/.zshrc.local` and `~/.tmux.conf.local` instead
 - Symlink `.claude/` contents (including skills) to `~/.claude/`
 - Symlink vendor skills from `_vendor/` into `~/.claude/skills/`
 - Symlink shared tools from `tools/` into `~/.claude/tools/`
