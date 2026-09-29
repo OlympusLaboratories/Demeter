@@ -360,6 +360,14 @@ main() {
     done
   fi
 
+  local staged_mcp="$home/.config/nvim/mcp.json"
+  if [[ -f "$staged_mcp" ]]; then
+    bold "Installing staged MCP config ..."
+    mkdir -p "$claude_dst"
+    install -m 600 "$staged_mcp" "$claude_dst/.mcp.json"
+    success "Installed: $claude_dst/.mcp.json"
+  fi
+
   # ── vendor skills (e.g. impeccable) ────────────────────────────────────────
   local vendor_dir="$REPO_DIR/_vendor"
   if [[ -d "$vendor_dir" ]]; then

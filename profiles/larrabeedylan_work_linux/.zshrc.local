@@ -494,3 +494,29 @@ wfwatch() {
         esac
       done
 }
+
+if [[ -f "$HOME/.rdev-env" && -z "${RDEV_BOOTSTRAP_DISABLE:-}" ]]; then
+  () {
+    local state="$HOME/.rdev-bootstrap"
+    local log="$HOME/.rdev-bootstrap.log"
+    local repo="$HOME/Demeter"
+    local script="$repo/tools/rdev-bootstrap/bootstrap.sh"
+
+    [[ -f "$state/done" ]] && return
+    if [[ -f "$state/running" ]] && kill -0 "$(<"$state/running")" 2>/dev/null; then
+      return
+    fi
+
+    mkdir -p "$state"
+    [[ -s "$state/failed" ]] &&
+      print -u2 "rdev bootstrap: retrying $(tr '\n' ' ' < "$state/failed")"
+    print "rdev bootstrap: running in background — tail -f $log"
+
+    (
+      [[ -d "$repo/.git" ]] ||
+        git clone --quiet https://github.com/OlympusLaboratories/Demeter.git "$repo"
+      [[ -x "$script" ]] && "$script"
+    ) >>"$log" 2>&1 &!
+    print $! > "$state/running"
+  }
+fi
