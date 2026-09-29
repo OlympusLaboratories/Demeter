@@ -318,6 +318,47 @@ main() {
 
   echo ""
 
+  local shell_dir="$REPO_DIR/shell"
+  if [[ -d "$shell_dir" ]] && ! should_skip "shell" "$machine"; then
+    bold "Linking shared shell config ..."
+    link_file "$shell_dir/terminal.zsh" "$home/.config/zsh/terminal.zsh"
+
+    if is_rdev_managed ".config/starship.toml"; then
+      warn "Skipping starship.toml (managed by rdev, rewritten on image updates)"
+    else
+      link_file "$shell_dir/starship.toml" "$home/.config/starship.toml"
+    fi
+
+    if is_rdev_managed ".tmux.conf"; then
+      info "rdev owns ~/.tmux.conf — linking ours to ~/.tmux.conf.local, which it sources."
+      link_file "$shell_dir/tmux.conf" "$home/.tmux.conf.local"
+    else
+      link_file "$shell_dir/tmux.conf" "$home/.tmux.conf"
+    fi
+
+    local missing_shell=()
+    if [[ -x "$shell_dir/install-tools.sh" ]]; then
+      while IFS= read -r shell_item; do
+        [[ -n "$shell_item" ]] && missing_shell+=("$shell_item")
+      done < <("$shell_dir/install-tools.sh" --check)
+    fi
+
+    if [[ "${#missing_shell[@]}" -gt 0 ]]; then
+      echo ""
+      printf '  %s\n' "${missing_shell[@]}"
+      echo ""
+      if ask "Install ${#missing_shell[@]} missing terminal tool(s)/plugin(s)?"; then
+        "$shell_dir/install-tools.sh"
+      else
+        info "Skipped. Install later with: $shell_dir/install-tools.sh"
+      fi
+    else
+      success "Terminal tools and zsh plugins all present."
+    fi
+  fi
+
+  echo ""
+
   # ── .claude setup ──────────────────────────────────────────────────────────
   local claude_src="$user_dir/.claude"
   local claude_dst="$home/.claude"

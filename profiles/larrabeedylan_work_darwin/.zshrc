@@ -4,12 +4,6 @@
 
 setopt PROMPT_SUBST
 
-# Persistent history — zsh saves nothing to disk by default
-HISTFILE="$HOME/.zsh_history"
-HISTSIZE=10000
-SAVEHIST=10000
-setopt SHARE_HISTORY HIST_IGNORE_DUPS HIST_IGNORE_SPACE
-
 # Completion system + support for bash-style completion scripts (nvm, gcloud)
 autoload -Uz compinit && compinit
 autoload -Uz bashcompinit && bashcompinit
@@ -417,34 +411,6 @@ alias pids="sudo netstat -tulp"
 alias gtop="watch -n 1 nvidia-smi"
 alias iftop="sudo iftop"
 
-### PROMPT
-
-git_branch() {
-    git rev-parse --is-inside-work-tree &>/dev/null || return
-    local branch=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null)
-    echo "($branch)"
-}
-
-if [ -x /usr/bin/tput ] && tput setaf 1 >&/dev/null; then
-    color_prompt=yes
-else
-    color_prompt=
-fi
-
-if [ "$color_prompt" = yes ]; then
-    PROMPT='${debian_chroot:+($debian_chroot)}%F{green}%n@%m%f:%F{blue}%~%f $(git_branch) %# '
-else
-    PROMPT='${debian_chroot:+($debian_chroot)}%n@%m:%~ $(git_branch) %# '
-fi
-unset color_prompt
-
-# Terminal window title
-case "$TERM" in
-xterm*|rxvt*)
-    precmd() { print -Pn "\e]0;${debian_chroot:+($debian_chroot)}%n@%m: %~\a" }
-    ;;
-esac
-
 ### COLORS
 
 # ls colors — platform aware (BSD ls on macOS, GNU ls on Linux)
@@ -559,3 +525,5 @@ wfwatch() {
         esac
       done
 }
+
+[ -r "$HOME/.config/zsh/terminal.zsh" ] && source "$HOME/.config/zsh/terminal.zsh"

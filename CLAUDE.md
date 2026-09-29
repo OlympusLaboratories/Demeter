@@ -15,6 +15,11 @@ Demeter/
   tools/                  # First-party projects shared by every profile
     claude-usage/         # VS Code extension, linked into ~/.claude/tools/
     worktree-sync/        # VS Code extension, linked into ~/.claude/tools/
+  shell/                  # Terminal experience shared by every profile
+    terminal.zsh          # gap-filling zsh fragment, sourced last from each rc
+    starship.toml         # prompt config (copy of rdev's)
+    tmux.conf             # ~/.tmux.conf, or ~/.tmux.conf.local on rdev
+    install-tools.sh      # installs the tools + zsh plugins terminal.zsh uses
   vscode/                 # Editor settings shared by every profile
     settings.json         # symlinked over VS Code's user settings.json
     extensions.txt        # extension ids the installer keeps present
@@ -45,14 +50,15 @@ The installer does the following in order:
 2. Detects machine type (macOS = `mac`, Linux = `linux`)
 3. Initializes git submodules if `.gitmodules` exists
 4. Symlinks dotfiles from `profiles/<profile>/` to `~/` (skipping `.claude/`, and any path listed in `~/.rdev-managed.json` on an rdev box)
-5. Symlinks `.claude/` contents individually (skills linked per-directory into `~/.claude/skills/`)
-6. Symlinks vendor skills from `_vendor/*/` into `~/.claude/skills/`
-7. Symlinks shared tools from `tools/*` into `~/.claude/tools/`
-8. Prompts to build and install shared tools exposing an `install` target in their Makefile. Runs through `mise exec` when the tool has a `.mise.toml`, so a pinned toolchain resolves in a non-interactive shell. Skipped without prompting when no `code`/`codium` CLI is present. Honours `SKIP_LIST` by tool directory name.
-9. Symlinks `vscode/settings.json` over VS Code's user settings, on every editor user directory that already exists
-10. Prompts to install any extension in `vscode/extensions.txt` missing from the editor
-11. Cleans stale skill symlinks (removes symlinks pointing to deleted repo paths)
-12. Creates data directories for skills that accumulate context
+5. Symlinks `shell/` config (`terminal.zsh` to `~/.config/zsh/`, `starship.toml`, `tmux.conf`) and offers to install any missing terminal tool or zsh plugin
+6. Symlinks `.claude/` contents individually (skills linked per-directory into `~/.claude/skills/`)
+7. Symlinks vendor skills from `_vendor/*/` into `~/.claude/skills/`
+8. Symlinks shared tools from `tools/*` into `~/.claude/tools/`
+9. Prompts to build and install shared tools exposing an `install` target in their Makefile. Runs through `mise exec` when the tool has a `.mise.toml`, so a pinned toolchain resolves in a non-interactive shell. Skipped without prompting when no `code`/`codium` CLI is present. Honours `SKIP_LIST` by tool directory name.
+10. Symlinks `vscode/settings.json` over VS Code's user settings, on every editor user directory that already exists
+11. Prompts to install any extension in `vscode/extensions.txt` missing from the editor
+12. Cleans stale skill symlinks (removes symlinks pointing to deleted repo paths)
+13. Creates data directories for skills that accumulate context
 
 Key behaviors:
 - Never copies `~/.claude` aside; it only replaces symlinks, leaving your session data in place
@@ -97,6 +103,7 @@ Key behaviors:
 - **Shared rate limit on `/api/oauth/usage`**: the Claude Code CLI polls this endpoint from every running session, and the limit is per account — so anything else reading it (`tools/claude-usage/`) competes with the user's own CLI sessions and must be frugal, not merely cached. Poll adaptively: compare each reading with the last and ease off geometrically while the numbers are flat, snapping back when they move. A fixed interval spends nearly all its requests re-reading identical numbers. Two things must survive that easing off: `resets_at` is absolute, so countdowns are recomputed locally and need no fetch, and the next poll must never be scheduled past the soonest reset — that is the instant the quota frees up and the user is watching it
 - **Browser OAuth**: any login flow here opens the system browser via `vscode.env.openExternal`, never a webview or popup — Okta SSO misbehaves in embedded browsers. Pair it with a loopback `http://localhost:<ephemeral>/callback` listener, and keep the copy-paste fallback for when the redirect can't reach the machine
 - **Theme ids**: `workbench.colorTheme`, the `workbench.preferred*ColorTheme` keys, and the `[Theme Name]` scopes in `workbench.colorCustomizations` all take a theme's **settingsId** — `contributes.themes[].id` falling back to `label`, which is often not the display name (`Dark Modern`, not `Default Dark Modern`; only the High Contrast themes carry the `Default` prefix). A wrong id fails silently: the scope matches nothing, and the light/dark toggle no-ops. Scopes match by exact id or a `*` glob at either or both ends, on the name only — there is no scope for "every dark theme"
+- **Shared terminal**: `shell/` holds one terminal experience for every machine — starship, zsh-autosuggestions/completions/syntax-highlighting, fzf, prefix history search — sourced as the **last** line of each profile's shell rc (`.zshrc` on Darwin, `.zshrc.local` on rdev). It **fills gaps only**: every block is guarded on whether the feature is already active (`$+functions[prompt_starship_precmd]` — that exact name; starship defines no `starship_precmd`, and the wrong guard loads starship then clobbers its prompt with the fallback, which reads as the config doing nothing — `$+functions[_zsh_autosuggest_start]`, `$+functions[compdef]`), verified against each tool's real init output rather than assumed, because rdev already builds this on its own boxes and owns the files it does it in. Per-feature guards, never one `is_rdev` switch — the half-configured machine is the common case. Three ordering rules are load-bearing and explained in `shell/AGENTS.md`: `fpath` before `compinit`, syntax highlighting from a one-shot `precmd` hook (after every widget, and after rdev's own load, so it can never double-load), and the `source` line staying last. Plugins live at `~/.local/share/zsh/<name>`, the same paths rdev clones to, which is what lets one code path serve both
 - **Editor settings**: `vscode/` holds one shared `settings.json`, not a per-profile copy — the point is an identical editor everywhere. Color fixes belong in its `workbench.colorCustomizations` (theme-scoped, so light and dark each get correct values), never in a per-repo `.vscode/settings.json`. Anything Peacock also writes must be listed in `peacock.excludedSettings`, or Peacock's workspace-level write will outrank the user-level pin. See the Editor Settings section of `README.md` for why the High Contrast themes broke the Claude Code webview
 - **Review findings are persisted, not just chatted**: a `review-code` swarm finding lives only in the transcript, so `fix-feedback` Step 3b posts every finding the MR does not already carry as its own anchored comment *before* working through the queue — deduped against the MR's existing threads (fetched, not assumed from context) and against comments an earlier run posted, which it recognises by their `🤖 review-code` header. Posting is one batch approval; a posted finding gains a discussion ID, so the reply drafted when the user rejects or modifies it lands back on that same thread
 - **Hooks**: One script per hook under `.claude/hooks/`, duplicated across profiles like `scripts/`. Register it in every profile's `settings.json` using `$HOME/.claude/hooks/<name>` so the path resolves on any machine

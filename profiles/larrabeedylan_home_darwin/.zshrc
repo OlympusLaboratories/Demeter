@@ -356,24 +356,6 @@ alias tfi='terraform init '
 alias tfp='terraform plan '
 alias tfa='terraform apply '
 
-# Git branch helper
-git_branch() {
-    git rev-parse --is-inside-work-tree &>/dev/null || return
-    local branch=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null)
-    echo "($branch)"
-}
-
-# Colored prompt (zsh on macOS always supports color)
-setopt PROMPT_SUBST
-PROMPT="%F{green}%n@%m%f:%F{blue}%~%f \$(git_branch) %# "
-
-# Set terminal window title
-case "$TERM" in
-xterm*|rxvt*)
-    precmd() { print -Pn "\e]0;%n@%m: %~\a" }
-    ;;
-esac
-
 # Enable color for ls on macOS
 export CLICOLOR=1
 export LSCOLORS=ExFxCxDxBxegedabagacad
@@ -467,3 +449,5 @@ wfwatch() {
         esac
       done
 }
+
+[ -r "$HOME/.config/zsh/terminal.zsh" ] && source "$HOME/.config/zsh/terminal.zsh"

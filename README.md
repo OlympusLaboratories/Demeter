@@ -14,6 +14,11 @@ Demeter/
 ├── tools/              # first-party projects, shared by every profile
 │   ├── claude-usage/   # VS Code extension, synced to ~/.claude/tools/
 │   └── worktree-sync/  # VS Code extension, synced to ~/.claude/tools/
+├── shell/              # terminal experience, shared by every profile
+│   ├── terminal.zsh    # gap-filling zsh fragment, sourced last from each rc
+│   ├── starship.toml   # prompt config (a copy of rdev's)
+│   ├── tmux.conf       # symlinked to ~/.tmux.conf (~/.tmux.conf.local on rdev)
+│   └── install-tools.sh  # installs starship, fzf, fd, bat + the zsh plugins
 ├── vscode/             # editor settings, shared by every profile
 │   ├── settings.json   # symlinked over VS Code's user settings.json
 │   ├── extensions.txt  # extensions the installer keeps present
@@ -55,6 +60,7 @@ The script will:
 - Symlink vendor skills from `_vendor/` into `~/.claude/skills/`
 - Symlink shared tools from `tools/` into `~/.claude/tools/`
 - Offer to build and install any shared tool that has an `install` target (prompted, skippable)
+- Symlink the shared shell config from `shell/` and offer to install the terminal tools it needs (see [Terminal](#terminal))
 - Symlink `vscode/settings.json` over VS Code's user settings (see [Editor Settings](#editor-settings))
 - Install any extensions in `vscode/extensions.txt` that are missing (prompts first)
 - Clean stale skill symlinks (e.g. after a skill is renamed or removed from the repo)
@@ -203,6 +209,60 @@ Peacock writes into a repo's **workspace** `.vscode/settings.json`, which
 outranks user settings. A repo colored before this change still carries stale
 `commandCenter.*` keys; run `Peacock: Remove All Colors` and re-apply the color
 to clear them.
+
+## Terminal
+
+Every machine gets the same terminal: the same prompt, history, completion and line editing.
+The config is profile-independent and lives in `shell/`, linked by the installer.
+
+What you get, once `shell/install-tools.sh` has run:
+
+- **starship prompt** — directory, git branch and status, language versions, a green `❯` that
+  turns red when the last command failed
+- **zsh-autosuggestions** — the rest of the line in grey as you type, from history and
+  completions; `→` accepts it, `Ctrl-→` accepts one word
+- **zsh-completions** with a selectable menu and case-insensitive matching
+- **↑/↓ prefix history search** — type `git co`, press `↑`, and walk only the matching history
+- **fzf** — `Ctrl-R` fuzzy history, `Ctrl-T` files, `Alt-C` cd, backed by `fd`
+- **zsh-syntax-highlighting** — commands colored valid/invalid as you type
+- 50 000 lines of shared, deduplicated history; `bat` in place of `cat`; a tmux config that
+  lets Claude Code's notifications and progress bar through and makes Shift+Enter work
+
+All of it is borrowed from the rdev box's shell, which is where this started.
+
+### How it stays consistent without fighting rdev
+
+rdev builds its own terminal — it owns `~/.zshrc`, `~/.config/starship.toml` and
+`~/.tmux.conf`, and rewrites them on image updates. Doing the same work again there would
+double-load plugins and lose the argument with the next image bump. So `shell/terminal.zsh`
+**fills gaps only**: each block checks whether the feature is already active
+(`$+functions[prompt_starship_precmd]`, `$+functions[_zsh_autosuggest_start]`, …) and does nothing if
+it is. On rdev it is nearly a no-op; on a fresh Mac it does everything.
+
+The installer follows the same principle: `starship.toml` is skipped where
+`~/.rdev-managed.json` claims the path, and `tmux.conf` is linked to `~/.tmux.conf.local` —
+the hook rdev's own config sources — instead of over rdev's file.
+
+Three load-order rules make it work, and `shell/AGENTS.md` explains them in full: `fpath`
+before `compinit`, syntax highlighting after every widget (it loads from a one-shot `precmd`
+hook, which is also what keeps rdev from loading it twice), and the `source` line staying last
+in each profile rc. **If you add a section to a profile `.zshrc`, add it above that line.**
+
+### Tools
+
+`terminal.zsh` degrades quietly when something isn't installed — no starship means a plain
+git-aware prompt, no fzf means the builtin `Ctrl-R`. Convenient, but it also means a missing
+tool looks like nothing happened, so the installer runs `shell/install-tools.sh --check` and
+lists what's absent before offering to install it:
+
+```bash
+./shell/install-tools.sh --check   # print what's missing, one per line
+./shell/install-tools.sh           # install it (brew, else apt, else direct download)
+```
+
+Plugins are cloned to `~/.local/share/zsh/<name>` — the same paths rdev uses, so one code path
+serves both kinds of machine. On an rdev box the script exits immediately: the image ships
+everything already.
 
 ## Claude Skills
 

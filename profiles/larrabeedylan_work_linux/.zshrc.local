@@ -520,3 +520,5 @@ if [[ -f "$HOME/.rdev-env" && -z "${RDEV_BOOTSTRAP_DISABLE:-}" ]]; then
     print $! > "$state/running"
   }
 fi
+
+[ -r "$HOME/.config/zsh/terminal.zsh" ] && source "$HOME/.config/zsh/terminal.zsh"
