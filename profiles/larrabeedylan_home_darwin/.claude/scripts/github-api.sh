@@ -3,12 +3,15 @@
 Token read from GITHUB_PERSONAL_ACCESS_TOKEN environment variable.
 
 Usage: github_api.py <command> [args...]
-Commands: current-user | open-prs | merged-prs | pr-info | pr-reviews | pr-changes | pr-commits | reply-to-thread
+Commands: current-user | open-prs | merged-prs | pr-info | pr-reviews | pr-changes | pr-commits |
+          pr-for-branch | reply-to-thread | create-diff-comment
 """
 
 import json
 import os
+import subprocess
 import sys
+import urllib.error
 import urllib.request
 import urllib.parse
 
@@ -29,6 +32,21 @@ def api_get(token, path, params=None):
         'Accept': 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
     })
+    with urllib.request.urlopen(req) as resp:
+        return json.loads(resp.read())
+
+
+def api_post(token, path, payload):
+    req = urllib.request.Request(
+        'https://api.github.com' + path,
+        data=json.dumps(payload).encode(),
+        headers={
+            'Authorization': f'Bearer {token}',
+            'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28',
+            'Content-Type': 'application/json',
+        },
+    )
     with urllib.request.urlopen(req) as resp:
         return json.loads(resp.read())
 
@@ -292,6 +310,119 @@ def cmd_reply_to_thread(token, args):
     })
 
 
+def _git(*args):
+    return subprocess.run(['git', *args], capture_output=True, text=True).stdout.strip()
+
+
+def _repo_from_remote():
+    url = _git('remote', 'get-url', 'origin')
+    if not url:
+        sys.exit('Error: no origin remote to derive owner/repo from')
+    path = url
+    for scheme in ('https://', 'http://', 'ssh://'):
+        if path.startswith(scheme):
+            path = path[len(scheme):]
+            path = path.split('/', 1)[1] if '/' in path else path
+            break
+    else:
+        path = path.split(':', 1)[1] if ':' in path else path
+    if path.endswith('.git'):
+        path = path[:-4]
+    parts = path.strip('/').split('/')
+    if len(parts) < 2:
+        sys.exit(f'Error: cannot parse owner/repo out of {url}')
+    return parts[-2], parts[-1]
+
+
+def cmd_pr_for_branch(token, args):
+    owner = args[0] if args else '-'
+    repo = args[1] if len(args) > 1 else '-'
+    branch = args[2] if len(args) > 2 else '-'
+    if owner == '-' or repo == '-':
+        owner, repo = _repo_from_remote()
+    if branch == '-':
+        branch = _git('rev-parse', '--abbrev-ref', 'HEAD')
+    if not branch or branch == 'HEAD':
+        sys.exit('Error: could not determine the current branch')
+    prs = api_get(token, f'/repos/{owner}/{repo}/pulls',
+                  {'head': f'{owner}:{branch}', 'state': 'open', 'per_page': 20})
+    for pr in prs:
+        emit({
+            'number': pr['number'],
+            'title': pr.get('title', ''),
+            'web_url': pr.get('html_url', ''),
+            'owner': owner,
+            'repo': repo,
+            'source_branch': pr.get('head', {}).get('ref', ''),
+            'target_branch': pr.get('base', {}).get('ref', ''),
+            'draft': pr.get('draft', False),
+        })
+
+
+def cmd_create_diff_comment(token, args):
+    if len(args) < 4:
+        sys.exit('Usage: github_api.py create-diff-comment <owner> <repo> <pr_number> <path> [line|-]\n'
+                 '       The comment body is read from stdin.')
+    owner, repo, number, path = args[0], args[1], args[2], args[3]
+    raw_line = args[4] if len(args) > 4 else '-'
+    line = None
+    if raw_line not in ('', '-'):
+        try:
+            line = int(raw_line)
+        except ValueError:
+            line = None
+    body = sys.stdin.read().strip()
+    if not body:
+        sys.exit('Error: empty comment body')
+
+    pr = api_get(token, f'/repos/{owner}/{repo}/pulls/{number}')
+    head_sha = pr.get('head', {}).get('sha', '')
+    anchored = False
+    reason = 'no line given' if line is None else ''
+    comment = None
+
+    if line is not None and head_sha:
+        try:
+            comment = api_post(token, f'/repos/{owner}/{repo}/pulls/{number}/comments', {
+                'body': body,
+                'commit_id': head_sha,
+                'path': path,
+                'line': line,
+                'side': 'RIGHT',
+            })
+            anchored = True
+        except urllib.error.HTTPError as err:
+            reason = f'GitHub rejected the line anchor ({err.code}): {err.read().decode()[:200]}'
+    elif line is not None:
+        reason = 'the PR has no head sha to anchor against'
+
+    if comment is None and head_sha:
+        try:
+            comment = api_post(token, f'/repos/{owner}/{repo}/pulls/{number}/comments', {
+                'body': body,
+                'commit_id': head_sha,
+                'path': path,
+                'subject_type': 'file',
+            })
+        except urllib.error.HTTPError as err:
+            reason = f'{reason}; file-level anchor also rejected ({err.code})'.lstrip('; ')
+
+    if comment is None:
+        where = f'`{path}`' if line is None else f'`{path}:{line}`'
+        comment = api_post(token, f'/repos/{owner}/{repo}/issues/{number}/comments',
+                           {'body': f'**{where}**\n\n{body}'})
+
+    emit({
+        'comment_id': comment.get('id'),
+        'node_id': comment.get('node_id', ''),
+        'anchored': anchored,
+        'path': path,
+        'line': line,
+        'url': comment.get('html_url', ''),
+        'fallback_reason': '' if anchored else reason,
+    })
+
+
 COMMANDS = {
     'current-user':    cmd_current_user,
     'open-prs':        cmd_open_prs,
@@ -300,7 +431,9 @@ COMMANDS = {
     'pr-reviews':      cmd_pr_reviews,
     'pr-changes':      cmd_pr_changes,
     'pr-commits':      cmd_pr_commits,
+    'pr-for-branch':   cmd_pr_for_branch,
     'reply-to-thread': cmd_reply_to_thread,
+    'create-diff-comment': cmd_create_diff_comment,
 }
 
 if __name__ == '__main__':

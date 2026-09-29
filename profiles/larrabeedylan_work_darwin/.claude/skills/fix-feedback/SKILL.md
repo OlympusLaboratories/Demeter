@@ -5,13 +5,13 @@ Work through review feedback on the current changes — present each item for se
 This skill runs in one of two **modes**, chosen automatically from the argument:
 
 - **Mode A — Merge request:** `$ARGUMENTS` is a GitLab merge request URL. Fetch the review discussion threads from that MR.
-- **Mode B — Feedback already in the conversation:** no argument is given. Pull the feedback from **every unaddressed source already in this conversation** — the `review-code` swarm's confirmed findings, any code review produced in the chat, *and* any MR threads fetched by an earlier Mode A run that the user has not yet worked through. Nothing new is fetched from GitLab; the changes are already local.
+- **Mode B — Feedback already in the conversation:** no argument is given. Pull the feedback from **every unaddressed source already in this conversation** — the `review-code` swarm's confirmed findings, any code review produced in the chat, *and* any MR threads fetched by an earlier Mode A run that the user has not yet worked through. Nothing new is fetched from GitLab; the changes are already local. Findings that are not already on the MR are posted to it as comments (**Step 3b**) before any of them are fixed, so the swarm's work outlives the conversation.
 
 **Parameter:** `$ARGUMENTS` — optionally, the full URL of a GitLab merge request (e.g., `https://gitlab.com/group/project/-/merge_requests/123`). Omit it to use Mode B.
 
 **Selecting the mode:**
 - `$ARGUMENTS` looks like a GitLab MR URL → **Mode A**: do Steps 1, 2, 2c, then continue from Step 3.
-- `$ARGUMENTS` is empty → **Mode B**: skip Steps 1, 2, and 2c; start at **Step 1B**, then continue from Step 4.
+- `$ARGUMENTS` is empty → **Mode B**: skip Steps 1, 2, and 2c; start at **Step 1B**, then continue from **Step 3b**.
 - `$ARGUMENTS` is empty **and** the conversation holds neither review output nor an unaddressed MR thread from an earlier Mode A run → tell the user there's nothing to work through (ask them to pass an MR URL or run a review first, e.g. `/review-code`) and stop. Check both before concluding this.
 
 ## Step 1: Parse the MR URL (Mode A)
@@ -83,14 +83,14 @@ Treat each distinct review finding as one feedback "thread":
 - **Comment body** — the finding's summary plus its failure scenario / rationale.
 - **Author** — the review source, for display only (e.g. `review-code: correctness`, or the bot/human handle for a carried-over MR thread).
 - **Replies** — none for a review-agent finding; a carried-over MR thread keeps whatever reply history was fetched.
-- **Discussion ID** — only for a carried-over MR thread, plus the project path and MR iid needed to reply. A review-agent finding has none, and that absence is what tells Step 7b which treatment the item gets.
+- **Discussion ID** — only for a carried-over MR thread, plus the project path and MR iid needed to reply. A review-agent finding has none **until Step 3b posts it to the MR**, and that absence is what tells Step 3b which items to post and Step 7b which treatment each one gets.
 - **Resolved status** — always unresolved.
 
-Collect these into the same numbered structure used in Step 4. Keep findings that target the same file/line as separate items unless they are clearly duplicates. Then go straight to **Step 4** to display them.
+Collect these into the same numbered structure used in Step 4. Keep findings that target the same file/line as separate items unless they are clearly duplicates. Then go to **Step 3b** to persist the ones the MR does not already carry, and on to **Step 4** to display them.
 
 In Mode B there is no branch to check out — the changes are already local — so **Step 2c never applies**.
 
-**Step 7b applies per item, not per mode.** An item that came from a review agent has no external thread: present its reply in chat and stop. An item that came from an MR thread carried over from an earlier Mode A run still has a live discussion ID, so it takes the full Step 7b treatment — offer to post, and post only on an explicit yes. Deciding this once for the whole run is the bug: it either strands MR replies in the chat or offers to post a swarm finding that has nowhere to go.
+**Step 7b applies per item, not per mode.** An item that came from a review agent and was not posted in Step 3b has no external thread: present its reply in chat and stop. One that Step 3b did post now carries a discussion ID and takes the full treatment. An item that came from an MR thread carried over from an earlier Mode A run still has a live discussion ID, so it takes the full Step 7b treatment — offer to post, and post only on an explicit yes. Deciding this once for the whole run is the bug: it either strands MR replies in the chat or offers to post a swarm finding that has nowhere to go.
 
 **Record the commit state before you edit anything.** Run `git log --oneline -3` and `git status --porcelain` and note which of the reviewed changes are committed. **Check whether the branch is pushed in the same breath** — `git rev-list --left-right --count origin/<branch>...HEAD` — and do it BEFORE you recommend anything, not after the user accepts. A finding about a name, a message, or a typo invites "amend the commit too", and that recommendation is only safe on unpublished work; offering it and then withdrawing it costs the user a decision they already made. When the branch is pushed, the fix is a follow-up commit, and a wrong commit subject that GitLab has not yet turned into an MR title is a field the user edits at MR-creation time rather than anything to force-push over. The user may have committed between turns — the reviewed work then lives in `HEAD` and a later `git status` shows those files clean, which reads exactly like an edit that silently failed to apply. Establish the baseline up front so you don't misdiagnose it, and diff against the branch's merge-base rather than the working tree when you need to see the whole change.
 
@@ -114,11 +114,88 @@ For each remaining thread, extract:
 - **Replies** (all subsequent notes in the thread, with author and body)
 - **Resolved status**
 
+## Step 3b: Persist Unique Swarm Findings to the MR
+
+A swarm finding exists only in this conversation. One the user accepts turns into a commit; one they reject or defer leaves **no trace at all** once the session ends, and the next reviewer re-derives it from scratch. So before working through the queue, put every unique finding onto the MR as its own comment, anchored to the code it is about.
+
+This step runs **once**, after the queue is assembled (Mode A: after Step 3; Mode B: after Step 1B) and **before** Step 4 lists it. It applies only to queue items with **no discussion ID** — the review-agent findings. Items that came from the MR are already on the MR; never re-post them.
+
+### 3b.1 Find the MR to post to
+
+- **Mode A** — the MR from the URL. Already known, nothing to look up.
+- **Mode B carrying MR threads** from an earlier Mode A run — that MR. Reuse the project path and iid already in context.
+- **Otherwise** — look it up from the branch:
+  ```bash
+  ~/.claude/scripts/gitlab-api.sh mr-for-branch - -
+  ```
+  Both `-` arguments mean "derive it": the project from the `origin` remote, the branch from `HEAD`. One open MR → that is the target. Several → list them and ask which. **None → say so in one line** (`no open MR for <branch>, so these findings stay in this conversation`) and go straight to Step 4. Do not offer to open the MR, and do not stall the fixes on it — re-running this skill once the MR exists will post them.
+
+**Anchors attach to the pushed head.** Check `git rev-list --left-right --count origin/<branch>...HEAD` before posting: if there are local-only commits, a finding about a line that exists only locally cannot anchor and will land as an unanchored note. Say that in the same breath as the count, so the user can push first if they want clean anchors.
+
+### 3b.2 Drop findings the MR already makes
+
+Fetch the MR's existing threads unless this run already has them:
+```bash
+~/.claude/scripts/gitlab-api.sh mr-discussions "<project_id_urlencoded>" <mr_iid>
+```
+Do this even when the conversation seems to hold the bot's comments — "what is in the chat" is not the same as "what is on the MR", and a duplicate posted next to `@griddy-bot`'s identical point makes the MR worse, not more durable.
+
+Compare each review-agent finding against:
+- threads already on the MR, whoever wrote them — a review bot (`@griddy-bot`, `gemini-mr-reviewer`) or a human;
+- comments a **previous run of this skill** posted — they carry the header from 3b.4, which is what makes them recognisable.
+
+**Judge by substance, not wording.** The same defect in the same code is a duplicate even when one calls it a nil dereference and the other a missing guard. The same file with a different defect is not. When it is genuinely unclear, post it and name the thread it resembles in the summary — a reviewer resolves a near-duplicate in seconds, while a dropped finding costs them the bug.
+
+### 3b.3 Show what will be posted and ask once
+
+Print the list and wait for a chat reply. **Do NOT use `AskUserQuestion`.**
+
+```
+### Posting 3 of 5 findings to !965 — 2 are already on the MR
+
+**1.** `src/api/handler.go:118` — nil map write when `opts` is empty   [review-code: correctness]
+**2.** `src/api/handler.go:204` — retry loop has no backoff            [review-code: reliability]
+**3.** `tests/test_api.py` (file-level) — the new branch is untested   [review-code: tests]
+
+Already covered: the `:118` bounds check (@griddy-bot, thread 2) and the logging nit (thread 4).
+
+Post these 3 as MR comments? (yes / no / a subset like "1,3")
+```
+
+One approval covers the whole batch. On **no**, post nothing, say in one line that the findings stay in this conversation, and continue to Step 4 — never re-ask per finding.
+
+### 3b.4 Post each approved finding
+
+One comment per finding — a thread is resolved as a unit, so batching several findings into one comment makes them unresolvable. Pipe the body through a heredoc; the single-quote rule in Step 7b exists because that call takes the body as an argument, and this one does not:
+
+```bash
+~/.claude/scripts/gitlab-api.sh create-diff-comment "<project_id_urlencoded>" <mr_iid> "<file_path>" <line> - << 'ENDOFBODY'
+🤖 **review-code — <dimension>**
+
+<one-sentence statement of the defect>
+
+**Failure scenario:** <concrete inputs or state → wrong output or crash>
+
+<optional: the direction a fix would take, 1-2 sentences>
+ENDOFBODY
+```
+
+- `<line>` is the line in the file **as it stands now**, not the line the review quoted if the file has moved since. Pass `-` for a file-level note.
+- Keep the `🤖 **review-code — <dimension>**` header exactly as written. It is how 3b.2 recognises this skill's own comments on a later run.
+- The script anchors to the diff when that line is inside it, and otherwise falls back to a plain note prefixed with `` `path:line` `` — a line outside the MR's hunks, a file the MR does not touch, or a commit that is not pushed. It reports which in the `anchored` and `fallback_reason` fields. **Report the fallback to the user**; do not describe a comment as anchored to the code when it landed as a general note.
+- Do not write the finding into the source as a comment while doing this. The MR thread is the record.
+
+### 3b.5 Record the discussion IDs
+
+Each posted finding comes back with a `discussion_id`. Attach it to its queue item. From here the item behaves like any other MR thread: Step 4 shows it with its thread link, and **Step 7b now applies to it** — a reject or modify reply goes back into the thread this step opened, which is what leaves the finding, the decision, and the reasoning in one place for whoever reads the MR later.
+
 ## Step 4: Display the Threads
 
 Print a numbered summary of all unresolved items. In **Mode A** use the MR heading below; in **Mode B** use a heading like `## Review Feedback on Local Changes` and list everything gathered in Step 1B (omit the 💬 line for review-agent findings, which have no thread history).
 
 **One numbered list, whatever the sources.** When a Mode B queue mixes review-agent findings with carried-over MR threads, do not split it into two lists — the user picks by number and should not have to think about provenance to do it. Tag each item's source inline instead (`— @griddy-bot, !965` vs `— review-code: tests`), order by what a reviewer would fix together rather than by source, and note any overlap in one line under the list. Splitting the list re-creates exactly the problem this mode exists to avoid.
+
+**Tag the items Step 3b posted with their thread link.** A finding that is now a live MR thread reads `— review-code: correctness, !965 thread` rather than as a chat-only finding. That is the user's confirmation it was persisted, and it tells them a reply to it will land on the MR rather than in the transcript.
 
 ```
 ## Unresolved Comment Threads on !IID — "MR Title"
@@ -244,7 +321,7 @@ Regarding [the part not applied] — I opted to keep [current approach] because 
 
 Then proceed to **Step 7b** to offer posting the reply.
 
-### Step 7b: Offer to Post the Reply (Mode A only)
+### Step 7b: Offer to Post the Reply (any item with a discussion ID)
 
 **This step is decided per item, by whether the item carries a discussion ID** (Step 1B records it). A review-agent finding has none: there is nothing to post to, so present the drafted reply in chat for the user to reuse and move on. An MR thread — reached through Mode A, or carried into a Mode B queue from an earlier Mode A run — does have one, and gets the full treatment below regardless of which mode is running.
 
@@ -282,7 +359,7 @@ After resolving one thread, offer to address the next unresolved thread. Loop ba
 ## Important Rules
 
 1. **NEVER auto-apply suggestions.** Always analyze and present your assessment first. The whole point of this skill is to think critically, not to blindly accept reviewer feedback.
-2. **NEVER post replies to GitLab.** Only draft replies and print them in chat. The user decides whether and when to post them.
+2. **Never write to GitLab unasked.** There are exactly two writes and both are gated on an explicit yes in chat: Step 3b posts unique swarm findings as new comments (one approval for the batch), and Step 7b posts a drafted reply into a thread (one approval per reply). Nothing else — never edit the MR description, never push, never post a reply the user has not seen.
 3. **NEVER resolve threads.** Thread resolution is the user's action in the GitLab UI after they've posted their reply or pushed changes.
 4. **Be honest in your assessment.** If the reviewer is right, say so. If they're wrong, explain why clearly. Don't just side with the MR author.
 5. **Consider codebase context.** When evaluating suggestions, look at how similar patterns are handled elsewhere in the codebase using `Grep` and `Read`. Consistency matters.
@@ -299,5 +376,7 @@ After the session, reflect on how the execution went. Consider:
 - Did the diff context help or was it stale relative to the local code?
 - Were the drafted replies well-received or did the user need to heavily edit them?
 - Did the critical analysis add value, or was it obvious the reviewer was correct?
+- Did Step 3b's duplicate detection hold up — anything posted that `@griddy-bot` had already said, or dropped that it had not?
+- Did the posted comments anchor to the right lines, or did they fall back to unanchored notes? If a fallback was avoidable, record why.
 
 If any issues were encountered, **edit this skill file** (`~/.claude/skills/fix-feedback/SKILL.md`) to add instructions, warnings, or tips that would prevent the same issue next time. Keep edits surgical. Briefly tell the user what was updated and why.

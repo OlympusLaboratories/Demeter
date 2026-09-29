@@ -38,6 +38,8 @@ Two facts those three skills depend on: a workflow reports `completed` even when
 
 MR-related skills (`explain`, `mr-description`, `feedback`, `eng-snippet`) use `~/.claude/scripts/gitlab-api.sh` for all GitLab API access. The script reads the GitLab token from `~/.claude/.mcp.json` so tokens never enter conversation context.
 
+`fix-feedback` is the only one that **writes** through it, and both writes are gated on an explicit yes in chat: Step 3b opens one new anchored discussion per unique review-swarm finding (`create-diff-comment` — body over stdin, so the single-quote rule that governs `reply-to-thread` does not apply; falls back to an unanchored note when the line sits outside the MR diff or the commit is unpushed), and Step 7b replies into an existing thread (`reply-to-thread`). `mr-for-branch` finds the MR when only the branch is known — both its arguments accept `-` to derive the project from `origin` and the branch from `HEAD`.
+
 ## User Data
 
 Some skills accumulate context data that is NOT tracked in git:

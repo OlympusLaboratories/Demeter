@@ -33,9 +33,11 @@ Each skill is a subdirectory containing a `SKILL.md` file that defines the skill
 
 Two facts those three skills depend on: a workflow reports `completed` even when agents died mid-run (`agent()` returns `null`, the script carries on), and the resume cache is a **prefix** — a hash chain over agent calls that stops replaying at the first agent with no recorded result. Neither is visible from the report a swarm prints.
 
-## GitLab Data
+## GitHub Data
 
-MR-related skills (`explain`, `mr-description`, `feedback`, `eng-snippet`) use `~/.claude/scripts/gitlab-api.sh` for all GitLab API access. The script reads the GitLab token from `~/.claude/.mcp.json` so tokens never enter conversation context.
+PR-related skills (`changes-explain`, `changes-description`, `fix-feedback`, `reflect-week`) use `~/.claude/scripts/github-api.sh` for GitHub API access. It reads the token from `GITHUB_PERSONAL_ACCESS_TOKEN` in the environment, so it never enters conversation context, and takes owner, repo, and PR number as plain arguments.
+
+`fix-feedback` is the only one that **writes** through it, and both writes are gated on an explicit yes in chat: Step 3b opens one new comment per unique review-swarm finding (`create-diff-comment` — body over stdin; anchors to the diff line, retrying as a file-level and then a general comment when GitHub rejects the anchor), and Step 7b replies into an existing thread (`reply-to-thread`). `pr-for-branch` finds the PR when only the branch is known — its arguments accept `-` to derive owner and repo from `origin` and the branch from `HEAD`. Note that `create-diff-comment` returns a REST comment id, not the GraphQL thread ID `reply-to-thread` needs; re-run `pr-reviews` to pick that up.
 
 ## User Data
 
