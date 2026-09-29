@@ -118,6 +118,7 @@
     },
     "claudeCode.preferredLocation": "panel",
     "claudeCode.allowDangerouslySkipPermissions": true,
+    "claudeCode.initialPermissionMode": "bypassPermissions",
     "claudeCode.hideOnboarding": true,
     "chat.titleBar.openInAgentsWindow.enabled": false,
     "chat.agentSessions.showExternal": "last30Days",

@@ -470,6 +470,13 @@ main() {
     echo ""
   fi
 
+  local machine_settings_src="$REPO_DIR/vscode/machine-settings.json"
+  if [[ -f "$machine_settings_src" && "$machine" == "linux" ]] && ! should_skip "vscode" "$machine"; then
+    bold "Linking VS Code Remote-SSH machine settings ..."
+    link_file "$machine_settings_src" "$home/.vscode-server/data/Machine/settings.json"
+    echo ""
+  fi
+
   # ── vscode extensions ──────────────────────────────────────────────────────
   # settings.json can name a theme, but a theme only exists once its extension
   # is installed — VS Code falls back silently otherwise. Installing is additive:
