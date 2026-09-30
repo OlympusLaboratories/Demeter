@@ -173,6 +173,33 @@ vscode_user_dirs() {
   fi
 }
 
+# ── git ───────────────────────────────────────────────────────────────────────
+# The file git reads for machine-wide ignores: core.excludesFile when set,
+# otherwise git's XDG default, which needs no configuration at all.
+
+git_excludes_path() {
+  local configured
+  configured="$(git config --global --get core.excludesFile 2>/dev/null || true)"
+  if [[ -n "$configured" ]]; then
+    configured="${configured/#\~/$HOME}"
+    configured="${configured/#\$HOME/$HOME}"
+    echo "$configured"
+  else
+    echo "${XDG_CONFIG_HOME:-$HOME/.config}/git/ignore"
+  fi
+}
+
+git_ignores_probe() {
+  local pattern="$1" probe status=1
+  probe="$(mktemp -d)"
+  if git -C "$probe" init -q >/dev/null 2>&1 &&
+     git -C "$probe" check-ignore -q "$pattern" >/dev/null 2>&1; then
+    status=0
+  fi
+  rm -rf "$probe"
+  return "$status"
+}
+
 # ── symlinking ────────────────────────────────────────────────────────────────
 
 link_file() {
@@ -516,6 +543,26 @@ main() {
     bold "Checking workspace color overrides ..."
     if ! "$stale_keys_sweep" --quiet; then
       warn "Sweep failed — run vscode/strip-stale-peacock-keys.sh by hand."
+    fi
+    echo ""
+  fi
+
+  local git_ignore_src="$REPO_DIR/git/ignore"
+  if [[ -f "$git_ignore_src" ]] && ! should_skip "gitignore" "$machine"; then
+    bold "Linking global git ignore ..."
+    local git_ignore_dst
+    git_ignore_dst="$(git_excludes_path)"
+    if is_rdev_managed "${git_ignore_dst#"$home"/}"; then
+      warn "Skipping ${git_ignore_dst/#$home/\~} — rdev manages it."
+      info "  Add the contents of git/ignore there by hand."
+    else
+      link_file "$git_ignore_src" "$git_ignore_dst"
+      if git_ignores_probe ".vscode/settings.json"; then
+        success "Verified: git ignores .vscode/settings.json in every repo here."
+      else
+        warn "git is not reading ${git_ignore_dst/#$home/\~}."
+        info "  Check: git config --global core.excludesFile"
+      fi
     fi
     echo ""
   fi

@@ -270,6 +270,37 @@ With the keys gone the user-level pins apply and every hue lands between 8:1 and
 18:1. Repos colored from here on never grow them, because the exclusions are in
 place before Peacock writes.
 
+### Global git ignore
+
+Peacock writes its color into a repo's workspace `.vscode/settings.json`, which
+leaves every repo dirty. `git/ignore` is the shared answer: it is linked to the
+file git reads for machine-wide ignores, so no repo needs a committed
+`.gitignore` change and nothing about it is per-profile.
+
+```
+**/.claude/settings.local.json
+.vscode/settings.json
+```
+
+The destination is `core.excludesFile` when that is set, and otherwise
+`$XDG_CONFIG_HOME/git/ignore` (`~/.config/git/ignore`) — the path git reads by
+default, so nothing has to be configured to make it take effect. The installer
+links whichever of the two applies, then proves it by running `check-ignore`
+inside a throwaway repo, because a `core.excludesFile` pointing somewhere else
+would otherwise leave the file silently inert. On an rdev box that lists the
+path in `~/.rdev-managed.json` the step steps aside and says so.
+
+The pattern is `.vscode/settings.json`, not `.vscode/`, so a repo can still
+commit `extensions.json` or `launch.json` normally; only the file Peacock writes
+is hidden. Two limits are worth knowing:
+
+- **A gitignore never applies to a tracked file.** A repo that already commits
+  `.vscode/settings.json` keeps showing Peacock's edit. Either commit the color
+  or `git update-index --skip-worktree .vscode/settings.json` — and remember
+  it's set, since `git ls-files -v | grep '^S'` is the only way to spot it and a
+  pull that touches the file will error rather than merge.
+- **Adding a real one later needs `git add -f`.**
+
 ## Terminal
 
 Every machine gets the same terminal: the same prompt, history, completion and line editing.
