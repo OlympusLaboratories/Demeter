@@ -7,14 +7,26 @@
     "window.autoDetectHighContrast": false,
 
     "workbench.colorCustomizations": {
-        "commandCenter.background": "#000000A6",
-        "commandCenter.activeBackground": "#000000CC",
-        "commandCenter.foreground": "#FFFFFF",
-        "commandCenter.activeForeground": "#FFFFFF",
-        "commandCenter.inactiveForeground": "#FFFFFFCC",
-        "commandCenter.border": "#FFFFFF33",
-        "commandCenter.activeBorder": "#FFFFFF66",
-        "commandCenter.inactiveBorder": "#FFFFFF26",
+        "[Dark Horizon]": {
+            "commandCenter.background": "#000000A6",
+            "commandCenter.activeBackground": "#000000CC",
+            "commandCenter.foreground": "#FFFFFF",
+            "commandCenter.activeForeground": "#FFFFFF",
+            "commandCenter.inactiveForeground": "#FFFFFFCC",
+            "commandCenter.border": "#FFFFFF33",
+            "commandCenter.activeBorder": "#FFFFFF66",
+            "commandCenter.inactiveBorder": "#FFFFFF26"
+        },
+
+        "[Pastel Sky Bright Theme]": {
+            "tab.activeForeground": "#3A4657",
+            "tab.inactiveForeground": "#5A6474",
+            "tab.hoverForeground": "#2F3A4A",
+            "list.activeSelectionForeground": "#3A4657",
+            "list.inactiveSelectionForeground": "#3A4657",
+            "list.hoverForeground": "#2F3A4A",
+            "titleBar.activeForeground": "#3A4657"
+        },
 
         "[Dark Modern]": {
             "list.activeSelectionBackground": "#04395E",
@@ -67,16 +79,7 @@
         }
     },
 
-    "peacock.excludedSettings": [
-        "commandCenter.background",
-        "commandCenter.activeBackground",
-        "commandCenter.foreground",
-        "commandCenter.activeForeground",
-        "commandCenter.inactiveForeground",
-        "commandCenter.border",
-        "commandCenter.activeBorder",
-        "commandCenter.inactiveBorder"
-    ],
+    "peacock.excludedSettings": [],
     "peacock.affectTitleBar": true,
     "peacock.affectActivityBar": true,
     "peacock.affectStatusBar": true,

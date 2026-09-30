@@ -150,6 +150,18 @@ Code webview consumes (`list.activeSelection*`, `textPreformat.*`,
 values in each theme, so light and dark differ in palette but not in which
 elements are visible.
 
+### Modern UI takes tab colors from the list colors
+
+With `workbench.experimental.modernUI` the tab strip stops reading the theme's
+`tab.*` entries: `modernEditorTab.activeForeground` falls back through
+`modernTab.activeForeground` to **`list.inactiveSelectionForeground`**, and the
+theme's own `tab.activeForeground` is consulted only when it is explicitly
+customized in settings. Pastel Sky Bright sets `list.inactiveSelectionForeground`
+to `#ffffff` — right on its blue selection bar, invisible on a `#f8fbff` active
+tab (1.04:1). The `[Pastel Sky Bright Theme]` block pins the tab *and* list
+foregrounds to a dark slate, which fixes the tab strip and the sidebar together.
+The dark themes never hit this: their list foregrounds are already light on dark.
+
 `window.autoDetectColorScheme` is **off**, because it and manual theme switching
 are mutually exclusive: the *Toggle between Light/Dark Themes* command bails out
 with "Cannot toggle between light and dark themes when `window.autoDetectColorScheme`
@@ -194,21 +206,29 @@ it works even without running *Shell Command: Install 'code' command in PATH*.
 
 ### Peacock
 
-Peacock colors the title bar per repo, but it only ever writes
-`commandCenter.foreground` and `commandCenter.border` — never
-`commandCenter.background` — and it picks its foreground from two hardcoded
-values by a luminance threshold. On mid-tone colors the repo name in the title
-bar ends up unreadable.
+Peacock colors the title bar per repo and writes `commandCenter.foreground` and
+`commandCenter.border` beside it, picking the foreground from two hardcoded
+values by a luminance threshold.
 
-The fix is `peacock.excludedSettings`, which Peacock documents as keys it must
-never modify or delete. Every `commandCenter.*` key is listed there, and they're
-pinned instead in `workbench.colorCustomizations` to white text on a 65% black
-scrim — readable over any hue Peacock picks, in either theme.
+The obvious workaround — pin white text on a 65% black scrim and exclude every
+`commandCenter.*` key from Peacock — does not survive modern UI, which never
+paints `commandCenter.background`. The scrim was invisible, so the white text sat
+directly on Peacock's hue, and in a window with **no** Peacock color it sat on
+the light theme's own pale title bar at 1.3:1. `peacock.excludedSettings` is
+therefore empty: Peacock owns the `commandCenter.*` keys, and the shared settings
+pin only `titleBar.activeForeground` per theme — which every Peacock-colored repo
+overrides anyway, so the pin only has to be right for uncolored windows.
+
+Peacock's own pick clears 4.5:1 on most hues but not on saturated mid-tones
+(`#fd0bf2` lands at 2.6:1). If a repo name reads dim, re-run Peacock and take a
+darker or lighter color; the background is per-repo, so only a per-repo
+foreground can answer it.
 
 Peacock writes into a repo's **workspace** `.vscode/settings.json`, which
-outranks user settings. A repo colored before this change still carries stale
-`commandCenter.*` keys; run `Peacock: Remove All Colors` and re-apply the color
-to clear them.
+outranks user settings. A repo colored while the `commandCenter.*` exclusions
+were in place carries no `commandCenter.foreground` at all; run
+`Peacock: Remove All Colors` and re-apply the color to have Peacock write the
+full set.
 
 ## Terminal
 
