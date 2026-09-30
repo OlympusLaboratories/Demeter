@@ -387,6 +387,8 @@ claude() { env -u ANTHROPIC_API_KEY command claude "$@"; }
 # direnv
 eval "$(direnv hook zsh)"
 
+command -v mise >/dev/null && eval "$(mise activate zsh)"
+
 # a-cli tab completion
 autoload -Uz compinit && compinit
 eval "$(_A_COMPLETE=zsh_source a)"
