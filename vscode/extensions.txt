@@ -38,4 +38,3 @@ shira.pastel-forest-theme
 shira.pastel-sky-theme
 svelte.svelte-vscode
 tomoki1207.pdf
-vscjava.vscode-gradle
