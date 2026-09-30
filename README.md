@@ -241,9 +241,34 @@ on [modern UI being off](#why-modern-ui-is-off); with modern UI on,
 the bare title bar.
 
 Peacock writes into a repo's **workspace** `.vscode/settings.json`, which
-outranks user settings. A repo colored before this change still carries stale
-`commandCenter.*` keys; run `Peacock: Remove All Colors` and re-apply the color
-to clear them.
+outranks user settings, and a repo colored before the exclusions were added
+still carries `commandCenter.foreground` and `commandCenter.border` from that
+earlier write. On a light hue Peacock's pick is `#15202b`, and dark ink on the
+65% black scrim is unreadable (1.3:1 on `#f97316`).
+
+`Peacock: Remove All Colors` does **not** clear them — `peacock.excludedSettings`
+means "never modify or delete", so the excluded keys are exactly the ones it
+leaves behind. `vscode/strip-stale-peacock-keys.sh` removes them:
+
+```bash
+vscode/strip-stale-peacock-keys.sh
+```
+
+`install.sh` runs it on every install, so a machine repairs itself rather than
+presenting a dim title bar with no obvious cause. It reads the key list from
+`peacock.excludedSettings` rather than hardcoding it, so excluding a new key is
+enough to have the sweep enforce it everywhere.
+
+The sweep searches `$HOME` five levels deep, skipping `node_modules`, `.git`,
+`Library` and similar; `PEACOCK_SCAN_ROOT` and `PEACOCK_SCAN_DEPTH` override
+that if your repos live elsewhere. It lists what it found and asks before
+writing, strips only the owned keys, and re-parses each file afterwards to
+confirm nothing else changed — a file that packs several settings onto one line
+is reported and left alone rather than rewritten.
+
+With the keys gone the user-level pins apply and every hue lands between 8:1 and
+18:1. Repos colored from here on never grow them, because the exclusions are in
+place before Peacock writes.
 
 ## Terminal
 

@@ -511,6 +511,15 @@ main() {
     echo ""
   fi
 
+  local stale_keys_sweep="$REPO_DIR/vscode/strip-stale-peacock-keys.sh"
+  if [[ -x "$stale_keys_sweep" ]] && ! should_skip "vscode" "$machine"; then
+    bold "Checking workspace color overrides ..."
+    if ! "$stale_keys_sweep" --quiet; then
+      warn "Sweep failed — run vscode/strip-stale-peacock-keys.sh by hand."
+    fi
+    echo ""
+  fi
+
   local machine_settings_src="$REPO_DIR/vscode/machine-settings.json"
   if [[ -f "$machine_settings_src" && "$machine" == "linux" ]] && ! should_skip "vscode" "$machine"; then
     bold "Linking VS Code Remote-SSH machine settings ..."
