@@ -1,32 +1,21 @@
 {
     "workbench.preferredDarkColorTheme": "Dark Horizon", // change for dark mode
-    "workbench.preferredLightColorTheme": "Pastel Sky Bright Theme", // change for light mode
+    "workbench.preferredLightColorTheme": "Github Light Theme", // change for light mode
     "workbench.preferredHighContrastColorTheme": "Dark Modern",
     "workbench.preferredHighContrastLightColorTheme": "Light Modern",
     "window.autoDetectColorScheme": false,
     "window.autoDetectHighContrast": false,
+    "workbench.experimental.modernUI": false,
 
     "workbench.colorCustomizations": {
-        "[Dark Horizon]": {
-            "commandCenter.background": "#000000A6",
-            "commandCenter.activeBackground": "#000000CC",
-            "commandCenter.foreground": "#FFFFFF",
-            "commandCenter.activeForeground": "#FFFFFF",
-            "commandCenter.inactiveForeground": "#FFFFFFCC",
-            "commandCenter.border": "#FFFFFF33",
-            "commandCenter.activeBorder": "#FFFFFF66",
-            "commandCenter.inactiveBorder": "#FFFFFF26"
-        },
-
-        "[Pastel Sky Bright Theme]": {
-            "tab.activeForeground": "#3A4657",
-            "tab.inactiveForeground": "#5A6474",
-            "tab.hoverForeground": "#2F3A4A",
-            "list.activeSelectionForeground": "#3A4657",
-            "list.inactiveSelectionForeground": "#3A4657",
-            "list.hoverForeground": "#2F3A4A",
-            "titleBar.activeForeground": "#3A4657"
-        },
+        "commandCenter.background": "#000000A6",
+        "commandCenter.activeBackground": "#000000CC",
+        "commandCenter.foreground": "#FFFFFF",
+        "commandCenter.activeForeground": "#FFFFFF",
+        "commandCenter.inactiveForeground": "#FFFFFFCC",
+        "commandCenter.border": "#FFFFFF33",
+        "commandCenter.activeBorder": "#FFFFFF66",
+        "commandCenter.inactiveBorder": "#FFFFFF26",
 
         "[Dark Modern]": {
             "list.activeSelectionBackground": "#04395E",
@@ -79,7 +68,16 @@
         }
     },
 
-    "peacock.excludedSettings": [],
+    "peacock.excludedSettings": [
+        "commandCenter.background",
+        "commandCenter.activeBackground",
+        "commandCenter.foreground",
+        "commandCenter.activeForeground",
+        "commandCenter.inactiveForeground",
+        "commandCenter.border",
+        "commandCenter.activeBorder",
+        "commandCenter.inactiveBorder"
+    ],
     "peacock.affectTitleBar": true,
     "peacock.affectActivityBar": true,
     "peacock.affectStatusBar": true,
@@ -131,7 +129,7 @@
     "window.zoomLevel": 4,
     "claudemeter.debugLogFile": "/Users/dylanlarrabee/Library/Application Support/claudemeter/debug.log",
     "chat.titleBar.signIn.enabled": false,
-    "workbench.colorTheme": "Dark Horizon",
+    "workbench.colorTheme": "Github Light Theme",
     "terminal.integrated.initialHint": false,
     "worktreeSync.direction": "both",
     "claudeUsage.barStyle": "squares"
