@@ -6,6 +6,8 @@ REPOS=(
   "gridmatic-dev|https://gitlab.com/gridmatic/foundation/gridmatic-dev.git"
   "tlaloc|https://gitlab.com/gridmatic/tlaloc.git"
   "tlaloc-env|https://gitlab.com/gridmatic/tlaloc-env.git"
+  "ftl-platform|https://gitlab.com/gridmatic/foundation/ftl-platform.git"
+  "ftl-poc|https://gitlab.com/gridmatic/foundation/ftl-poc.git"
 )
 
 MISE_CONFIGS=(
