@@ -264,21 +264,66 @@ run_tool_install() {
 }
 
 # PATH first, then the macOS app bundle — present even when the user never ran
-# "Shell Command: Install 'code' command in PATH".
+# "Shell Command: Install 'code' command in PATH" — then the CLIs a Remote-SSH
+# box unpacks under ~/.vscode-server, which are never on PATH outside the
+# integrated terminal. Newest first within each layout.
+editor_cli_candidates() {
+  command -v code 2>/dev/null || true
+  command -v codium 2>/dev/null || true
+  local bundle="/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
+  [[ -x "$bundle" ]] && echo "$bundle"
+  local candidate found=()
+  for candidate in \
+    "$HOME"/.vscode-server/cli/servers/*/server/bin/code-server \
+    "$HOME"/.vscode-server/bin/*/bin/code-server \
+    "$HOME"/.vscode-server/bin/*/bin/remote-cli/code \
+    "$HOME"/.vscode-server-insiders/cli/servers/*/server/bin/code-server; do
+    [[ -x "$candidate" ]] && found+=("$candidate")
+  done
+  [[ "${#found[@]}" -gt 0 ]] && ls -t -- "${found[@]}"
+  return 0
+}
+
+EDITOR_CLI_CACHE=""
+
 editor_cli() {
-  if command -v code >/dev/null 2>&1; then
-    command -v code
-  elif command -v codium >/dev/null 2>&1; then
-    command -v codium
-  elif [[ -x "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" ]]; then
-    echo "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
-  else
-    return 1
+  if [[ -n "$EDITOR_CLI_CACHE" ]]; then
+    echo "$EDITOR_CLI_CACHE"
+    return 0
   fi
+  local candidate
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    if "$candidate" --list-extensions >/dev/null 2>&1; then
+      EDITOR_CLI_CACHE="$candidate"
+      echo "$candidate"
+      return 0
+    fi
+  done < <(editor_cli_candidates)
+  return 1
 }
 
 editor_cli_available() {
   editor_cli >/dev/null 2>&1
+}
+
+tool_extension_id() {
+  local pkg="$1/package.json"
+  [[ -f "$pkg" ]] || return 1
+  python3 -c "
+import json, sys
+d = json.load(open(sys.argv[1]))
+pub, name = d.get('publisher'), d.get('name')
+if not (pub and name):
+    sys.exit(1)
+print(f'{pub}.{name}'.lower())
+" "$pkg" 2>/dev/null
+}
+
+editor_has_extension() {
+  local id="$1" editor_bin
+  editor_bin="$(editor_cli)" || return 1
+  "$editor_bin" --list-extensions 2>/dev/null | tr '[:upper:]' '[:lower:]' | grep -qx "$id"
 }
 
 # One extension id per line; `#` comments and blank lines are ignored.
@@ -428,6 +473,24 @@ main() {
     done
   fi
 
+  local worktree_hook="$claude_dst/hooks/link-worktree-session.py"
+  if [[ -x "$worktree_hook" ]]; then
+    echo ""
+    bold "Linking worktree sessions back to their main checkout ..."
+    local backfill_out=""
+    if backfill_out="$(env -i HOME="$HOME" PATH="/usr/bin:/bin" "$worktree_hook" --backfill 2>&1)"; then
+      success "${backfill_out##*$'\n'}"
+    else
+      warn "The session hook cannot run the way Claude Code spawns it."
+      info "  Hooks get a bare PATH (/usr/bin:/bin), so a python3 from mise or a"
+      info "  venv is never found and the hook fails silently on every session."
+      info "  Install a system python3, then re-run this installer."
+      if backfill_out="$("$worktree_hook" --backfill 2>&1)"; then
+        info "  Backfilled with your PATH for now: ${backfill_out##*$'\n'}"
+      fi
+    fi
+  fi
+
   local staged_mcp="$home/.config/nvim/mcp.json"
   if [[ -f "$staged_mcp" ]]; then
     bold "Installing staged MCP config ..."
@@ -482,17 +545,24 @@ main() {
     if [[ "${#buildable[@]}" -gt 0 ]]; then
       echo ""
       if ! editor_cli_available; then
-        warn "No VS Code CLI found — not installing: ${buildable[*]+${buildable[*]}}"
+        warn "No working VS Code CLI found — not installing: ${buildable[*]+${buildable[*]}}"
+        info "  Looked on PATH, in the macOS app bundle, and under ~/.vscode-server."
         [[ "$machine" == "linux" ]] && \
-          info "  Over Remote-SSH, editor extensions install on the client machine."
+          info "  Over Remote-SSH, UI-only extensions install on the client machine."
       elif ask "Build and install shared tools into the editor (${buildable[*]+${buildable[*]}})?"; then
         for tool_name in "${buildable[@]+"${buildable[@]}"}"; do
           bold "Installing $tool_name ..."
-          if run_tool_install "$tools_dir/$tool_name"; then
-            success "Installed $tool_name"
-          else
+          local ext_id=""
+          ext_id="$(tool_extension_id "$tools_dir/$tool_name")" || ext_id=""
+          if ! run_tool_install "$tools_dir/$tool_name"; then
             warn "Failed to install $tool_name"
             info "  Retry with: make -C $tools_dir/$tool_name install"
+          elif [[ -n "$ext_id" ]] && ! editor_has_extension "$ext_id"; then
+            warn "$tool_name built, but $ext_id is not registered with the editor."
+            info "  Installed via: $(editor_cli)"
+            info "  Retry with: make -C $tools_dir/$tool_name install"
+          else
+            success "Installed $tool_name"
           fi
         done
         if pgrep -f "MacOS/Code$|/usr/share/code/code|Code Helper" >/dev/null 2>&1; then

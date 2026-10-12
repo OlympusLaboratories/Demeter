@@ -373,11 +373,13 @@ Each profile's shell config also defines `go` (worktree-aware `git checkout` —
 
 `.claude/hooks/` is linked into `~/.claude/hooks/`, and each profile's `settings.json` registers the hooks that run from there. One hook lives there today:
 
-**`link-worktree-session.py`** (`SessionStart`, `CwdChanged`, `Stop`) — a session started inside a worktree writes its transcript to that worktree's own `~/.claude/projects/<slug>/` directory, so `claude --resume` run from the main checkout cannot see it. The hook symlinks each worktree session's transcript back into the main checkout's project directory, which makes every worktree's history resumable and searchable from one place. Run it with `--backfill` to link transcripts recorded before the hook was installed:
+**`link-worktree-session.py`** (`SessionStart`, `CwdChanged`, `Stop`) — a session started inside a worktree writes its transcript to that worktree's own `~/.claude/projects/<slug>/` directory, so `claude --resume` run from the main checkout cannot see it. The hook symlinks each worktree session's transcript back into the main checkout's project directory, which makes every worktree's history resumable and searchable from one place. `install.sh` runs the backfill for you, so sessions recorded before the hook existed are linked on the first install; run it by hand after importing transcripts from elsewhere:
 
 ```bash
 ~/.claude/hooks/link-worktree-session.py --backfill
 ```
+
+Claude Code spawns hooks with a **bare `PATH`**, not the one your shell builds, so a `#!/usr/bin/env python3` hook that works perfectly when you run it yourself can still fail on every real session — and it fails invisibly, with no session ever appearing where you expect it. The installer therefore probes the hook under `env -i PATH=/usr/bin:/bin` and tells you when a system `python3` is missing, rather than assuming that linking the file was enough. A python3 that exists only under mise or a venv will not do.
 
 ### Claude Usage Extension
 
@@ -411,6 +413,8 @@ make -C ~/.claude/tools/worktree-sync install
 
 The build runs through `mise exec` when the tool has a `.mise.toml`, so it works from a shell where the pinned toolchain isn't activated.
 
-A VS Code extension installs into `~/.vscode/extensions`, which every **profile** on the machine shares — but each profile chooses whether to enable it, so enable it once per profile. On Linux the installer skips the build when no `code` CLI is on PATH: over Remote-SSH the extension belongs on the client machine.
+A VS Code extension installs into `~/.vscode/extensions`, which every **profile** on the machine shares — but each profile chooses whether to enable it, so enable it once per profile.
+
+**Over Remote-SSH it belongs on the remote, not the client.** It reads the transcript corpus under `~/.claude/projects`, which lives wherever your sessions actually run — install it on the client and it indexes the wrong machine's history and resolves nothing. The catch is that `code` is only on PATH inside VS Code's integrated terminal, so an installer run from a plain SSH shell used to skip the build without comment; it now also finds the CLIs under `~/.vscode-server/` and checks afterwards that the extension id really registered. Nothing runnable is committed — `dist/` and `*.vsix` are gitignored — so a box where that build never ran has the extension listed and no bundle behind it: it looks installed and silently never activates. `Worktree Sync: Show Diagnostics` names the failure when sync goes quiet.
 
 `make link` is the development alternative: it symlinks the source into `~/.vscode/extensions/` so a rebuild picks up on a window reload. `make check` runs typecheck, tests, and build. See [tools/worktree-sync/README.md](tools/worktree-sync/README.md) for how tabs and terminals are matched and which settings it exposes.
