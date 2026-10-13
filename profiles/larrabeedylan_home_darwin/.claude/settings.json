@@ -16,6 +16,17 @@
   },
   "remoteControlAtStartup": false,
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "EnterWorktree",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/link-worktree-session.py"
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [
