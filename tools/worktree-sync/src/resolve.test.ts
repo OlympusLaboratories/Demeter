@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  aliasOutranks,
   isPathWithin,
+  normalizeLabel,
   parseSessionTail,
   resolveWorktreeForCwd,
   sessionAliases,
   splitTail,
+  truncatedPrefix,
 } from './resolve';
 
 const REPO = '/Users/d/gridmatic-dev';
@@ -132,6 +135,45 @@ describe('sessionAliases', () => {
 
   it('is empty for a session with no title and no worktree', () => {
     expect(sessionAliases(parseSessionTail([]))).toEqual([]);
+  });
+});
+
+describe('prompt aliases', () => {
+  const lastPrompt = (p: string) => JSON.stringify({ type: 'last-prompt', lastPrompt: p, sessionId: 's1' });
+
+  it('reads the newest last prompt', () => {
+    const facts = parseSessionTail([lastPrompt('/fix-linear PLAT-1'), lastPrompt('try again')]);
+    expect(facts.lastPrompt).toBe('try again');
+  });
+
+  it('offers the last prompt after every title and name alias', () => {
+    const facts = parseSessionTail([worktreeState(WT), lastPrompt('/fix-linear PLAT-2401')]);
+    expect(sessionAliases(facts)).toEqual([
+      { value: 'PLAT-2401', kind: 'name' },
+      { value: '/fix-linear PLAT-2401', kind: 'prompt' },
+    ]);
+  });
+
+  it('ranks titles over names over prompts', () => {
+    expect(aliasOutranks('title', 'name')).toBe(true);
+    expect(aliasOutranks('name', 'prompt')).toBe(true);
+    expect(aliasOutranks('prompt', 'title')).toBe(false);
+  });
+});
+
+describe('label normalization', () => {
+  it('collapses runs of whitespace', () => {
+    expect(normalizeLabel('  /fix-linear   dylan/PLAT-1 ')).toBe('/fix-linear dylan/PLAT-1');
+  });
+
+  it('turns a label cut off with an ellipsis into a prefix', () => {
+    expect(truncatedPrefix('/fix-linear  dylan/PLAT-\u2026')).toBe('/fix-linear dylan/PLAT-');
+    expect(truncatedPrefix('/fix-linear dylan/PLAT-...')).toBe('/fix-linear dylan/PLAT-');
+  });
+
+  it('treats a label without an ellipsis as complete', () => {
+    expect(truncatedPrefix('PLAT-2401')).toBeUndefined();
+    expect(truncatedPrefix('\u2026')).toBeUndefined();
   });
 });
 

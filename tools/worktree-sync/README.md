@@ -25,12 +25,19 @@ alias it might present**, in this precedence:
 2. `ai-title` — the generated title
 3. `worktreeName` from `worktree-state`
 4. the worktree directory's basename
+5. `lastPrompt` from `last-prompt` — what the tab shows when a session has no title at all,
+   which is the norm for one started from a slash command (`/fix-linear PLAT-2819`)
+
+Labels are compared with whitespace collapsed. The panel cuts long labels off with `…`, so a
+label ending in one matches every alias it is a prefix of — but only when all of those
+belong to one worktree. A prefix shared by sessions in different worktrees is skipped, not
+guessed.
 
 When two sessions claim the same alias, the more **specific worktree** wins: if one
 candidate's path contains the other's, the deeper one is taken. A repo-root session titled
 `PLAT-2472` therefore loses to the actual `PLAT-2472` worktree — which matters because the
 repo root is a key shared by dozens of sessions, and resolving there is almost never what
-you meant. Only when the paths are unrelated does title outrank name, then newest mtime.
+you meant. Only when the paths are unrelated does title outrank name outrank prompt, then newest mtime.
 
 Renaming a tab writes a ~100-byte stub transcript containing just the `custom-title` and no
 location, so those are skipped; the rename is still matched through the real session's own

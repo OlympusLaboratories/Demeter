@@ -29,6 +29,8 @@ const message = (cwd: string, sessionId: string) =>
   JSON.stringify({ type: 'user', cwd, sessionId });
 const customTitle = (title: string, sessionId: string) =>
   JSON.stringify({ type: 'custom-title', customTitle: title, sessionId });
+const lastPrompt = (prompt: string, sessionId: string) =>
+  JSON.stringify({ type: 'last-prompt', lastPrompt: prompt, sessionId });
 const worktreeState = (worktreePath: string, sessionId: string) =>
   JSON.stringify({
     type: 'worktree-state',
@@ -102,6 +104,25 @@ beforeAll(async () => {
     new Date('2026-09-02T18:50:00Z'),
   );
   await writeSession('repo-stub', 's2472stub', [customTitle('PLAT-2472', 's2472stub')]);
+
+  await writeSession('repo', 's2819', [
+    message(repo, 's2819'),
+    lastPrompt('/fix-linear PLAT-2819', 's2819'),
+    worktreeState(worktree('PLAT-2819'), 's2819'),
+  ]);
+  await writeSession('repo', 's2922', [
+    message(repo, 's2922'),
+    lastPrompt('/fix-linear dylan/PLAT-2922', 's2922'),
+    worktreeState(worktree('PLAT-2922'), 's2922'),
+  ]);
+  await writeSession('repo', 's3001', [
+    lastPrompt('/fix-linear dylan/PLAT-3001', 's3001'),
+    worktreeState(worktree('PLAT-3001'), 's3001'),
+  ]);
+  await writeSession('repo', 's3002', [
+    lastPrompt('/fix-linear dylan/PLAT-3002', 's3002'),
+    worktreeState(worktree('PLAT-3002'), 's3002'),
+  ]);
 
   await writeSession('repo-a', 's2408', [aiTitle('PLAT-2408', 's2408'), message(repo, 's2408')]);
   await writeSession('repo-b', 'schat', [
@@ -291,6 +312,39 @@ describe('Claude tab to terminal', () => {
     await settle();
     expect(state.showCalls).toEqual([]);
     expect(state.logLines.some((l) => l.includes('no terminal open'))).toBe(true);
+  });
+});
+
+describe('Claude tab labelled by its prompt', () => {
+  async function showFor(label: string, names: string[]): Promise<string[]> {
+    const tab = makeTab(label, f.group);
+    f.group.tabs = [...f.group.tabs, tab];
+    state.terminals = [
+      ...state.terminals,
+      ...names.map((name) => makeTerminal(`zsh ${name}`, worktree(name))),
+    ];
+    activateTab(tab);
+    onDidChangeTabs.fire({});
+    await settle();
+    return state.showCalls;
+  }
+
+  it('matches a tab showing the last prompt of a session with no title', async () => {
+    expect(await showFor('/fix-linear PLAT-2819', ['PLAT-2819'])).toEqual([
+      'zsh PLAT-2819:preserveFocus=true',
+    ]);
+  });
+
+  it('matches a truncated prompt label by prefix, ignoring doubled spaces', async () => {
+    expect(await showFor('/fix-linear  dylan/PLAT-292\u2026', ['PLAT-2922'])).toEqual([
+      'zsh PLAT-2922:preserveFocus=true',
+    ]);
+  });
+
+  it('skips a truncated label whose prefix fits sessions in different worktrees', async () => {
+    expect(await showFor('/fix-linear dylan/PLAT-300\u2026', ['PLAT-3001', 'PLAT-3002'])).toEqual(
+      [],
+    );
   });
 });
 

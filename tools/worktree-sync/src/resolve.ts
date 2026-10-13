@@ -6,12 +6,19 @@ export interface TailFacts {
   sessionId?: string;
   aiTitle?: string;
   customTitle?: string;
+  lastPrompt?: string;
   worktreeName?: string;
   worktreePath?: string;
   source?: WorktreeSource;
 }
 
-const TITLE_MARKERS = ['"ai-title"', '"custom-title"', '"worktree-state"', '"relocated"'];
+const TITLE_MARKERS = [
+  '"ai-title"',
+  '"custom-title"',
+  '"last-prompt"',
+  '"worktree-state"',
+  '"relocated"',
+];
 
 export function parseSessionTail(lines: string[]): TailFacts {
   const facts: TailFacts = {};
@@ -54,6 +61,13 @@ export function parseSessionTail(lines: string[]): TailFacts {
         const title = record.customTitle;
         if (!facts.customTitle && typeof title === 'string' && title.length > 0) {
           facts.customTitle = title;
+        }
+        break;
+      }
+      case 'last-prompt': {
+        const prompt = record.lastPrompt;
+        if (!facts.lastPrompt && typeof prompt === 'string' && prompt.length > 0) {
+          facts.lastPrompt = prompt;
         }
         break;
       }
@@ -102,7 +116,7 @@ export function parseSessionTail(lines: string[]): TailFacts {
   return facts;
 }
 
-export type AliasKind = 'title' | 'name';
+export type AliasKind = 'title' | 'name' | 'prompt';
 
 export interface Alias {
   value: string;
@@ -115,6 +129,7 @@ export function sessionAliases(facts: TailFacts): Alias[] {
     { value: facts.aiTitle ?? '', kind: 'title' },
     { value: facts.worktreeName ?? '', kind: 'name' },
     { value: facts.worktreePath ? path.basename(facts.worktreePath) : '', kind: 'name' },
+    { value: facts.lastPrompt ?? '', kind: 'prompt' },
   ];
   const seen = new Set<string>();
   const aliases: Alias[] = [];
@@ -126,6 +141,28 @@ export function sessionAliases(facts: TailFacts): Alias[] {
     aliases.push(alias);
   }
   return aliases;
+}
+
+const ALIAS_PRECEDENCE: Record<AliasKind, number> = { title: 0, name: 1, prompt: 2 };
+
+export function aliasOutranks(candidate: AliasKind, incumbent: AliasKind): boolean {
+  return ALIAS_PRECEDENCE[candidate] < ALIAS_PRECEDENCE[incumbent];
+}
+
+export function normalizeLabel(label: string): string {
+  return label.replace(/\s+/g, ' ').trim();
+}
+
+const ELLIPSES = ['\u2026', '...'];
+
+export function truncatedPrefix(label: string): string | undefined {
+  const trimmed = label.trimEnd();
+  const ellipsis = ELLIPSES.find((e) => trimmed.endsWith(e));
+  if (!ellipsis) {
+    return undefined;
+  }
+  const prefix = normalizeLabel(trimmed.slice(0, -ellipsis.length));
+  return prefix.length > 0 ? prefix : undefined;
 }
 
 export function normalizePath(value: string): string {

@@ -2,11 +2,14 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Logger } from './log';
 import {
+  aliasOutranks,
   isPathWithin,
+  normalizeLabel,
   normalizePath,
   parseSessionTail,
   sessionAliases,
   splitTail,
+  truncatedPrefix,
   type AliasKind,
   type WorktreeSource,
 } from './resolve';
@@ -59,7 +62,7 @@ function rankBeats(candidate: SessionEntry, incumbent: SessionEntry): boolean {
     }
   }
   if (candidate.matchedVia !== incumbent.matchedVia) {
-    return candidate.matchedVia === 'title';
+    return aliasOutranks(candidate.matchedVia, incumbent.matchedVia);
   }
   return candidate.mtimeMs > incumbent.mtimeMs;
 }
@@ -113,7 +116,7 @@ export class SessionIndex {
 
   async lookupLabel(label: string): Promise<SessionEntry | undefined> {
     await this.ensureFresh();
-    const hit = this.byLabel.get(label);
+    const hit = this.find(label);
     if (hit) {
       return hit;
     }
@@ -121,11 +124,35 @@ export class SessionIndex {
       return undefined;
     }
     await this.ensureFresh(true);
-    const retried = this.byLabel.get(label);
+    const retried = this.find(label);
     if (!retried) {
       this.misses.add(label);
     }
     return retried;
+  }
+
+  private find(label: string): SessionEntry | undefined {
+    const exact = this.byLabel.get(normalizeLabel(label));
+    if (exact) {
+      return exact;
+    }
+    const prefix = truncatedPrefix(label);
+    if (prefix === undefined) {
+      return undefined;
+    }
+    let best: SessionEntry | undefined;
+    for (const [key, entry] of this.byLabel) {
+      if (!key.startsWith(prefix)) {
+        continue;
+      }
+      if (best && best.worktreePath !== entry.worktreePath) {
+        return undefined;
+      }
+      if (!best || rankBeats(entry, best)) {
+        best = entry;
+      }
+    }
+    return best;
   }
 
   knownWorktrees(): Set<string> {
@@ -210,7 +237,7 @@ export class SessionIndex {
       if (aliases.length === 0) {
         skipped.push({
           file,
-          reason: 'no ai-title, custom-title, or worktree name to match a tab label against',
+          reason: 'no ai-title, custom-title, worktree name, or last prompt to match a tab label against',
         });
         return;
       }
@@ -229,9 +256,10 @@ export class SessionIndex {
           mtimeMs,
           file,
         };
-        const existing = byLabel.get(alias.value);
+        const key = normalizeLabel(alias.value);
+        const existing = byLabel.get(key);
         if (!existing || rankBeats(entry, existing)) {
-          byLabel.set(alias.value, entry);
+          byLabel.set(key, entry);
         }
       }
     });
