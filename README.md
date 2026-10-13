@@ -339,6 +339,29 @@ before `compinit`, syntax highlighting after every widget (it loads from a one-s
 hook, which is also what keeps rdev from loading it twice), and the `source` line staying last
 in each profile rc. **If you add a section to a profile `.zshrc`, add it above that line.**
 
+### VS Code shell integration is loaded by `terminal.zsh`, not injected
+
+`vscode/settings.json` sets `terminal.integrated.shellIntegration.enabled: false` — and so
+does `vscode/machine-settings.json`, the Remote-SSH machine settings, so an rdev box gets it
+whichever client connects — and
+`terminal.zsh` sources VS Code's `shellIntegration-rc.zsh` itself when `TERM_PROGRAM` is
+`vscode`. You still get command decorations, the sticky scroll and the terminal cwd that
+worktree-sync pairs on — only the delivery changes.
+
+Automatic injection works by pointing `ZDOTDIR` at a temporary directory whose `.zshrc` sources
+yours from `$USER_ZDOTDIR`. VS Code writes those variables into the environment it saves for
+the terminal, and when it **revives** a terminal whose process died — every reload after an
+rdev disconnect — it injects again on that saved environment, computing
+`USER_ZDOTDIR=$ZDOTDIR`: its own directory. Its `.zshrc` then sources itself and returns, so
+your rc never runs. The tell is a revived terminal (`History restored`) showing zsh's bare
+`host%` prompt with no starship, writing history to `/tmp/<user>-code-zsh/.zsh_history`.
+With injection off, VS Code never touches `ZDOTDIR` and there is nothing to loop on.
+
+The script is found from `$VSCODE_GIT_ASKPASS_MAIN`, which points into the running VS Code
+install on both the Mac app bundle and an rdev `~/.vscode-server`, so no CLI is spawned per
+shell; `code --locate-shell-integration-path zsh` is the fallback. A terminal that was already
+broken before this change keeps its saved environment — close it once.
+
 ### Tools
 
 `terminal.zsh` degrades quietly when something isn't installed — no starship means a plain

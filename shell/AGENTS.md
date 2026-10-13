@@ -69,6 +69,24 @@ what lets one code path serve both kinds of machine. Override with `$DEMETER_ZSH
 Homebrew's own plugin locations (`/opt/homebrew/share/...`) are searched as a fallback, so a
 `brew install zsh-autosuggestions` is picked up too.
 
+## VS Code shell integration
+
+`vscode/settings.json` turns automatic injection off and `terminal.zsh` sources
+`shellIntegration-rc.zsh` itself, guarded on `TERM_PROGRAM == vscode` and on
+`$VSCODE_SHELL_INTEGRATION` being unset (a terminal still running on an old injected
+environment already has it). Injection rewrites `ZDOTDIR` into the environment VS Code saves
+for terminal revival, and a revive re-injects on that environment with
+`USER_ZDOTDIR=$ZDOTDIR` — VS Code's own temp directory — so the user rc never runs. Read the
+README's Terminal section before turning injection back on.
+
+Two rules for the block:
+
+- **Source at top level, never inside a function.** The script relies on global assignments; a
+  function body would scope some of them away. Only the path lookup is a function.
+- **Unset `VSCODE_INJECTION` and `USER_ZDOTDIR` first.** They are meaningless in manual mode
+  but can be inherited from a saved environment, and with `VSCODE_INJECTION=1` the script
+  points `HISTFILE` at the temp directory and sources `~/.zshrc` a second time.
+
 ## When rdev changes
 
 `starship.toml` is a copy, so the prompts match. If rdev's changes, re-copy it rather than

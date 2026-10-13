@@ -112,6 +112,7 @@
     "extensions.autoUpdate": "off",
     "security.promptForRemoteFileProtocolHandling": false,
     "terminal.integrated.enableMultiLinePasteWarning": "never",
+    "terminal.integrated.shellIntegration.enabled": false,
     "redhat.telemetry.enabled": true,
     "azureTerraform.survey": {
         "surveyPromptDate": "never",

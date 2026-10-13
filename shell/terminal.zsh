@@ -122,6 +122,24 @@ fi
 : "${LESS:=-R}"
 export LESS
 
+_dt_vscode_integration_script() {
+  local script=""
+  if [[ -n "${VSCODE_GIT_ASKPASS_MAIN:-}" ]]; then
+    script="${VSCODE_GIT_ASKPASS_MAIN%/extensions/git/dist/askpass-main.js}/out/vs/workbench/contrib/terminal/common/scripts/shellIntegration-rc.zsh"
+  fi
+  if [[ ! -r "$script" ]] && command -v code >/dev/null 2>&1; then
+    script="$(code --locate-shell-integration-path zsh 2>/dev/null)"
+  fi
+  [[ -r "$script" ]] && print -r -- "$script"
+}
+
+if [[ "${TERM_PROGRAM:-}" == "vscode" && -z "${VSCODE_SHELL_INTEGRATION:-}" ]] \
+  && _dt_vscode_rc="$(_dt_vscode_integration_script)"; then
+  unset VSCODE_INJECTION USER_ZDOTDIR
+  source "$_dt_vscode_rc"
+fi
+unfunction _dt_vscode_integration_script
+
 _dt_load_syntax_highlighting() {
   add-zsh-hook -d precmd _dt_load_syntax_highlighting
   if [[ -z "${ZSH_HIGHLIGHT_VERSION:-}" ]]; then
@@ -135,4 +153,4 @@ _dt_load_syntax_highlighting() {
 }
 add-zsh-hook precmd _dt_load_syntax_highlighting
 
-unset _dt_completions _dt_recompinit _dt_found _dt_fzf_init
+unset _dt_completions _dt_recompinit _dt_found _dt_fzf_init _dt_vscode_rc
