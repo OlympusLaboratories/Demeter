@@ -270,6 +270,31 @@ With the keys gone the user-level pins apply and every hue lands between 8:1 and
 18:1. Repos colored from here on never grow them, because the exclusions are in
 place before Peacock writes.
 
+#### Favorite colors
+
+`peacock.favoriteColors` carries 24 colors — twelve hues at 30° apart (red,
+orange, yellow, lime, green, spring, cyan, azure, blue, violet, magenta, rose)
+in two families. **Neon** is full saturation at mid lightness, for repos that
+should be impossible to miss; **Dusk** is the same twelve hues darkened and
+muted (40% saturation, ~32% lightness), for everything else. Naming them
+`Neon <hue>` and `Dusk <hue>` means `Peacock: Change to a Favorite Color`
+filters to one family by typing its prefix.
+
+Setting the key **replaces** Peacock's shipped favorites (Angular Red, Node
+Green and the rest) rather than adding to them. `Peacock: Save Current Color to
+Favorites` appends here, and because the file is a symlink that write lands in
+the repo.
+
+Every value is picked so Peacock's own foreground choice stays readable on it.
+Peacock selects between `#15202b` and `#e7e7e7` by a brightness threshold, and a
+saturated mid-tone can land just past it with nothing behind the text — pure
+neon red, azure, magenta and rose all measured 2.5–3.1:1 that way. Each hue uses
+instead the lightness closest to its family's target that clears 4.5:1 against
+whichever foreground the threshold picks, which moved four neons and three dusks
+by a few percent and left the rest untouched. The palette now spans 4.5:1 to
+15.4:1 for Peacock's text, and 7.4:1 to 18.5:1 for the white-on-65%-black
+command center scrim above.
+
 ### Global git ignore
 
 Peacock writes its color into a repo's workspace `.vscode/settings.json`, which
