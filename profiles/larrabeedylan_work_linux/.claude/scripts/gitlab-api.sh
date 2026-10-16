@@ -152,6 +152,43 @@ print(json.dumps({
 }))
 "
     ;;
+  update-mr-title)
+    # Args: project_path (URL-encoded), mr_iid, title
+    PROJECT="${2:?Usage: gitlab-api.sh update-mr-title <project_path_urlencoded> <mr_iid> <title>}"
+    MR_IID="${3:?}"
+    TITLE="${4:?}"
+    curl -sf -X PUT -H "PRIVATE-TOKEN: $TOKEN" \
+      --data-urlencode "title=$TITLE" \
+      "$GITLAB_URL/projects/$PROJECT/merge_requests/$MR_IID" | python3 -c "
+import sys, json
+mr = json.load(sys.stdin)
+print(json.dumps({
+    'iid': mr.get('iid'),
+    'title': mr.get('title', ''),
+    'web_url': mr.get('web_url', ''),
+}))
+"
+    ;;
+  create-note)
+    # Args: project_path (URL-encoded), mr_iid, body
+    # Posts a plain MR note with the body verbatim (no location prefix), so
+    # bot commands like `atlantis plan` parse correctly.
+    PROJECT="${2:?Usage: gitlab-api.sh create-note <project_path_urlencoded> <mr_iid> <body>}"
+    MR_IID="${3:?}"
+    BODY="${4:?}"
+    curl -sf -X POST -H "PRIVATE-TOKEN: $TOKEN" \
+      --data-urlencode "body=$BODY" \
+      "$GITLAB_URL/projects/$PROJECT/merge_requests/$MR_IID/notes" | python3 -c "
+import sys, json
+note = json.load(sys.stdin)
+print(json.dumps({
+    'id': note['id'],
+    'author': note.get('author', {}).get('username', ''),
+    'body': note.get('body', ''),
+    'created_at': note.get('created_at', ''),
+}))
+"
+    ;;
   mr-commits)
     # Args: project_path (URL-encoded), mr_iid
     PROJECT="${2:?Usage: gitlab-api.sh mr-commits <project_path_urlencoded> <mr_iid>}"
@@ -480,7 +517,7 @@ PYEOF
 )" < "$BODY_FILE"
     ;;
   *)
-    echo "Usage: gitlab-api.sh {current-user|merged-mrs|open-mrs|mr-info|mr-discussions|mr-changes|mr-commits|reply-to-thread|create-mr|update-mr-description|mr-for-branch|create-diff-comment}" >&2
+    echo "Usage: gitlab-api.sh {current-user|merged-mrs|open-mrs|mr-info|mr-discussions|mr-changes|mr-commits|reply-to-thread|create-note|create-mr|update-mr-description|update-mr-title|mr-for-branch|create-diff-comment}" >&2
     exit 1
     ;;
 esac

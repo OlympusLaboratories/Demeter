@@ -387,6 +387,18 @@ Then a short summary line: how many lenses ran, how many candidate findings were
 
 **Read the confirmed findings against EACH OTHER before presenting them.** Every finding is verified in isolation by its own panel, so nothing in the pipeline notices when two of them cannot both be true — one asserts a config value is ignored entirely, another asserts that same value changes behavior elsewhere, and both come back confirmed 3/3. Scan for pairs whose mechanisms are mutually exclusive, or where one finding's premise is the negation of another's. When you find such a pair, do not report both as fact: say which one the code actually supports (verify the load-bearing mechanism yourself — read the library source, run the command), and say plainly that the other's mechanism is wrong. Findings that are merely facets of one underlying defect should be grouped under it rather than listed as separate discoveries, and where finding B is a straightforward consequence of finding A, say so instead of counting it as independent evidence.
 
+**In an infrastructure-as-code repo, never let a finding treat `origin/main` as the deployed state.** Terraform/Helm/kustomize reviewers reason "state today holds X, this diff re-keys it, therefore apply destroys X" — and they derive "state today" from the default branch, because that is all they can read. But applied state is whatever was last *applied*, which in an Atlantis-style apply-before-merge shop routinely includes unmerged branches. A diff that merely re-synchronises the repo with already-applied state then looks exactly like a destructive migration, and every skeptic confirms it, because git genuinely says what they claim.
+
+The tell is a cluster of findings on one resource whose argument is about `for_each` keys, resource renames, or `moved` blocks. Before reporting any of them, check whether the change is already live:
+
+```bash
+git log -1 --format=%B <the commit that introduced it>     # authors often say "already applied"
+git branch -r --contains <sibling-branch>                   # unmerged but applied is the trap
+git diff HEAD <sibling-branch> -- <module path>             # empty = this diff is a no-op overlay
+```
+
+Then confirm against the provider, not the repo — `gcloud ... list`, `terraform state list`, or the Atlantis plan on the PR. If you cannot reach the provider (expired credentials, no PR yet), say the premise is **unverified** and name the one artifact that settles it. Do not present the cluster as confirmed defects, and do not silently drop it either; a destroy that is real and a destroy that is already applied read identically in the diff.
+
 **When findings agree on a premise that lives in ANOTHER repo, check that repo is current before believing any of them.** The scope filter only proves reviewers named a file from the diff; it says nothing about where they got their *semantics*. A config-only repo (Terraform, Helm, kustomize) rarely contains the engine that consumes it, so reviewers go read the sibling checkout — and a sibling checked out behind `origin/main` is a real, relevant, authoritative-looking file that is simply out of date. Every skeptic then confirms, because the stale code genuinely says what they claim.
 
 The tell is unanimity on a mechanism the diff itself does not contain: several lenses independently "confirming" the same external behavior, often quoting the same function. When you see it, before writing a single finding into the report:
