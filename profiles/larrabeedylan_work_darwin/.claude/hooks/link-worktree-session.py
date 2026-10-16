@@ -332,6 +332,7 @@ def prune_dead_links():
 
 
 def backfill():
+    os.makedirs(PROJECTS, exist_ok=True)
     counts = {"unified": 0, "already": 0, "conflict": 0}
     for entry in sorted(os.listdir(PROJECTS)):
         d = os.path.join(PROJECTS, entry)

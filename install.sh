@@ -255,12 +255,34 @@ tool_has_install_target() {
 }
 
 run_tool_install() {
-  local tool_dir="$1"
+  local tool_dir="$1" code_bin
+  code_bin="$(editor_cli)" || return 1
   if [[ -f "$tool_dir/.mise.toml" ]] && command -v mise >/dev/null 2>&1; then
-    ( cd "$tool_dir" && mise exec -- make install )
+    ( cd "$tool_dir" && mise exec -- make install CODE="$code_bin" )
   else
-    ( cd "$tool_dir" && make install )
+    ( cd "$tool_dir" && make install CODE="$code_bin" )
   fi
+}
+
+EXTENSION_INSTALL_TIMEOUT="${EXTENSION_INSTALL_TIMEOUT:-180}"
+
+run_with_timeout() {
+  local seconds="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$seconds" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$seconds" "$@"
+  else
+    "$@"
+  fi
+}
+
+install_extension() {
+  local editor_bin="$1" ext="$2"
+  run_with_timeout "$EXTENSION_INSTALL_TIMEOUT" "$editor_bin" --install-extension "$ext" --force >/dev/null 2>&1 && return 0
+  "$editor_bin" --list-extensions 2>/dev/null | tr '[:upper:]' '[:lower:]' |
+    grep -qxF "$(tr '[:upper:]' '[:lower:]' <<<"$ext")"
 }
 
 # PATH first, then the macOS app bundle — present even when the user never ran
@@ -556,11 +578,11 @@ main() {
           ext_id="$(tool_extension_id "$tools_dir/$tool_name")" || ext_id=""
           if ! run_tool_install "$tools_dir/$tool_name"; then
             warn "Failed to install $tool_name"
-            info "  Retry with: make -C $tools_dir/$tool_name install"
+            info "  Retry with: make -C $tools_dir/$tool_name install CODE=$(editor_cli)"
           elif [[ -n "$ext_id" ]] && ! editor_has_extension "$ext_id"; then
             warn "$tool_name built, but $ext_id is not registered with the editor."
             info "  Installed via: $(editor_cli)"
-            info "  Retry with: make -C $tools_dir/$tool_name install"
+            info "  Retry with: make -C $tools_dir/$tool_name install CODE=$(editor_cli)"
           else
             success "Installed $tool_name"
           fi
@@ -683,7 +705,7 @@ main() {
           echo ""
           if ask "Install ${#missing_exts[@]} missing extension(s)?"; then
             for wanted_ext in "${missing_exts[@]}"; do
-              if "$editor_bin" --install-extension "$wanted_ext" --force >/dev/null 2>&1; then
+              if install_extension "$editor_bin" "$wanted_ext"; then
                 success "Installed $wanted_ext"
               else
                 warn "Failed to install $wanted_ext"

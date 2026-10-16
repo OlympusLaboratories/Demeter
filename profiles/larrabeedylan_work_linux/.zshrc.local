@@ -504,6 +504,7 @@ if [[ -f "$HOME/.rdev-env" && -z "${RDEV_BOOTSTRAP_DISABLE:-}" ]]; then
 
     [[ -f "$state/done" ]] && return
     if [[ -f "$state/running" ]] && kill -0 "$(<"$state/running")" 2>/dev/null; then
+      print -u2 "rdev bootstrap: still running — $(tail -n 1 "$log")"
       return
     fi
 

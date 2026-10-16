@@ -20,6 +20,7 @@ MISE_CONFIGS=(
 STATE_DIR="$HOME/.rdev-bootstrap"
 FAILED_FILE="$STATE_DIR/failed"
 DONE_FILE="$STATE_DIR/done"
+SETUP_TIMEOUT="${RDEV_BOOTSTRAP_SETUP_TIMEOUT:-1200}"
 
 force=0
 [[ "${1:-}" == "--force" ]] && force=1
@@ -76,30 +77,38 @@ setup_repo() {
   }
 }
 
-handle_repo() {
+needs_bootstrap() {
+  [[ $force -eq 1 || ! -f "$STATE_DIR/$1.done" ]]
+}
+
+clone_repo() {
   local name="$1" url="$2" dir="$HOME/$1"
+  [[ -d "$dir/.git" ]] && return 0
+  log "$name: cloning $url"
+  git clone --progress "$url" "$dir" || {
+    log "$name: clone FAILED"
+    return 1
+  }
+}
+
+handle_repo() {
+  local name="$1" dir="$HOME/$1"
   local marker="$STATE_DIR/$name.done"
 
-  if [[ -f "$marker" && $force -eq 0 ]]; then
-    log "$name: already bootstrapped, skipping"
-    return 0
-  fi
-
-  if [[ ! -d "$dir/.git" ]]; then
-    log "$name: cloning $url"
-    git clone --progress "$url" "$dir" || {
-      log "$name: clone FAILED"
-      return 1
-    }
-  elif rdev_setup_done "$dir"; then
-    log "$name: already cloned and set up by rdev, skipping"
+  if rdev_setup_done "$dir"; then
+    log "$name: set up by rdev, skipping"
     : > "$marker"
     return 0
-  else
-    log "$name: already cloned, running setup"
   fi
 
-  setup_repo "$name" "$dir" || return 1
+  log "$name: running setup (timeout ${SETUP_TIMEOUT}s)"
+  timeout "$SETUP_TIMEOUT" "${BASH_SOURCE[0]}" --setup-one "$name" "$dir" </dev/null
+  local status=$?
+  if [[ $status -eq 124 ]]; then
+    log "$name: setup TIMED OUT after ${SETUP_TIMEOUT}s"
+    return 1
+  fi
+  [[ $status -eq 0 ]] || return 1
   : > "$marker"
   log "$name: done"
 }
@@ -110,11 +119,21 @@ main() {
   rm -f "$DONE_FILE"
 
   log "rdev bootstrap starting (${#REPOS[@]} repos)"
-  local entry name url
+  local entry name url pending=()
   for entry in "${REPOS[@]}"; do
     name="${entry%%|*}"
     url="${entry#*|}"
-    handle_repo "$name" "$url" || echo "$name" >> "$FAILED_FILE"
+    if ! needs_bootstrap "$name"; then
+      log "$name: already bootstrapped, skipping"
+    elif clone_repo "$name" "$url"; then
+      pending+=("$name")
+    else
+      echo "$name" >> "$FAILED_FILE"
+    fi
+  done
+
+  for name in "${pending[@]+"${pending[@]}"}"; do
+    handle_repo "$name" || echo "$name" >> "$FAILED_FILE"
   done
 
   if [[ -s "$FAILED_FILE" ]]; then
@@ -126,5 +145,10 @@ main() {
   fi
   return 0
 }
+
+if [[ "${1:-}" == "--setup-one" ]]; then
+  setup_repo "$2" "$3"
+  exit
+fi
 
 main "$@"
