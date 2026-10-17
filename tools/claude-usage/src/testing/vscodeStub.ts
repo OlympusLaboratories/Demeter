@@ -62,10 +62,15 @@ export interface StubStatusBarItem {
   dispose(): void;
 }
 
+const DEFAULT_EXTERNAL_COMMANDS = ['claude-vscode.editor.open', 'workbench.action.lockEditorGroup'];
+
 export const state = {
   config: {} as Record<string, unknown>,
   statusItems: [] as StubStatusBarItem[],
   commands: new Map<string, (...args: unknown[]) => unknown>(),
+  externalCommands: [...DEFAULT_EXTERNAL_COMMANDS],
+  executedCommands: [] as string[],
+  commandErrors: {} as Record<string, string>,
   logLines: [] as string[],
   infoMessages: [] as string[],
   warningMessages: [] as string[],
@@ -152,6 +157,17 @@ export const commands = {
     state.commands.set(id, handler);
     return { dispose() {} };
   },
+  executeCommand: (id: string, ...args: unknown[]) => {
+    state.executedCommands.push(id);
+    const failure = state.commandErrors[id];
+    if (failure !== undefined) {
+      return Promise.reject(new Error(failure));
+    }
+    const handler = state.commands.get(id);
+    return Promise.resolve(handler ? handler(...args) : undefined);
+  },
+  getCommands: (_filterInternal?: boolean) =>
+    Promise.resolve([...state.externalCommands, ...state.commands.keys()]),
 };
 
 export const env = {
@@ -172,6 +188,9 @@ export function resetState(): void {
   state.config = {};
   state.statusItems = [];
   state.commands = new Map();
+  state.externalCommands = [...DEFAULT_EXTERNAL_COMMANDS];
+  state.executedCommands = [];
+  state.commandErrors = {};
   state.logLines = [];
   state.infoMessages = [];
   state.warningMessages = [];

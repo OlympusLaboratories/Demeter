@@ -2,7 +2,7 @@
   "name": "claude-usage",
   "displayName": "Claude Usage",
   "description": "Shows Claude session and weekly quota usage as bars in the status bar.",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "publisher": "dylanlarrabee",
   "license": "MIT",
   "private": true,
@@ -37,6 +37,10 @@
       {
         "command": "claudeUsage.pickBarStyle",
         "title": "Claude Usage: Choose Bar Style"
+      },
+      {
+        "command": "claudeUsage.newChat",
+        "title": "Claude Usage: New Claude Chat in a Locked Group"
       }
     ],
     "configuration": {
@@ -97,6 +101,16 @@
           },
           "uniqueItems": true,
           "description": "Which meters to show: the 5-hour session window, the 7-day window, per-model 7-day windows, and extra-usage spend."
+        },
+        "claudeUsage.newChatButton": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a button to the left of the meters that opens a new Claude Code chat session as a tab in its own locked editor group. Needs the Claude Code extension."
+        },
+        "claudeUsage.newChatIcon": {
+          "type": "string",
+          "default": "sparkle",
+          "description": "Codicon name drawn on the new-chat button, without the $() wrapper. Try sparkle, comment-discussion, add, or robot. Browse the set at https://microsoft.github.io/vscode-codicons/dist/codicon.html."
         },
         "claudeUsage.labelStyle": {
           "type": "string",

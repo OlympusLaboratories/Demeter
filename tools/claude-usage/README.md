@@ -7,6 +7,13 @@ usage skill to find out how close you are to a limit.
 Session ●●○○○○ 33% 1h20m   Weekly ●●●○○○ 53% 5d20h   ⟳ now
 ```
 
+```
+✨   Session ●●○○○○ 33% 1h20m   Weekly ●●●○○○ 53% 5d20h   ⟳ now
+```
+
+The button on the left opens a new Claude Code chat as a tab in its own locked
+editor group — see [The new-chat button](#the-new-chat-button).
+
 Each meter is a separate status bar item: a label, a bar, the percentage used,
 and how long until that window resets. The 5-hour session window and the 7-day
 window are shown by default; per-model weekly windows and extra-usage spend are
@@ -163,6 +170,8 @@ except while a shared rate-limit backoff is in effect.
 | `claudeUsage.steadyAfter` | `2` | Identical readings in a row before easing off starts. |
 | `claudeUsage.credentials` | `auto` | `auto`, `claudeCode`, or `browser`. |
 | `claudeUsage.show` | `["session","weekly"]` | Any of `session`, `weekly`, `scoped`, `spend`. |
+| `claudeUsage.newChatButton` | `true` | Show the new-chat button to the left of the meters. |
+| `claudeUsage.newChatIcon` | `sparkle` | Codicon on that button, without the `$()` wrapper. |
 | `claudeUsage.labelStyle` | `long` | `long` gives `Session`/`Weekly`/`Credits`, `short` gives `5h`/`7d`/`$`. |
 | `claudeUsage.age` | `always` | `always`, `whenStale`, or `never` for the age chip. |
 | `claudeUsage.barWidth` | `6` | Cells per bar; `0` drops the bar and keeps the percentage. |
@@ -190,9 +199,36 @@ Which one looks best still depends on your font and zoom level, and the README
 cannot tell you. Run **Claude Usage: Choose Bar Style** and move through the
 list: each option previews live in the real status bar, and Enter keeps it.
 
+## The new-chat button
+
+To the left of the meters sits a one-glyph button that opens a **new** Claude
+Code chat session as a tab in its own **locked** editor group, which is the
+layout that makes a chat usable side by side with code: a locked group refuses
+to host anything else, so clicking a file in the explorer opens it in your code
+group instead of replacing the chat.
+
+It drives the Claude Code extension's own `claude-vscode.editor.open` command,
+so the session is an ordinary Claude Code tab — same history, same
+`Claude Code: Reopen Closed Session`, same everything. Claude Code puts the tab
+beside your code, reusing the column that already holds Claude tabs if there is
+one, and this extension then locks that group itself rather than relying on
+Claude Code's `claudeCode.lockEditorGroups` setting, so the button behaves the
+same whichever way that is set.
+
+The button is hidden by `claudeUsage.newChatButton: false`, and by
+`claudeUsage.enabled: false` along with everything else. Without the Claude Code
+extension in the window there is nothing to open, and clicking says so.
+
+`claudeUsage.newChatIcon` takes any [codicon](https://microsoft.github.io/vscode-codicons/dist/codicon.html)
+name — `sparkle` by default, `comment-discussion`, `add` and `robot` are the
+other obvious ones. Unlike the bars, this is a codicon rather than a text glyph,
+so it comes from VS Code's own bundled font and cannot fall back to a mismatched
+one.
+
 ## Commands
 
 - **Claude Usage: Refresh Now** — also what clicking a meter does.
+- **Claude Usage: New Claude Chat in a Locked Group** — what the button does.
 - **Claude Usage: Choose Bar Style** — live preview of each bar style.
 - **Claude Usage: Sign In With Browser**
 - **Claude Usage: Sign Out (Forget Browser Login)** — clears only this

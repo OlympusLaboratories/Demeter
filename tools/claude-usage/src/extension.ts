@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { AuthManager, CredentialMode, ResolvedToken } from './auth';
+import { openChatInLockedGroup } from './chat';
 import {
   AgeMode,
   BAR_STYLES,
@@ -28,6 +29,7 @@ const MIN_BACKOFF_MS = 60_000;
 const MAX_BACKOFF_MS = 15 * 60_000;
 const LOCK_STALE_MS = 60_000;
 const FRESH_FRACTION = 0.9;
+const NEW_CHAT_TOOLTIP = 'New Claude Code chat — opens a session tab in its own locked editor group';
 
 interface Settings {
   enabled: boolean;
@@ -36,6 +38,8 @@ interface Settings {
   steadyAfter: number;
   credentials: CredentialMode;
   show: MeterGroup[];
+  newChatButton: boolean;
+  newChatIcon: string;
   alignment: vscode.StatusBarAlignment;
   priority: number;
   age: AgeMode;
@@ -52,6 +56,8 @@ function readSettings(): Settings {
     steadyAfter: Math.max(1, config.get<number>('steadyAfter', 2)),
     credentials: config.get<CredentialMode>('credentials', 'auto'),
     show: GROUP_ORDER.filter((group) => show.includes(group)),
+    newChatButton: config.get<boolean>('newChatButton', true),
+    newChatIcon: config.get<string>('newChatIcon', 'sparkle'),
     alignment:
       config.get<string>('alignment', 'right') === 'left'
         ? vscode.StatusBarAlignment.Left
@@ -83,6 +89,7 @@ class UsageController {
   private readonly items = new Map<string, vscode.StatusBarItem>();
   private readonly noticeItem: vscode.StatusBarItem;
   private readonly freshnessItem: vscode.StatusBarItem;
+  private newChatItem: vscode.StatusBarItem | undefined;
   private settings = readSettings();
   private snapshot: UsageSnapshot | undefined;
   private notice: string | undefined;
@@ -123,6 +130,8 @@ class UsageController {
     this.settings = next;
     if (alignmentChanged) {
       this.disposeItems();
+      this.newChatItem?.dispose();
+      this.newChatItem = undefined;
     }
     this.render();
     this.schedule();
@@ -377,8 +386,10 @@ class UsageController {
       this.disposeItems();
       this.freshnessItem.hide();
       this.noticeItem.hide();
+      this.newChatItem?.hide();
       return;
     }
+    this.renderNewChat();
     const now = Date.now();
     const meters = this.visibleMeters();
     const seen = new Set<string>();
@@ -428,6 +439,20 @@ class UsageController {
     } else {
       this.noticeItem.hide();
     }
+  }
+
+  private renderNewChat(): void {
+    if (!this.settings.newChatButton) {
+      this.newChatItem?.hide();
+      return;
+    }
+    if (this.newChatItem === undefined) {
+      this.newChatItem = vscode.window.createStatusBarItem(this.settings.alignment, this.settings.priority + 1);
+      this.newChatItem.command = 'claudeUsage.newChat';
+    }
+    this.newChatItem.text = `$(${this.settings.newChatIcon})`;
+    this.newChatItem.tooltip = NEW_CHAT_TOOLTIP;
+    this.newChatItem.show();
   }
 
   private tooltip(now: number): vscode.MarkdownString {
@@ -488,6 +513,7 @@ class UsageController {
     }
     this.cacheWatch?.dispose();
     this.disposeItems();
+    this.newChatItem?.dispose();
     this.freshnessItem.dispose();
     this.noticeItem.dispose();
   }
@@ -547,6 +573,7 @@ export function activate(context: vscode.ExtensionContext): void {
     logger,
     controller,
     vscode.commands.registerCommand('claudeUsage.refresh', () => controller.refreshNow()),
+    vscode.commands.registerCommand('claudeUsage.newChat', () => openChatInLockedGroup(logger)),
     vscode.commands.registerCommand('claudeUsage.signIn', async () => {
       if (await auth.signIn()) {
         await controller.refreshNow();

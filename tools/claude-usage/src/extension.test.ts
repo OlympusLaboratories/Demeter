@@ -50,6 +50,10 @@ function meterItems(): stub.StubStatusBarItem[] {
   return stub.visibleItems().filter((item) => !item.text.startsWith('$('));
 }
 
+function newChatButton(): stub.StubStatusBarItem | undefined {
+  return stub.visibleItems().find((item) => item.command === 'claudeUsage.newChat');
+}
+
 function chipItem(): stub.StubStatusBarItem | undefined {
   return stub.visibleItems().find((item) => item.text.startsWith('$(history)') || item.text.startsWith('$(warning)'));
 }
@@ -193,7 +197,7 @@ describe('activate', () => {
     activate(context as never);
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    const items = stub.visibleItems();
+    const items = stub.visibleItems().filter((item) => item.command !== 'claudeUsage.newChat');
     expect(items).toHaveLength(1);
     expect(items[0]!.text).toContain('Claude usage');
     expect(items[0]!.command).toBe('claudeUsage.signIn');
@@ -332,12 +336,75 @@ describe('activate', () => {
     await settle();
 
     expect([...stub.state.commands.keys()].sort()).toEqual([
+      'claudeUsage.newChat',
       'claudeUsage.pickBarStyle',
       'claudeUsage.refresh',
       'claudeUsage.showDetails',
       'claudeUsage.signIn',
       'claudeUsage.signOut',
     ]);
+  });
+
+  it('puts the new-chat button to the left of every meter', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(jsonResponse(payload()))));
+    activate(context as never);
+    await settle();
+
+    const button = newChatButton()!;
+    expect(button.text).toBe('$(sparkle)');
+    expect(button.alignment).toBe(stub.StatusBarAlignment.Right);
+    for (const meter of meterItems()) {
+      expect(button.priority).toBeGreaterThan(meter.priority);
+    }
+  });
+
+  it('opens a Claude chat and locks the group it landed in', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(jsonResponse(payload()))));
+    activate(context as never);
+    await settle();
+
+    await stub.state.commands.get('claudeUsage.newChat')!();
+
+    expect(stub.state.executedCommands).toEqual([
+      'claude-vscode.editor.open',
+      'workbench.action.lockEditorGroup',
+    ]);
+    expect(stub.state.warningMessages).toEqual([]);
+  });
+
+  it('warns instead of opening when Claude Code is not in this window', async () => {
+    stub.state.externalCommands = ['workbench.action.lockEditorGroup'];
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(jsonResponse(payload()))));
+    activate(context as never);
+    await settle();
+
+    await stub.state.commands.get('claudeUsage.newChat')!();
+
+    expect(stub.state.executedCommands).toEqual([]);
+    expect(stub.state.warningMessages[0]).toContain('Claude Code extension is not available');
+  });
+
+  it('still opens the chat when the group cannot be locked', async () => {
+    stub.state.commandErrors['workbench.action.lockEditorGroup'] = 'group is already locked';
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(jsonResponse(payload()))));
+    activate(context as never);
+    await settle();
+
+    await stub.state.commands.get('claudeUsage.newChat')!();
+
+    expect(stub.state.executedCommands).toContain('claude-vscode.editor.open');
+    expect(stub.state.warningMessages).toEqual([]);
+    expect(stub.state.logLines.join('\n')).toContain('Could not lock the group');
+  });
+
+  it('can hide the new-chat button', async () => {
+    stub.state.config['newChatButton'] = false;
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(jsonResponse(payload()))));
+    activate(context as never);
+    await settle();
+
+    expect(newChatButton()).toBeUndefined();
+    expect(meterItems()).toHaveLength(2);
   });
 
   it('hides everything when the extension is switched off', async () => {
