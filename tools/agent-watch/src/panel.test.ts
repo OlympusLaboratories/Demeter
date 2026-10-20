@@ -5,7 +5,15 @@ import { afterEach, describe, expect, it } from 'vitest';
 import * as vscode from 'vscode';
 import { AgentWatchPanel } from './panel';
 import { Store } from './store';
-import { createdPanels, resetStub } from './testing/vscodeStub';
+import {
+  Uri as StubUri,
+  createdPanels,
+  executedCommands,
+  externalCommands,
+  resetStub,
+  window as stubWindow,
+  workspace as stubWorkspace,
+} from './testing/vscodeStub';
 import type { HostMessage } from './protocol';
 
 const temps: string[] = [];
@@ -240,6 +248,55 @@ describe('live detail', () => {
     await new Promise((resolve) => setImmediate(resolve));
     await panel.refresh();
     expect(states(stub).filter((m) => m.type === 'detail').length).toBeGreaterThan(0);
+  });
+});
+
+describe('opening the source chat', () => {
+  const OPEN = 'claude-vscode.editor.open';
+
+  async function openFirstSession(projects: string): Promise<void> {
+    const panel = AgentWatchPanel.show(context(), store(projects));
+    await panel.refresh();
+    const stub = createdPanels[0]!;
+    const state = states(stub).find((m) => m.type === 'state' && m.state.graph.nodes.length > 0);
+    const root = state?.type === 'state' ? state.state.graph.nodes[0] : undefined;
+    expect(root?.kind).toBe('session');
+    stub.webview.onDidReceiveMessage.fire({ type: 'openSession', id: root!.id });
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  it('resumes the session by id when it belongs to this window', async () => {
+    const projects = await fixtureProjects();
+    externalCommands.push(OPEN);
+    stubWorkspace.workspaceFolders = [{ uri: StubUri.file('/tmp/repo') }];
+
+    await openFirstSession(projects);
+
+    const call = executedCommands.find((entry) => entry.command === OPEN);
+    expect(call?.args[0]).toBe(SESSION_ID);
+    expect(call?.args[1]).toBeUndefined();
+    expect(stubWindow.warnings).toHaveLength(0);
+  });
+
+  it('refuses to attach a session from another repo to this workspace', async () => {
+    const projects = await fixtureProjects();
+    externalCommands.push(OPEN);
+    stubWorkspace.workspaceFolders = [{ uri: StubUri.file('/tmp/somewhere-else') }];
+
+    await openFirstSession(projects);
+
+    expect(executedCommands.some((entry) => entry.command === OPEN)).toBe(false);
+    expect(stubWindow.warnings[0]).toContain('/tmp/repo');
+  });
+
+  it('says so plainly when Claude Code does not register the command', async () => {
+    const projects = await fixtureProjects();
+    stubWorkspace.workspaceFolders = [{ uri: StubUri.file('/tmp/repo') }];
+
+    await openFirstSession(projects);
+
+    expect(executedCommands.some((entry) => entry.command === OPEN)).toBe(false);
+    expect(stubWindow.warnings[0]).toContain(OPEN);
   });
 });
 

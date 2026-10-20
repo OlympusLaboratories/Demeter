@@ -378,6 +378,30 @@ wide, and how deep the nesting went.
   wins outright, and only within each kind does the newest line win. 505 of the 578 sessions
   touched in the last week carry one; the remainder (all but a handful being one session
   seen through 70 worktree symlinks) fall back to the first 8 characters of the UUID.
+- **A session node opens its own chat.** `claude-vscode.editor.open` is undocumented past
+  its title, but the extension calls it internally as
+  `(sessionId, initialPrompt, viewColumn)` and its `createPanel` keys open panels by
+  session id — so passing an id reveals that chat if its tab is still open and resumes it
+  from the transcript if not. The prompt argument is passed as `undefined` deliberately:
+  with one set, revealing an already-open session pops a "Your prompt was not applied"
+  notice. Being a contributed command and not API, it is probed through
+  `vscode.commands.getCommands(true)` first, since `executeCommand` on a missing id rejects
+  with a raw `command 'x' not found`.
+
+  The guard that matters is **cwd**. Claude Code resolves a resumed session's working
+  directory from `workspaceFolders[0]`, not from the transcript, so resuming a session that
+  ran in another repo would attach it to whatever this window has open — and agent-watch
+  deliberately shows every repo on the machine. Those are refused with an offer to open the
+  right folder in a new window. One accepted side effect: any column other than
+  `ViewColumn.Active` makes the extension set its own preferred location to `panel`, and
+  `Active` would open the chat on top of Agent Watch itself, so the preference is allowed
+  to move — which is what asking for a tab means anyway.
+
+  Geometry: the button sits bottom-right, mirroring the expand badge top-right. It clears
+  the badge and the label row but does overlap the sublabel row, so `sublabelCapacity`
+  takes it into account — the capacity helpers now take a `{ badge, open }` record and
+  shorten a row only for the boxes that actually intersect it, which is asserted rather
+  than assumed.
 - **Click a node → modal** with that agent's full event stream: tool calls, arguments,
   results, text output, and thinking summary when present. The modal is where "a lot of
   information" lives, keeping the graph itself scannable — which is the whole point of
@@ -388,10 +412,16 @@ wide, and how deep the nesting went.
   the row covers at least `MIN_HEIGHT_FRACTION` (1/3) of the canvas height, bounded twice:
   never past `MAX_ZOOM` (4), the same ceiling the wheel stops at, and never so far that the
   box stops fitting *across*, which is what keeps a short wide tree from being magnified
-  off both edges. On a 1200×700 canvas that puts 2–4 children at exactly 33% (zoom 2.16,
-  1.37, 1.01), a single child at the zoom ceiling and 26%, and 6 or more already past a
-  third at 100%, so they are left alone. `fitToView` runs through the same function, so a
-  lone session node opens at 4× rather than marooned at 1×.
+  off both edges.
+
+  A third bound exists because the first two were not enough: a row of one taken literally
+  to a third of the viewport wants 5×, which is a single box filling the screen. The
+  fraction is therefore computed against `max(row height, the height three nodes would
+  take)`, so **three nodes is the most magnified anything ever gets** and shorter rows
+  share that zoom rather than exceeding it. On a 1200×700 canvas every row of 1–3 lands at
+  1.37 (9%, 21%, 33% of the height), 4 at 1.01, and 6 or more are already past a third at
+  100% and left alone. `fitToView` runs through the same function, so a lone session node
+  opens at 1.37× rather than marooned at 1× or blown up to 4×.
 - **Expanding a node frames what it just revealed**, rather than refitting the whole tree.
   Refitting was the obvious thing and the wrong one: the point of clicking expand is the
   children, and a refit answers by zooming *out* until they are too small to read. The new

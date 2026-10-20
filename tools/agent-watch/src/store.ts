@@ -153,6 +153,12 @@ export class Store {
     return `${this.selectedRepo ?? ''}::${this.selectedWorktree ?? ''}`;
   }
 
+  sessionTarget(id: string): { sessionId: string; cwd?: string } | undefined {
+    const node = this.nodesById.get(id);
+    if (!node || node.kind !== 'session') return undefined;
+    return { sessionId: node.id.slice('session:'.length), cwd: node.cwd };
+  }
+
   detail(id: string): NodeDetail | undefined {
     const node = this.nodesById.get(id);
     if (!node) return undefined;

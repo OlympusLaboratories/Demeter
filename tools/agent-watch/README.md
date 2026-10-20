@@ -62,10 +62,11 @@ gives Review (6) and Verify (90) rather than 96 siblings.
 Expanding frames what you just opened, rather than refitting the whole tree — the point of
 clicking a badge is the children, and a refit answers by zooming out until they are too
 small to read. The revealed row is centred and scaled to its full height, and never allowed
-to occupy less than a **third of the viewport**: two to four children magnify to exactly
-that, a single child goes to the 4× ceiling, and anything already larger is left at its
-natural size. The row is never magnified so far that it stops fitting across, so a short
-wide tree cannot be blown off both edges.
+to occupy less than a **third of the viewport** — with a ceiling of however much a
+**three-node row** gets, so a row of one or two shares that zoom instead of a single box
+filling the screen. Anything already larger than a third is left at its natural size, and
+nothing is ever magnified so far that it stops fitting across, so a short wide tree cannot
+be blown off both edges.
 
 Collapsing reframes the same way, on the row the node now sits in — its siblings, or every
 session when it is a root — so you land on the level you stepped back out to. The one
@@ -81,6 +82,13 @@ jump more than 8%. Tune it with `agentWatch.zoomSensitivity`, or set it to `0` t
 wheel zoom off and use the `+`/`−` buttons. The view refits itself whenever the graph's
 shape changes, so switching from a large run to a single session does not leave you panning
 around an apparently blank canvas.
+
+**Every session node carries an `↗` button** in its bottom-right corner that opens that
+chat. If the session's tab is still open it is revealed rather than duplicated; if not, it
+resumes from its transcript. A session that ran outside this window's workspace is refused
+rather than resumed — Claude Code would attach it to the folder this window has open, not
+the one it actually ran in — with an offer to open the right folder in a new window
+instead.
 
 Each session node is named by the title on its Claude Code tab — the one the model wrote,
 or the one you typed over it — not by its UUID.

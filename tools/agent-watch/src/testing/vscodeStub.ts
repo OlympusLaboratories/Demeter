@@ -54,14 +54,19 @@ export const workspace = {
 };
 
 export const registeredCommands = new Map<string, (...args: unknown[]) => unknown>();
+export const externalCommands: string[] = [];
+export const executedCommands: { command: string; args: unknown[] }[] = [];
 
 export const commands = {
   registerCommand(command: string, handler: (...args: unknown[]) => unknown) {
     registeredCommands.set(command, handler);
     return { dispose: () => registeredCommands.delete(command) };
   },
-  executeCommand: async () => undefined,
-  getCommands: async () => [...registeredCommands.keys()],
+  executeCommand: async (command: string, ...args: unknown[]) => {
+    executedCommands.push({ command, args });
+    return undefined;
+  },
+  getCommands: async () => [...registeredCommands.keys(), ...externalCommands],
 };
 
 export const createdPanels: StubPanel[] = [];
@@ -157,7 +162,12 @@ export const window = {
     return panel;
   },
   showErrorMessage: async () => undefined,
-  showWarningMessage: async () => undefined,
+  warnings: [] as string[],
+  warningChoice: undefined as string | undefined,
+  showWarningMessage: async (message: string, ...actions: string[]) => {
+    window.warnings.push(message);
+    return actions.includes(window.warningChoice ?? '') ? window.warningChoice : undefined;
+  },
   showInformationMessage: async () => undefined,
 };
 
@@ -172,5 +182,9 @@ export function resetStub(): void {
   registeredSerializers.clear();
   createdPanels.length = 0;
   statusBarItems.length = 0;
+  externalCommands.length = 0;
+  executedCommands.length = 0;
+  window.warnings.length = 0;
+  window.warningChoice = undefined;
   workspace.workspaceFolders = undefined;
 }

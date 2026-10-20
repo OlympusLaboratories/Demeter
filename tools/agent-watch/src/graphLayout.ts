@@ -3,8 +3,13 @@ import type { AgentNode, NodeKind, NodeStatus } from './model';
 
 export const NODE_WIDTH = 190;
 export const NODE_HEIGHT = 46;
-const ROW_GAP = 16;
+export const ROW_GAP = 16;
 const COLUMN_GAP = 76;
+
+export function rowHeight(count: number): number {
+  if (count <= 0) return 0;
+  return count * NODE_HEIGHT + (count - 1) * ROW_GAP;
+}
 
 export interface PositionedNode {
   id: string;

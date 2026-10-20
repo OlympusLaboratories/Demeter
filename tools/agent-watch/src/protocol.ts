@@ -53,4 +53,5 @@ export type ViewMessage =
   | { type: 'selectWorktree'; key: string }
   | { type: 'selectNode'; id: string }
   | { type: 'toggleNode'; id: string }
+  | { type: 'openSession'; id: string }
   | { type: 'closeDetail' };

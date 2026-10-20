@@ -6,6 +6,7 @@ import {
   TEXT_X,
   badgeBox,
   labelCapacity,
+  openBox,
   sublabelCapacity,
 } from '../nodeChrome';
 import type { GraphLayout } from '../graphLayout';
@@ -313,7 +314,8 @@ function renderGraph(state: ViewState): void {
     label.setAttribute('class', 'label');
     label.setAttribute('x', String(TEXT_X));
     label.setAttribute('y', String(LABEL_BASELINE));
-    label.textContent = truncate(node.label, labelCapacity(node.totalChildren > 0));
+    const chrome = { badge: node.totalChildren > 0, open: node.kind === 'session' };
+    label.textContent = truncate(node.label, labelCapacity(chrome));
     group.append(label);
 
     const sub = svgEl('text');
@@ -323,13 +325,43 @@ function renderGraph(state: ViewState): void {
     const counts = node.childCount > 0 ? `${node.childCount} agents` : `${node.eventCount} events`;
     sub.textContent = truncate(
       node.sublabel ? `${node.sublabel} · ${counts}` : counts,
-      sublabelCapacity(node.totalChildren > 0),
+      sublabelCapacity(chrome),
     );
     group.append(sub);
 
     const title = svgEl('title');
     title.textContent = node.sublabel ? `${node.label}\n${node.sublabel}` : node.label;
     group.append(title);
+
+    if (chrome.open) {
+      const box = openBox();
+      const open = svgEl('g');
+      open.setAttribute('class', 'open-chat');
+      open.setAttribute('transform', `translate(${box.x},${box.y})`);
+
+      const plate = svgEl('rect');
+      plate.setAttribute('width', String(box.width));
+      plate.setAttribute('height', String(box.height));
+      plate.setAttribute('rx', '4');
+      open.append(plate);
+
+      const mark = svgEl('text');
+      mark.setAttribute('x', String(box.width / 2));
+      mark.setAttribute('y', String(box.height - 4));
+      mark.setAttribute('text-anchor', 'middle');
+      mark.textContent = '↗';
+      open.append(mark);
+
+      const hint = svgEl('title');
+      hint.textContent = 'Open this chat session';
+      open.append(hint);
+
+      open.addEventListener('click', (event) => {
+        event.stopPropagation();
+        vscode.postMessage({ type: 'openSession', id: node.id });
+      });
+      group.append(open);
+    }
 
     if (node.totalChildren > 0) {
       const box = badgeBox();

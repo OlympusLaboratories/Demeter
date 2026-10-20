@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { MIN_FOCUS_SCALE, MIN_HEIGHT_FRACTION, expansionBoxes, frameBox, siblingBoxes } from './focus';
-import { MAX_ZOOM } from './zoom';
+import {
+  MAX_MAGNIFIED_ROWS,
+  MIN_FOCUS_SCALE,
+  MIN_HEIGHT_FRACTION,
+  expansionBoxes,
+  frameBox,
+  siblingBoxes,
+} from './focus';
 import { NODE_HEIGHT, NODE_WIDTH, type GraphLayout } from './graphLayout';
 
 function layoutOf(rows: Array<{ id: string; x: number; y: number }>, edges: Array<[string, string]>): GraphLayout {
@@ -120,13 +126,21 @@ function rowOf(count: number, x = 266, y = 0) {
 }
 
 describe('frameBox', () => {
-  it('magnifies a short row until it fills a third of the viewport', () => {
-    for (const count of [2, 3]) {
-      const box = rowOf(count);
-      const frame = frameBox(box, canvas);
+  it('magnifies a three-node row until it fills a third of the viewport', () => {
+    const box = rowOf(MAX_MAGNIFIED_ROWS);
+    const frame = frameBox(box, canvas);
 
-      expect(box.height * frame.k).toBeCloseTo(canvas.height * MIN_HEIGHT_FRACTION);
-      expect(frame.k).toBeGreaterThan(1);
+    expect(box.height * frame.k).toBeCloseTo(canvas.height * MIN_HEIGHT_FRACTION);
+    expect(frame.k).toBeGreaterThan(1);
+  });
+
+  it('never magnifies a shorter row past what three nodes would get', () => {
+    const ceiling = frameBox(rowOf(MAX_MAGNIFIED_ROWS), canvas).k;
+
+    for (const count of [1, 2]) {
+      const frame = frameBox(rowOf(count), canvas);
+      expect(frame.k).toBe(ceiling);
+      expect(rowOf(count).height * frame.k).toBeLessThan(canvas.height * MIN_HEIGHT_FRACTION);
     }
   });
 
@@ -138,16 +152,11 @@ describe('frameBox', () => {
     expect(box.height * frame.k).toBeGreaterThan(canvas.height * MIN_HEIGHT_FRACTION);
   });
 
-  it('stops magnifying a lone node at the ceiling the wheel also stops at', () => {
-    const frame = frameBox(rowOf(1), canvas);
-    expect(frame.k).toBe(MAX_ZOOM);
-  });
-
   it('never magnifies so far that the box stops fitting across', () => {
-    const wide = { x: 0, y: 0, width: 456, height: NODE_HEIGHT };
+    const wide = { x: 0, y: 0, width: 900, height: NODE_HEIGHT };
     const frame = frameBox(wide, canvas);
 
-    expect(wide.height * frame.k).toBeLessThan(canvas.height * MIN_HEIGHT_FRACTION);
+    expect(frame.k).toBeLessThan(frameBox(rowOf(MAX_MAGNIFIED_ROWS), canvas).k);
     expect(wide.width * frame.k).toBeLessThanOrEqual(canvas.width - 56 + 0.001);
   });
 
@@ -180,7 +189,7 @@ describe('frameBox', () => {
 
   it('drops the parent and centres the child when the pair no longer fits', () => {
     const box = rowOf(1);
-    const context = { x: 0, y: 0, width: 456, height: box.height };
+    const context = { x: 0, y: 0, width: 1200, height: box.height };
     const frame = frameBox(box, canvas, { context });
 
     expect(context.width * frame.k).toBeGreaterThan(canvas.width - 56);

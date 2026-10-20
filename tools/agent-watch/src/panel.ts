@@ -2,8 +2,10 @@ import * as vscode from 'vscode';
 import type { HostMessage, NodeDetail, ViewMessage } from './protocol';
 import type { Store } from './store';
 import { PathWatcher, debounce } from './watch';
+import { isInAnyFolder } from './workspacePaths';
 
 const VIEW_TYPE = 'agentWatch.graph';
+const OPEN_SESSION_COMMAND = 'claude-vscode.editor.open';
 
 export class AgentWatchPanel {
   private static current: AgentWatchPanel | undefined;
@@ -181,7 +183,45 @@ export class AgentWatchPanel {
         this.store.toggleNode(message.id);
         this.postState(false);
         return;
+      case 'openSession':
+        await this.openSession(message.id);
+        return;
     }
+  }
+
+  private async openSession(id: string): Promise<void> {
+    const target = this.store.sessionTarget(id);
+    if (!target) return;
+
+    const available = await vscode.commands.getCommands(true);
+    if (!available.includes(OPEN_SESSION_COMMAND)) {
+      void vscode.window.showWarningMessage(
+        `Cannot open the chat: the Claude Code extension did not register ${OPEN_SESSION_COMMAND}. Check that it is installed and enabled.`,
+      );
+      return;
+    }
+
+    const folders = (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath);
+    if (!isInAnyFolder(folders, target.cwd)) {
+      const open = 'Open Folder in New Window';
+      const choice = await vscode.window.showWarningMessage(
+        `That session ran in ${target.cwd ?? 'another directory'}, outside this window. Resuming it here would attach it to this workspace instead.`,
+        open,
+      );
+      if (choice === open && target.cwd) {
+        await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(target.cwd), {
+          forceNewWindow: true,
+        });
+      }
+      return;
+    }
+
+    await vscode.commands.executeCommand(
+      OPEN_SESSION_COMMAND,
+      target.sessionId,
+      undefined,
+      vscode.ViewColumn.Beside,
+    );
   }
 
   private post(message: HostMessage): void {
@@ -313,6 +353,10 @@ svg { display: block; }
 .node .badge rect { fill: var(--vscode-badge-background); stroke: none; }
 .node .badge text { fill: var(--vscode-badge-foreground); font-size: 11px; }
 .node .badge:hover rect { fill: var(--vscode-button-background); }
+.node .open-chat { cursor: pointer; }
+.node .open-chat rect { fill: var(--vscode-badge-background); stroke: none; }
+.node .open-chat text { fill: var(--vscode-badge-foreground); font-size: 11px; }
+.node .open-chat:hover rect { fill: var(--vscode-button-background); }
 .node .label { fill: var(--vscode-foreground); font-size: 12px; }
 .node .sublabel { fill: var(--vscode-descriptionForeground); font-size: 10.5px; }
 .node .glyph { font-size: 12px; }

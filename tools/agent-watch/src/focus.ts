@@ -1,5 +1,5 @@
 import type { GraphLayout, PositionedNode } from './graphLayout';
-import { NODE_HEIGHT, NODE_WIDTH } from './graphLayout';
+import { NODE_HEIGHT, NODE_WIDTH, rowHeight } from './graphLayout';
 import { MAX_ZOOM } from './zoom';
 
 export interface Box {
@@ -25,6 +25,7 @@ export interface FrameOptions {
   minScale?: number;
   maxScale?: number;
   minHeightFraction?: number;
+  maxMagnifiedRows?: number;
   context?: Box;
   anchor?: Box;
 }
@@ -33,6 +34,7 @@ export const FOCUS_PADDING = 28;
 export const MIN_FOCUS_SCALE = 0.55;
 export const MAX_FOCUS_SCALE = 1;
 export const MIN_HEIGHT_FRACTION = 1 / 3;
+export const MAX_MAGNIFIED_ROWS = 3;
 
 export interface RowFrame {
   row: Box;
@@ -102,7 +104,8 @@ export function scaleFor(box: Box, canvas: Canvas, options: FrameOptions = {}): 
   const fitted = Math.min(byWidth, byHeight, maxScale);
 
   const fraction = options.minHeightFraction ?? MIN_HEIGHT_FRACTION;
-  const toFillFraction = Math.min((canvas.height * fraction) / box.height, byWidth);
+  const magnified = Math.max(box.height, rowHeight(options.maxMagnifiedRows ?? MAX_MAGNIFIED_ROWS));
+  const toFillFraction = Math.min((canvas.height * fraction) / magnified, byWidth);
 
   return Math.min(Math.max(fitted, toFillFraction, minScale), MAX_ZOOM);
 }
