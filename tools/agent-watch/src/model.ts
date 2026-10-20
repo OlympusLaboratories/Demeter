@@ -10,6 +10,7 @@ import {
   isAgentSpawn,
   latestBranch,
   latestCwd,
+  sessionTitle,
   speakerOf,
 } from './transcript';
 
@@ -245,7 +246,7 @@ export function buildSessionTree(input: SessionInput): AgentNode {
   const root: AgentNode = {
     id: `session:${input.sessionId}`,
     kind: 'session',
-    label: input.sessionId.slice(0, 8),
+    label: clip(sessionTitle(input.lines) ?? input.sessionId.slice(0, 8), 48),
     sublabel: branch,
     status: ageSeconds <= input.liveWindowSeconds ? 'live' : 'done',
     events,

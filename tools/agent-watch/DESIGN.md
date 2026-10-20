@@ -329,10 +329,31 @@ wide, and how deep the nesting went.
 - **Status is carried by the node itself** — border color plus a glyph, so it reads without
   clicking: `●` live (animated ring), `◐` running, `✓` done, `✗` error, dimmed for idle.
   Node label is `agentType` over `description` from the `.meta.json`.
+- **A session node carries the title on its editor tab**, not its UUID. Claude Code writes
+  the tab title into the transcript itself: `{"type":"ai-title","aiTitle":…}` for the one
+  the model generates, `{"type":"custom-title","customTitle":…}` for one renamed by hand.
+  Both are re-emitted throughout the run and **interleave** — a session renamed `PLAT-3138`
+  still gets fresh `ai-title` lines after the rename — so last-line-wins would hand the
+  model's guess back to someone who had already overruled it. The hand-set title therefore
+  wins outright, and only within each kind does the newest line win. 505 of the 578 sessions
+  touched in the last week carry one; the remainder (all but a handful being one session
+  seen through 70 worktree symlinks) fall back to the first 8 characters of the UUID.
 - **Click a node → modal** with that agent's full event stream: tool calls, arguments,
   results, text output, and thinking summary when present. The modal is where "a lot of
   information" lives, keeping the graph itself scannable — which is the whole point of
   choosing a graph over nested line items.
+- **Expanding a node frames what it just revealed**, rather than refitting the whole tree.
+  Refitting was the obvious thing and the wrong one: the point of clicking expand is the
+  children, and a refit answers by zooming *out* until they are too small to read. The new
+  view is built from the children's bounding box, widened leftward to the parent so the
+  edge into the row stays visible — centred and scaled to the row's full height when it
+  fits, capped at 100% so a single child does not fill the canvas, and floored at the same
+  0.55 as `Fit` when it cannot. Past that floor the row is anchored at its **top** instead
+  of centred, so a 96-child expansion starts at the first child and scrolls down rather
+  than dropping you in the middle of a row with no way to tell which end you are at.
+  Collapsing instead pans the toggled node to the centre at the **current** zoom: the tree
+  reflows underneath a collapse, so holding the raw transform drifts, and rescaling would
+  punish a click that asked for less on screen, not more.
 - **Pan and zoom**, with a `Fit` control. The viewport refits automatically whenever the
   graph's *shape* changes — scope key plus node count plus dimensions — because a zoom
   level chosen for a 96-node run leaves a single-node session off-screen on an apparently

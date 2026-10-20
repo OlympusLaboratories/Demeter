@@ -14,6 +14,7 @@ import type { SpeakerRole } from '../transcript';
 import { moreLabel, previewOf } from '../preview';
 import type { HostMessage, NodeDetail, ViewMessage, ViewState } from '../protocol';
 import { clampZoom, zoomFactorFor } from '../zoom';
+import { centerBox, expansionBox, frameBox, nodeBox } from '../focus';
 
 declare function acquireVsCodeApi(): { postMessage(message: ViewMessage): void };
 
@@ -53,7 +54,10 @@ function renderScope(state: ViewState): void {
     chip.type = 'button';
     chip.append(document.createTextNode(repo.label));
     if (repo.liveCount > 0) chip.append(el('span', 'live', `●${repo.liveCount}`));
-    chip.addEventListener('click', () => vscode.postMessage({ type: 'selectRepo', slug: repo.slug }));
+    chip.addEventListener('click', () => {
+      pendingFocus = undefined;
+      vscode.postMessage({ type: 'selectRepo', slug: repo.slug });
+    });
     repos.append(chip);
   }
 
@@ -64,7 +68,10 @@ function renderScope(state: ViewState): void {
     chip.type = 'button';
     chip.append(document.createTextNode(tree.label));
     if (tree.liveCount > 0) chip.append(el('span', 'live', `●${tree.liveCount}`));
-    chip.addEventListener('click', () => vscode.postMessage({ type: 'selectWorktree', key: tree.key }));
+    chip.addEventListener('click', () => {
+      pendingFocus = undefined;
+      vscode.postMessage({ type: 'selectWorktree', key: tree.key });
+    });
     worktrees.append(chip);
   }
 }
@@ -80,6 +87,7 @@ let lastLayout: GraphLayout = { nodes: [], edges: [], width: 0, height: 0 };
 let userAdjusted = false;
 let lastShape = '';
 let zoomSensitivity = 1;
+let pendingFocus: { id: string; expanding: boolean } | undefined;
 
 function applyTransform(): void {
   const root = document.getElementById('viewport');
@@ -103,6 +111,35 @@ function fitToView(): void {
   view.ty = pad;
   userAdjusted = false;
   applyTransform();
+}
+
+function canvasSize(): { width: number; height: number } {
+  const canvas = byId('canvas');
+  return { width: canvas.clientWidth, height: canvas.clientHeight };
+}
+
+function applyFocus(layout: GraphLayout): boolean {
+  const request = pendingFocus;
+  if (!request) return false;
+
+  const node = layout.nodes.find((entry) => entry.id === request.id);
+  if (!node || node.expanded !== request.expanding) return false;
+
+  const box = request.expanding
+    ? expansionBox(layout, request.id)
+    : nodeBox(layout, request.id);
+  if (!box) return false;
+
+  const frame = request.expanding
+    ? frameBox(box, canvasSize())
+    : centerBox(box, canvasSize(), view.k);
+  pendingFocus = undefined;
+  view.k = frame.k;
+  view.tx = frame.tx;
+  view.ty = frame.ty;
+  userAdjusted = true;
+  applyTransform();
+  return true;
 }
 
 function zoomAt(factor: number, clientX: number, clientY: number): void {
@@ -161,7 +198,10 @@ function wireViewport(): void {
     { passive: false },
   );
 
-  byId('fit').addEventListener('click', () => fitToView());
+  byId('fit').addEventListener('click', () => {
+    pendingFocus = undefined;
+    fitToView();
+  });
   byId('zoom-in').addEventListener('click', () => {
     const rect = byId('canvas').getBoundingClientRect();
     zoomAt(1.2, rect.left + rect.width / 2, rect.top + rect.height / 2);
@@ -299,6 +339,7 @@ function renderGraph(state: ViewState): void {
 
       badge.addEventListener('click', (event) => {
         event.stopPropagation();
+        pendingFocus = { id: node.id, expanding: !node.expanded };
         vscode.postMessage({ type: 'toggleNode', id: node.id });
       });
       group.append(badge);
@@ -310,10 +351,10 @@ function renderGraph(state: ViewState): void {
 
   lastLayout = state.graph;
   const shape = `${state.scopeKey}|${state.graph.nodes.length}|${Math.round(state.graph.width)}x${Math.round(state.graph.height)}`;
-  if (shape !== lastShape) {
-    lastShape = shape;
-    userAdjusted = false;
-  }
+  const reshaped = shape !== lastShape;
+  lastShape = shape;
+  if (applyFocus(state.graph)) return;
+  if (reshaped) userAdjusted = false;
   if (!userAdjusted) fitToView();
   else applyTransform();
 }

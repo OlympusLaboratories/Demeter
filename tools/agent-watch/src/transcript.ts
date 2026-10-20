@@ -19,6 +19,8 @@ export interface TranscriptLine {
   gitBranch?: string;
   version?: string;
   isMeta?: boolean;
+  aiTitle?: string;
+  customTitle?: string;
   message?: { role?: string; content?: ContentBlock[] | string };
 }
 
@@ -73,6 +75,21 @@ export function latestCwd(lines: TranscriptLine[]): string | undefined {
 
 export function latestBranch(lines: TranscriptLine[]): string | undefined {
   return lastDefined(lines, (line) => line.gitBranch);
+}
+
+export function sessionTitle(lines: TranscriptLine[]): string | undefined {
+  let generated: string | undefined;
+  let chosen: string | undefined;
+  for (const line of lines) {
+    if (line.type === 'custom-title') {
+      const value = line.customTitle?.trim();
+      if (value) chosen = value;
+    } else if (line.type === 'ai-title') {
+      const value = line.aiTitle?.trim();
+      if (value) generated = value;
+    }
+  }
+  return chosen ?? generated;
 }
 
 export function firstCwd(lines: TranscriptLine[]): string | undefined {

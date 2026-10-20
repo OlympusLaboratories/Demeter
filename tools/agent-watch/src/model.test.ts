@@ -139,6 +139,53 @@ describe('buildSessionTree', () => {
     workflows: [],
   };
 
+  it('names the session after the title shown on its editor tab', () => {
+    const tree = buildSessionTree({
+      ...base,
+      lines: [{ type: 'ai-title', aiTitle: 'Herdr swarm observation setup' }],
+      subagents: [],
+    });
+
+    expect(tree.label).toBe('Herdr swarm observation setup');
+  });
+
+  it('prefers a title you set by hand over one the model wrote later', () => {
+    const tree = buildSessionTree({
+      ...base,
+      lines: [
+        { type: 'ai-title', aiTitle: 'ticket context' },
+        { type: 'custom-title', customTitle: 'PLAT-3138' },
+        { type: 'ai-title', aiTitle: '/dev/shm size in rdev' },
+      ],
+      subagents: [],
+    });
+
+    expect(tree.label).toBe('PLAT-3138');
+  });
+
+  it('keeps the newest title of each kind', () => {
+    const tree = buildSessionTree({
+      ...base,
+      lines: [
+        { type: 'custom-title', customTitle: 'first name' },
+        { type: 'custom-title', customTitle: 'renamed' },
+      ],
+      subagents: [],
+    });
+
+    expect(tree.label).toBe('renamed');
+  });
+
+  it('ignores a blank title and falls back to the session id', () => {
+    const tree = buildSessionTree({
+      ...base,
+      lines: [{ type: 'custom-title', customTitle: '   ' }],
+      subagents: [],
+    });
+
+    expect(tree.label).toBe('abcdef12');
+  });
+
   it('attaches a subagent to the node whose transcript spawned it', () => {
     const tree = buildSessionTree({
       ...base,
