@@ -5,6 +5,7 @@ import {
   SUBLABEL_BASELINE,
   TEXT_X,
   badgeBox,
+  edgeClass,
   labelCapacity,
   openBox,
   sublabelCapacity,
@@ -53,8 +54,13 @@ function chipFor(
   liveCount: number,
   selected: boolean,
   onPick: () => void,
+  home = false,
 ): HTMLButtonElement {
-  const chip = el('button', selected ? `chip ${kind} selected` : `chip ${kind}`);
+  const classes = ['chip', kind];
+  if (selected) classes.push('selected');
+  if (home) classes.push('home');
+  const chip = el('button', classes.join(' '));
+  if (home) chip.title = 'The repo this window has open';
   chip.type = 'button';
   chip.append(document.createTextNode(label));
   if (liveCount > 0) chip.append(el('span', 'live', `●${liveCount}`));
@@ -76,8 +82,13 @@ function renderScope(state: ViewState): void {
     'repo-row',
     'repos',
     state.repos.map((repo) =>
-      chipFor('repo', repo.label, repo.liveCount, repo.slug === state.selectedRepo, () =>
-        vscode.postMessage({ type: 'selectRepo', slug: repo.slug }),
+      chipFor(
+        'repo',
+        repo.label,
+        repo.liveCount,
+        repo.slug === state.selectedRepo,
+        () => vscode.postMessage({ type: 'selectRepo', slug: repo.slug }),
+        repo.isWorkspace,
       ),
     ),
   );
@@ -178,6 +189,7 @@ function wireViewport(): void {
 
   canvas.addEventListener('mousedown', (event) => {
     if (event.button !== 0) return;
+    event.preventDefault();
     dragging = true;
     originX = event.clientX - view.tx;
     originY = event.clientY - view.ty;
@@ -289,7 +301,7 @@ function renderGraph(state: ViewState): void {
       'd',
       `M${edge.fromX + pad},${edge.fromY + pad} C${midX + pad},${edge.fromY + pad} ${midX + pad},${edge.toY + pad} ${edge.toX + pad},${edge.toY + pad}`,
     );
-    path.setAttribute('class', 'edge');
+    path.setAttribute('class', edgeClass(edge.toStatus));
     viewport.append(path);
   }
 

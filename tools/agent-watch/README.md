@@ -51,6 +51,24 @@ of it is ever truncated — a long open panel shows its first 20 lines with a **
 button naming exactly how much is held back, and the header above it always reports the
 real size.
 
+**Status comes from each node's own transcript**, not from its parent. `●` green means the
+transcript was written within the last `liveWindowSeconds` — it is working right now. `◐`
+blue means launched and not yet returned but currently quiet, such as an agent waiting on a
+long command. `✓` grey means finished. A background agent's `tool_result` arrives within
+milliseconds of launch, so judging it by the parent marked it done while it still had
+minutes of work left.
+
+**The whole path from a working agent to its session is green**, edges included. A node
+with a working descendant is shown as working, because a grey `✓` on it would be a lie
+about the subtree underneath. A failure stays visible — `error` is never painted over, and
+never propagates upward either.
+
+**A node expands itself the first time it gains children**, so agents appearing under a
+node you are watching show up without a click. Only the first time: more children arriving
+later leave the expansion alone, and a branch you collapsed by hand stays collapsed. A tree
+that already had children when you opened the panel does not spring open either — unless
+something in it is **live**, which is the one case you opened the panel for.
+
 **The graph opens collapsed and you expand into it.** By default you see each session and
 one level below it — typically a handful of nodes — with a count badge on anything that has
 children (`▸90`). Click a badge to open that branch; click again to shut it. Nothing
@@ -75,7 +93,8 @@ to the row's **top**, since the first child is where you start reading, while a 
 keeps the **node you clicked** centred, so collapsing one agent inside a 90-sibling row
 does not throw you to that row's start.
 
-Drag to pan, scroll to zoom, `Fit` to reframe. Zoom tracks how far you actually scrolled
+Drag to pan (without selecting the labels you drag over), scroll to zoom, `Fit` to
+reframe. Zoom tracks how far you actually scrolled
 rather than stepping a fixed amount per wheel event, so a trackpad gesture nudges it
 instead of flinging it; pinch responds faster than a scroll, and one huge delta can never
 jump more than 8%. Tune it with `agentWatch.zoomSensitivity`, or set it to `0` to turn
@@ -93,7 +112,15 @@ instead.
 Each session node is named by the title on its Claude Code tab — the one the model wrote,
 or the one you typed over it — not by its UUID.
 
-The top row picks a repo, the second row a branch within it. The two are told apart by
+Arriving at a tree opens the path down to whatever is **live** in it, however deep — a
+transcript being written right now, not merely an agent that was launched and never
+reported back, since that claim can outlive the work by weeks. A wide band of live agents
+still stays collapsed rather than flooding the canvas, drawn green with its badge so you
+can see where to click. A collapse you made by hand still wins, and
+the expansion closes again when the work stops.
+
+The top row picks a repo, the second row a branch within it. The repo this window has open
+is pinned first and marked with a dot. The two are told apart by
 more than position, because both wrap: each row carries a caption in a fixed left gutter,
 they are separated by a hairline, and repo chips are square and bold against the branch
 chips' pills. Wrapping stays inside its own block, so the caption on the left always says

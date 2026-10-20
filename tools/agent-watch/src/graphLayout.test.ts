@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NODE_WIDTH, layoutForest, layoutTree } from './graphLayout';
+import { propagateActivity } from './model';
+import { edgeClass } from './nodeChrome';
 import type { AgentNode } from './model';
 
 function node(id: string, children: AgentNode[] = []): AgentNode {
@@ -182,5 +184,148 @@ describe('initial depth', () => {
       overrides: new Map([['session', true]]),
     });
     expect(layout.nodes.map((positioned) => positioned.id)).toEqual(['session', 'workflow']);
+  });
+});
+
+describe('edges carry the activity of what they point at', () => {
+  function tree(): AgentNode {
+    const leaf: AgentNode = { id: 'leaf', kind: 'agent', label: 'leaf', status: 'live', events: [], children: [] };
+    const failed: AgentNode = { id: 'failed', kind: 'agent', label: 'failed', status: 'error', events: [], children: [leaf] };
+    const quiet: AgentNode = { id: 'quiet', kind: 'agent', label: 'quiet', status: 'done', events: [], children: [] };
+    return { id: 'root', kind: 'session', label: 'root', status: 'done', events: [], children: [failed, quiet] };
+  }
+
+  it('does not break the live path where it passes through a failure', () => {
+    const root = tree();
+    propagateActivity(root);
+    const layout = layoutTree(root, { autoCollapseThreshold: 1000, initialDepth: 99 });
+    const classes = Object.fromEntries(layout.edges.map((edge) => [edge.to, edgeClass(edge.toStatus)]));
+
+    expect(classes['failed']).toBe('edge live');
+    expect(classes['leaf']).toBe('edge live');
+    expect(classes['quiet']).toBe('edge');
+  });
+
+  it('matches every edge to the activity of the node it reaches', () => {
+    const root = tree();
+    propagateActivity(root);
+    const layout = layoutTree(root, { autoCollapseThreshold: 1000, initialDepth: 99 });
+    const byId = new Map(layout.nodes.map((node) => [node.id, node]));
+
+    for (const edge of layout.edges) {
+      const target = byId.get(edge.to);
+      expect(edge.toStatus).toBe(target?.activity ?? target?.status);
+    }
+  });
+
+  it('gives a collapsed parent the green of the live descendant it is hiding', () => {
+    const root = tree();
+    propagateActivity(root);
+    const layout = layoutTree(root, { overrides: new Map([['failed', false]]), initialDepth: 99 });
+
+    expect(layout.nodes.some((node) => node.id === 'leaf')).toBe(false);
+    const toFailed = layout.edges.find((edge) => edge.to === 'failed');
+    expect(edgeClass(toFailed!.toStatus)).toBe('edge live');
+  });
+});
+
+describe('edgeClass', () => {
+  it('names only the two statuses that mean work is happening', () => {
+    expect(edgeClass('live')).toBe('edge live');
+    expect(edgeClass('running')).toBe('edge running');
+    for (const quiet of ['done', 'error', 'idle'] as const) {
+      expect(edgeClass(quiet)).toBe('edge');
+    }
+  });
+});
+
+describe('arriving at a tree with work in it', () => {
+  function chain(statuses: ('done' | 'live')[]): AgentNode {
+    let built: AgentNode | undefined;
+    for (const status of [...statuses].reverse()) {
+      built = {
+        id: `n${statuses.indexOf(status)}-${status}-${Math.random()}`,
+        kind: 'agent',
+        label: status,
+        status,
+        events: [],
+        children: built ? [built] : [],
+      };
+    }
+    return built as AgentNode;
+  }
+
+  it('opens the path down to a working node that depth alone would have hidden', () => {
+    const root = chain(['done', 'done', 'done', 'live']);
+    propagateActivity(root);
+    const layout = layoutTree(root, { initialDepth: 1 });
+
+    expect(layout.nodes).toHaveLength(4);
+    expect(layout.nodes.every((entry) => entry.status === 'live')).toBe(true);
+  });
+
+  it('leaves a quiet branch collapsed at the usual depth', () => {
+    const root = chain(['done', 'done', 'done', 'done']);
+    propagateActivity(root);
+
+    expect(layoutTree(root, { initialDepth: 1 }).nodes).toHaveLength(2);
+  });
+
+  it('does not let an active fan-out flood the canvas', () => {
+    const wide: AgentNode = {
+      id: 'band',
+      kind: 'phase',
+      label: 'Verify',
+      status: 'done',
+      events: [],
+      children: [...Array(90)].map((_, index) => ({
+        id: `a${index}`,
+        kind: 'agent' as const,
+        label: `a${index}`,
+        status: 'live' as const,
+        events: [],
+        children: [],
+      })),
+    };
+    propagateActivity(wide);
+
+    const layout = layoutTree(wide, { initialDepth: 1 });
+    expect(layout.nodes).toHaveLength(1);
+    expect(layout.nodes[0]?.status).toBe('live');
+    expect(layout.nodes[0]?.hiddenChildren).toBe(90);
+  });
+
+  it('does not spring open a branch whose only claim to activity is a stale launch', () => {
+    const stale: AgentNode = {
+      id: 'stale-root',
+      kind: 'session',
+      label: 'month old',
+      status: 'done',
+      events: [],
+      children: [
+        {
+          id: 'stuck',
+          kind: 'agent',
+          label: 'never returned',
+          status: 'running',
+          events: [],
+          children: [
+            { id: 'deep', kind: 'agent', label: 'deep', status: 'done', events: [], children: [] },
+          ],
+        },
+      ],
+    };
+    propagateActivity(stale);
+
+    expect(stale.status).toBe('running');
+    expect(layoutTree(stale, { initialDepth: 1 }).nodes).toHaveLength(2);
+  });
+
+  it('still obeys a collapse you asked for by hand', () => {
+    const root = chain(['done', 'live']);
+    propagateActivity(root);
+    const layout = layoutTree(root, { overrides: new Map([[root.id, false]]), initialDepth: 1 });
+
+    expect(layout.nodes).toHaveLength(1);
   });
 });

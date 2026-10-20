@@ -83,7 +83,13 @@ async function loadSubagentDir(dir: string, cache?: TranscriptCache): Promise<Su
     const meta = (await readJson<SubagentMeta>(path.join(dir, `agent-${agentId}.meta.json`))) ?? {};
     const transcript = path.join(dir, entry.name);
     const lines = cache ? await cache.read(transcript) : parseJsonl(await readText(transcript));
-    agents.push({ agentId, meta, lines, transcriptPath: transcript });
+    let mtimeMs: number | undefined;
+    try {
+      mtimeMs = (await fs.stat(transcript)).mtimeMs;
+    } catch {
+      mtimeMs = undefined;
+    }
+    agents.push({ agentId, meta, lines, transcriptPath: transcript, mtimeMs });
   }
   return agents;
 }

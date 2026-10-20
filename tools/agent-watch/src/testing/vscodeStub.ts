@@ -88,6 +88,7 @@ export const statusBarItems: StubStatusBarItem[] = [];
 export interface StubPanel {
   visible: boolean;
   viewColumn: number | undefined;
+  iconPath?: { light: Uri; dark: Uri };
   onDidChangeViewState: StubEvent<void>;
   reveal(column?: number, preserveFocus?: boolean): void;
   revealCalls: { column?: number; preserveFocus?: boolean }[];

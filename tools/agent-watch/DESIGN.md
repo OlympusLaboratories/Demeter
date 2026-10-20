@@ -359,6 +359,20 @@ wide, and how deep the nesting went.
   than flowing under the label), a hairline separates the rows, and repo chips are square
   and bold against the branch chips' pills. Checked by rendering the real stylesheet in
   headless Chrome at 380px, where each row wraps to three lines and still reads correctly.
+- **The tab carries its own icon.** `WebviewPanel.iconPath` takes a `{light, dark}` pair of
+  file URIs; left unset you get the editor's generic webview glyph, which is what every
+  other untitled panel shows. The mark is the thing the tool draws — one node branching to
+  two — at a 16px viewBox, since that is the only size a tab ever renders it at. Tab icons
+  are **not** recoloured the way codicons are, so the two variants carry their own colours
+  (`#C5C5C5` / `#424242`) rather than `currentColor`. They live in `media/`, outside the
+  `dist/` the `.gitignore` drops, and `vsce` picks them up with no `.vscodeignore` entry —
+  verified in the packaged vsix rather than assumed.
+- **The repo this window has open is pinned first and marked with a dot.** Recency ordering
+  otherwise buries the one repo you almost always want behind whatever ran last. The mark
+  is a CSS pseudo-element rather than a left border, because the home repo is usually also
+  the *selected* one and a border is invisible against the selected fill — caught by
+  rendering both states rather than only the one being designed. The workspace lookup is
+  memoized per path: it costs a `git rev-parse`, and a window's folder does not change.
 - **Layout is a left-to-right layered tree.** Depth grows rightward, siblings stack
   vertically. This matters: a swarm is wide and shallow (16–27 siblings at depth 1), so
   breadth must land on the axis that scrolls naturally. Top-down would put 27 nodes
@@ -367,8 +381,10 @@ wide, and how deep the nesting went.
   node tree to coordinates, with no DOM dependency, so it unit-tests directly. Rendering
   is hand-written SVG; no charting framework, no CDN (CSP would block it anyway).
 - **Status is carried by the node itself** — border color plus a glyph, so it reads without
-  clicking: `●` live (animated ring), `◐` running, `✓` done, `✗` error, dimmed for idle.
-  Node label is `agentType` over `description` from the `.meta.json`.
+  clicking: `●` live (animated ring), `◐` running, `✓` done, `✗` error. No visible node is
+  ever `idle` — that status exists only on the synthetic forest root, which `layoutForest`
+  filters out before rendering.
+  An agent node's label is the `.meta.json` `description`, with `agentType` as its sublabel.
 - **A session node carries the title on its editor tab**, not its UUID. Claude Code writes
   the tab title into the transcript itself: `{"type":"ai-title","aiTitle":…}` for the one
   the model generates, `{"type":"custom-title","customTitle":…}` for one renamed by hand.
@@ -443,10 +459,62 @@ wide, and how deep the nesting went.
   the view to the top of that row and lose your place entirely. So `frameBox` takes an
   optional `anchor` — the sub-box to keep centred when the row overflows — and only the
   collapse path passes one.
+- **Panning must not select the labels it drags over.** A drag across the canvas is a
+  native text selection as far as the browser is concerned, so nodes light up blue as you
+  move. Two fixes, because either alone leaves a gap: `user-select: none` on `#canvas`
+  stops the selection forming, and `preventDefault()` on the mousedown stops the drag
+  *starting* one. Both are scoped to the canvas — the detail modal lives outside it and
+  must stay selectable, since copying a tool's output is the point of opening it. Verified
+  by reading `getComputedStyle` in headless Chrome rather than by eye: canvas and SVG text
+  `none`, overlay and its `<pre>` `auto`.
 - **Pan and zoom**, with a `Fit` control. The viewport refits automatically whenever the
   graph's *shape* changes — scope key plus node count plus dimensions — because a zoom
   level chosen for a 96-node run leaves a single-node session off-screen on an apparently
   blank canvas. Manual pan/zoom is preserved within a shape, and discarded when it changes.
+- **A node expands itself the first time it gains children, and only then.** Watching a
+  swarm start means watching agents appear under a node you are already looking at, and
+  having to click the badge each time defeats the point. The rule has to be "gained
+  children while you were watching", not "has children" — `FirstChildrenWatch` therefore
+  records every node id it has seen, and claims one only when a node it saw *without*
+  children turns up *with* them. Seeding on the first pass is what keeps an
+  already-populated tree from exploding open the moment the panel is opened. After that one
+  claim the node is never claimed again, however many more children arrive, and an explicit
+  collapse is never overridden.
+
+  "Seen" has to mean **on screen**, not "in the index", and the set has to be **pruned to
+  what is on screen each pass**. Indexing every worktree group of the repo meant a node
+  registered while you were looking at `main` counted as seen, so switching to the worktree
+  a swarm had been running in found it already blown open — the exact flow this repo's own
+  `fix-linear` encourages. The same leak reaches a session that slides out of
+  `maxSessionsPerRepo` and returns, one that `hideDeletedWork` drops and restores, and a
+  repo that `discover()` silently reselects. Pruning fixes all four and bounds the memory:
+  unpruned, the busiest project here would retain ~2k ids a month with 205 on screen.
+  `hadChildren` is still carried forward for ids that *are* present, so children vanishing
+  and returning does not re-fire the claim.
+
+  The claim is also capped at `DEFAULT_AUTO_COLLAPSE`. Without that, a `review-code` run
+  spawning 20+ agents floods the canvas when watched live and stays collapsed when opened
+  cold — the auto-expand override is permanent and sits *before* the fan-out guard in
+  `isExpanded`, so it silently repeals it. A small arrival opening itself is the ask; a
+  96-agent fan-out doing so is what collapsing-by-default exists to prevent.
+- **Arriving at a tree opens the path to whatever is live in it.** The depth rule exists so
+  you are not drowned on arrival; a branch with a working agent in it is the exception,
+  since that is what you opened the panel to see. `propagateActivity` already marks every
+  ancestor of a working node with `activity`, so `isExpanded` opens any node whose subtree
+  is `live`, at any depth.
+
+  `live` and **not** `running`, deliberately. `running` only means "launched, no
+  `tool_result` yet", and this document records at length how long that claim can outlive
+  the work — a journal `started` with no `result` never retires. Opening on
+  `activity !== undefined` therefore sprang month-dead sessions fully open on arrival,
+  the opposite of the request. `live` is the only status backed by evidence that something
+  is happening *now*, and it is the one the eye already reads as green.
+
+  The fan-out cap still applies. Without it a 90-agent `Verify` band would open itself the
+  moment one member wrote a line — exactly the flood collapsing-by-default exists to
+  prevent. The band stays shut, drawn green with its badge, so you can see where to click.
+  An explicit collapse outranks all of it, and the expansion is not sticky: when the work
+  stops, the branch closes again.
 - **The graph opens collapsed, by depth.** Width was the wrong rule: with every layer under
   the 12-child threshold, a real `gridmatic-dev` view expanded to **33 nodes at
   988x1348px**, which fit-to-view then shrank below readability. Depth is what controls
@@ -508,10 +576,83 @@ wide, and how deep the nesting went.
 
 ### Agent status, derived
 
-- Workflow agents: `journal.jsonl` — `started` with no matching `result` → running.
-- `Agent`-tool subagents: running until the parent transcript shows a `tool_result`
-  carrying that agent's `toolUseId`.
-- Sessions: live if the transcript's mtime is within 60s; otherwise idle or done.
+Every node's status comes from its **own transcript's mtime** first, and only then from
+whatever the parent or the manifest says:
+
+- `live` — the transcript was written within `liveWindowSeconds`. It is working *now*.
+  Bounded in **both** directions: an unbounded `now - mtime <= window` makes any future
+  timestamp pass every positive window, so one backward NTP step would pin thousands of
+  transcripts green at once. Modest skew is tolerated, a 2035 stamp is not.
+- `running` — not writing, but launched and not yet returned. Quiet, not finished: an
+  agent waiting on a long `Bash` call, or one still queued.
+- `done` / `error` — terminal.
+
+Deriving an agent's liveness from the parent instead was wrong, and measurably so. A
+background `Agent` call's `tool_result` is the *launch acknowledgement*, not the outcome —
+measured on this session's own transcript, every one of six landed **12–16 ms** after the
+`tool_use`:
+
+```
+'Review focus and zoom math'   launched 21:05:46.630Z  result 21:05:46.646Z
+'Review deleted-work filter'   launched 21:06:11.610Z  result 21:06:11.618Z
+```
+
+So `running = no tool_result yet` marked every background agent `done` within milliseconds
+while it worked for another eight minutes. They flashed blue and went grey. The mtime is
+the only signal on disk that tracks what an agent is actually doing, which is why it now
+comes first. A workflow manifest's `state` still overrides — except that it cannot
+downgrade a `live` node to `running`, since the transcript is the more recent evidence.
+
+**Activity propagates up the tree, and the edges carry it.** A node whose own transcript is
+quiet but which has a working descendant is not done — it is waiting on that descendant,
+and a grey `✓` on it is a lie about the subtree beneath. `propagateActivity` therefore
+raises a node to the strongest activity anywhere under it (`live` beats `running`), and
+each `PositionedEdge` records the status of the node it points *at*, so the whole path from
+a working leaf to its session root draws green and the rest of the tree stays grey.
+
+Two things it deliberately does not do: `error` never propagates (one failed verify in
+ninety does not make the run failed), and an errored node is never painted over by live
+descendants — but it still *reports* their activity upward, so the path above it stays
+green rather than breaking at the failure. That report is kept on the node as `activity`,
+separate from the status it displays, and the **edge** is drawn from `activity`, not from
+the target's own status. Drawn from the status instead, the chain renders green → grey →
+red → green around a failed node, which is exactly the broken path the feature exists to
+avoid.
+
+**A finished run must not keep claiming agents are running**, which propagation made
+urgent: a stale `running` that used to sit quietly on one workflow node now travels to the
+session root and lights a month-dead session as active. Two sources of that claim, both
+real on this machine:
+
+- A **killed** run strands its in-flight agents at `progress`/`start`, and `statusFromState`
+  maps both to `running` — so the old `running > 0 ? 'running' : killed ? 'error'` ordering
+  made the `killed` branch unreachable for precisely the runs that were killed mid-flight.
+  All three killed manifests here have stranded agents; a `failed` manifest was not handled
+  at all and rendered as a green ✓.
+- A **completed** run can still hold an agent with a journal `started` and no `result`,
+  which reads as running forever.
+
+A manifest can also be **unreadable for a silly reason**. One on this machine is two
+complete JSON documents concatenated — the harness rewrote it without truncating — so
+`JSON.parse` threw, the run lost its labels, phases and states, and fell back to a journal
+whose `started` lines have no matching `result`. That is a `running` claim nothing can ever
+retire, and propagation carried it to the root of a session dead for 27.7 days.
+`firstJsonValue` now takes the first complete object when a straight parse fails, matching
+braces outside strings and giving up rather than guessing at a truncated file. That session
+reads `done` again.
+
+So a manifest's terminal status now settles its agents before anything else is derived
+from them: `killed`/`failed` → `error`, `completed` → `done`. Order matters — this has to
+happen *before* `groupIntoPhases`, or the phase nodes are built from the statuses being
+corrected. A run with no manifest still falls back to the journal. Measured on the
+27-day-dead session that exposed this: root `running` → **`done`**, with its killed run
+correctly red and the other two runs grey.
+
+One more count was out of step with `live`: `groupIntoPhases` filtered on `'running'`
+alone, so a phase holding one failed member flipped to `error` exactly when its other
+members started writing, and `propagateActivity` could not repair it because of the
+`error` guard. Mixed error/active phases are the normal shape for `review-code` — one real
+`Verify` phase holds 61 done and 49 errored agents.
 
 No polling of agent processes, no PID tracking — purely derived from the files.
 
@@ -604,6 +745,16 @@ expire after 15s, so a deleted branch leaves the UI within 15s, while whether a 
 git repo at all is cached for 5 minutes, since it effectively never changes. Measured over
 32s of polling, that is **9 git invocations total** — 5 one-off repo probes, then
 `worktree list` and `branch` twice each.
+
+### The store never shows an empty world mid-reload
+
+`loadSelected()` used to clear `groups` and `nodesById` at the top and repopulate at the
+bottom, so for the length of a reload — 11-13 ms warm, 85 ms cold, every 2 s — the store
+answered as if nothing existed. Two things fall through that window: a `toggleNode` finds
+no node, returns `false` and drops the click with no feedback; and any `postState` landing
+in the gap posts an empty graph, so the canvas wipes and prints "No sessions in the last 7
+days for this repo." It builds into locals and assigns at the end instead. Pre-existing,
+but auto-expansion made it bite more often by putting many more clickable badges on screen.
 
 ### Polling only runs when someone is looking
 

@@ -24,6 +24,7 @@ export interface PositionedNode {
   hiddenChildren: number;
   expanded: boolean;
   totalChildren: number;
+  activity?: NodeStatus;
 }
 
 export interface PositionedEdge {
@@ -33,6 +34,7 @@ export interface PositionedEdge {
   fromY: number;
   toX: number;
   toY: number;
+  toStatus: NodeStatus;
 }
 
 export interface GraphLayout {
@@ -55,8 +57,10 @@ export function isExpanded(node: AgentNode, depth: number, options: LayoutOption
   if (node.children.length === 0) return true;
   const override = options.overrides?.get(node.id);
   if (override !== undefined) return override;
+  const fits = node.children.length <= (options.autoCollapseThreshold ?? DEFAULT_AUTO_COLLAPSE);
+  if (node.activity === 'live') return fits;
   if (depth >= (options.initialDepth ?? DEFAULT_INITIAL_DEPTH)) return false;
-  return node.children.length <= (options.autoCollapseThreshold ?? DEFAULT_AUTO_COLLAPSE);
+  return fits;
 }
 
 interface Collapsed {
@@ -108,6 +112,7 @@ export function layoutTree(root: AgentNode, options: LayoutOptions = {}): GraphL
       eventCount: node.data.events.length,
       childCount: node.data.children.length,
       totalChildren: flag?.node.children.length ?? node.data.children.length,
+      activity: node.data.activity,
       hiddenChildren: flag?.hidden ?? 0,
       expanded: flag?.expanded ?? true,
       x: (node.y ?? 0) - minColumn,
@@ -130,6 +135,7 @@ export function layoutTree(root: AgentNode, options: LayoutOptions = {}): GraphL
       fromY: from.y + NODE_HEIGHT / 2,
       toX: to.x,
       toY: to.y + NODE_HEIGHT / 2,
+      toStatus: to.activity ?? to.status,
     });
   }
 

@@ -36,6 +36,7 @@ export interface AgentNode {
   label: string;
   sublabel?: string;
   status: NodeStatus;
+  activity?: NodeStatus;
   events: AgentEvent[];
   children: AgentNode[];
   toolUseId?: string;
@@ -49,6 +50,19 @@ export interface SubagentInput {
   meta: SubagentMeta;
   lines: TranscriptLine[];
   transcriptPath?: string;
+  mtimeMs?: number;
+}
+
+export interface Liveness {
+  liveWindowSeconds: number;
+  nowMs: number;
+}
+
+export function isLive(mtimeMs: number | undefined, liveness: Liveness): boolean {
+  if (mtimeMs === undefined) return false;
+  const ageSeconds = (liveness.nowMs - mtimeMs) / 1000;
+  if (ageSeconds < -liveness.liveWindowSeconds) return false;
+  return ageSeconds <= liveness.liveWindowSeconds;
 }
 
 export interface JournalEntry {
@@ -206,7 +220,12 @@ function blockText(content: ContentBlock[] | undefined): string | undefined {
   return undefined;
 }
 
-function subagentNode(input: SubagentInput, running: boolean, errored = false): AgentNode {
+function subagentNode(
+  input: SubagentInput,
+  running: boolean,
+  liveness: Liveness,
+  errored = false,
+): AgentNode {
   const events = buildEvents(input.lines);
   const label = input.meta.description ?? deriveLabel(input.lines) ?? input.agentId.slice(0, 8);
   return {
@@ -214,7 +233,13 @@ function subagentNode(input: SubagentInput, running: boolean, errored = false): 
     kind: 'agent',
     label: clip(label, 48),
     sublabel: input.meta.agentType,
-    status: running ? 'running' : errored ? 'error' : 'done',
+    status: errored
+      ? 'error'
+      : isLive(input.mtimeMs, liveness)
+        ? 'live'
+        : running
+          ? 'running'
+          : 'done',
     events,
     children: [],
     toolUseId: input.meta.toolUseId,
@@ -239,8 +264,26 @@ interface Owner {
   errored: Set<string>;
 }
 
+const ACTIVITY: Record<NodeStatus, number> = { live: 2, running: 1, error: 0, done: 0, idle: 0 };
+
+export function propagateActivity(node: AgentNode): NodeStatus | undefined {
+  let strongest: NodeStatus | undefined;
+  const consider = (status: NodeStatus | undefined): void => {
+    if (!status || ACTIVITY[status] === 0) return;
+    if (!strongest || ACTIVITY[status] > ACTIVITY[strongest]) strongest = status;
+  };
+
+  consider(node.status);
+  for (const child of node.children) consider(propagateActivity(child));
+
+  node.activity = strongest;
+  if (strongest && node.status !== 'error') node.status = strongest;
+  return strongest;
+}
+
 export function buildSessionTree(input: SessionInput): AgentNode {
   const events = buildEvents(input.lines);
+  const liveness: Liveness = { liveWindowSeconds: input.liveWindowSeconds, nowMs: input.nowMs };
   const ageSeconds = (input.nowMs - input.mtimeMs) / 1000;
   const branch = latestBranch(input.lines);
   const root: AgentNode = {
@@ -274,7 +317,7 @@ export function buildSessionTree(input: SessionInput): AgentNode {
     if (!owner) continue;
     const running = toolUseId !== undefined && !owner.completed.has(toolUseId);
     const errored = toolUseId !== undefined && owner.errored.has(toolUseId);
-    const node = subagentNode(candidate, running, errored);
+    const node = subagentNode(candidate, running, liveness, errored);
     owner.node.children.push(node);
     owners.push({
       node,
@@ -285,9 +328,10 @@ export function buildSessionTree(input: SessionInput): AgentNode {
   }
 
   for (const workflow of input.workflows) {
-    root.children.push(buildWorkflowNode(workflow));
+    root.children.push(buildWorkflowNode(workflow, liveness));
   }
 
+  propagateActivity(root);
   return root;
 }
 
@@ -295,18 +339,21 @@ function workflowAgentNode(
   agent: SubagentInput,
   entry: ManifestAgent | undefined,
   journalRunning: boolean,
+  liveness: Liveness,
 ): AgentNode {
-  const node = subagentNode(agent, journalRunning);
+  const node = subagentNode(agent, journalRunning, liveness);
   const fromManifest = statusFromState(entry?.state);
-  if (fromManifest) node.status = fromManifest;
+  if (fromManifest && !(fromManifest === 'running' && node.status === 'live')) {
+    node.status = fromManifest;
+  }
   if (entry?.label) node.label = clip(entry.label, 48);
-  const detail = node.status === 'running' ? entry?.lastToolName : undefined;
+  const detail = node.status === 'running' || node.status === 'live' ? entry?.lastToolName : undefined;
   if (detail) node.sublabel = detail;
   else if (entry?.label) node.sublabel = undefined;
   return node;
 }
 
-export function buildWorkflowNode(workflow: WorkflowInput): AgentNode {
+export function buildWorkflowNode(workflow: WorkflowInput, liveness: Liveness): AgentNode {
   const started = new Set<string>();
   const finished = new Set<string>();
   for (const entry of workflow.journal) {
@@ -321,13 +368,22 @@ export function buildWorkflowNode(workflow: WorkflowInput): AgentNode {
       agent,
       manifest?.agents.get(agent.agentId),
       started.has(agent.agentId) && !finished.has(agent.agentId),
+      liveness,
     ),
   );
+
+  const abandoned = manifest?.status === 'killed' || manifest?.status === 'failed';
+  const settled = abandoned ? 'error' : manifest?.status === 'completed' ? 'done' : undefined;
+  if (settled) {
+    for (const node of nodes) {
+      if (node.status === 'running' || node.status === 'live') node.status = settled;
+    }
+  }
 
   const byAgentId = new Map(workflow.agents.map((agent, index) => [agent.agentId, nodes[index] as AgentNode]));
   const children = groupIntoPhases(byAgentId, manifest) ?? nodes;
 
-  const running = nodes.filter((node) => node.status === 'running').length;
+  const running = nodes.filter((node) => node.status === 'running' || node.status === 'live').length;
   const total = Math.max(started.size, workflow.agents.length);
   const summary = manifest?.logs[0] ?? `${finished.size}/${total} done`;
 
@@ -336,7 +392,7 @@ export function buildWorkflowNode(workflow: WorkflowInput): AgentNode {
     kind: 'workflow',
     label: manifest?.workflowName ?? workflow.runId,
     sublabel: clip(summary, 60),
-    status: running > 0 ? 'running' : manifest?.status === 'killed' ? 'error' : 'done',
+    status: abandoned ? 'error' : running > 0 ? 'running' : 'done',
     events: [],
     children,
   };
@@ -361,6 +417,7 @@ function groupIntoPhases(
   for (const title of manifest.phases) {
     const members = buckets.get(title);
     if (!members || members.length === 0) continue;
+    const live = members.filter((member) => member.status === 'live').length;
     const running = members.filter((member) => member.status === 'running').length;
     const errored = members.filter((member) => member.status === 'error').length;
     phases.push({
@@ -368,7 +425,7 @@ function groupIntoPhases(
       kind: 'phase',
       label: title,
       sublabel: `${members.length} agents${errored > 0 ? ` · ${errored} failed` : ''}`,
-      status: running > 0 ? 'running' : errored > 0 ? 'error' : 'done',
+      status: live > 0 ? 'live' : running > 0 ? 'running' : errored > 0 ? 'error' : 'done',
       events: [],
       children: members,
     });

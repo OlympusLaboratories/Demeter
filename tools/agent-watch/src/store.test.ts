@@ -4,6 +4,8 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Store, type StoreSettings } from './store';
 
+const SESSION_ID = 'aaaaaaaa-1111-2222-3333-444444444444';
+
 const temps: string[] = [];
 
 async function fixture(): Promise<{ projects: string; transcript: string; subagents: string }> {
@@ -11,7 +13,7 @@ async function fixture(): Promise<{ projects: string; transcript: string; subage
   temps.push(root);
   const projects = path.join(root, 'projects');
   const slug = '-tmp-repo';
-  const sessionId = 'aaaaaaaa-1111-2222-3333-444444444444';
+  const sessionId = SESSION_ID;
   const dir = path.join(projects, slug);
   const subagents = path.join(dir, sessionId, 'subagents');
   await fs.mkdir(subagents, { recursive: true });
@@ -83,6 +85,69 @@ describe('Store', () => {
 
     expect(store.view(false).repos).toHaveLength(1);
     expect(store.view(false).removedCount).toBe(0);
+  });
+
+  it('never reports an empty world while it is reloading', async () => {
+    const { projects } = await fixture();
+    const store = new Store(settings(projects));
+    await store.discover();
+    await store.loadSelected();
+
+    const before = store.view(false);
+    expect(before.graph.nodes.length).toBeGreaterThan(0);
+
+    const inflight = store.loadSelected();
+    const during = store.view(false);
+    await inflight;
+
+    expect(during.graph.nodes).toHaveLength(before.graph.nodes.length);
+    expect(during.worktrees).toHaveLength(before.worktrees.length);
+  });
+
+  it('does not let a click vanish into a reload', async () => {
+    const { projects, subagents } = await fixture();
+    await fs.writeFile(path.join(subagents, 'agent-a1.meta.json'), JSON.stringify({ description: 'worker' }));
+    await fs.writeFile(path.join(subagents, 'agent-a1.jsonl'), '');
+
+    const store = new Store(settings(projects));
+    await store.discover();
+    await store.loadSelected();
+    expect(store.view(false).graph.nodes.some((node) => node.id === 'agent:a1')).toBe(true);
+
+    const inflight = store.loadSelected();
+    const toggled = store.toggleNode(`session:${SESSION_ID}`);
+    await inflight;
+
+    expect(toggled).toBe(false);
+    expect(store.view(false).graph.nodes.find((n) => n.id === `session:${SESSION_ID}`)?.expanded).toBe(false);
+  });
+
+  it('puts the window own repo first and marks it, whoever was busiest', async () => {
+    const { projects } = await fixture();
+    const other = path.join(projects, '-tmp-elsewhere');
+    await fs.mkdir(other, { recursive: true });
+    await fs.writeFile(
+      path.join(other, 'dddddddd-0000-0000-0000-000000000004.jsonl'),
+      `${JSON.stringify({ type: 'user', cwd: '/tmp/elsewhere', message: { content: [{ type: 'text', text: 'hi' }] } })}\n`,
+    );
+
+    const store = new Store(settings(projects));
+    await store.discover('/tmp/repo');
+    await store.loadSelected();
+    const repos = store.view(false).repos;
+
+    expect(repos[0]?.label).toBe('repo');
+    expect(repos[0]?.isWorkspace).toBe(true);
+    expect(repos.filter((entry) => entry.isWorkspace)).toHaveLength(1);
+  });
+
+  it('marks nothing when the window is not in any repo it can see', async () => {
+    const { projects } = await fixture();
+    const store = new Store(settings(projects));
+    await store.discover('/tmp/somewhere-unrelated');
+    await store.loadSelected();
+
+    expect(store.view(false).repos.some((entry) => entry.isWorkspace)).toBe(false);
   });
 
   it('picks up a subagent that appears after the first load', async () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseManifest, statusFromState } from './manifest';
+import { isLive } from './model';
+import { firstJsonValue, parseManifest, statusFromState } from './manifest';
 
 const sample = {
   runId: 'wf_abc',
@@ -70,5 +71,48 @@ describe('statusFromState', () => {
     expect(statusFromState('start')).toBe('running');
     expect(statusFromState('something-new')).toBeUndefined();
     expect(statusFromState(undefined)).toBeUndefined();
+  });
+});
+
+describe('firstJsonValue', () => {
+  it('reads an ordinary document unchanged', () => {
+    expect(firstJsonValue('{"runId":"wf_a","logs":[]}')).toEqual({ runId: 'wf_a', logs: [] });
+  });
+
+  it('recovers the first document when the harness wrote two without truncating', () => {
+    const first = { runId: 'wf_a', status: 'completed' };
+    const stale = { runId: 'wf_a', status: 'running' };
+    const value = firstJsonValue(`${JSON.stringify(first)}${JSON.stringify(stale)}`);
+
+    expect(value).toEqual(first);
+  });
+
+  it('is not fooled by braces inside strings', () => {
+    const doc = { runId: 'wf_a', logs: ['a } b { c', 'escaped \\" quote }'] };
+    expect(firstJsonValue(`${JSON.stringify(doc)}{"runId":"later"}`)).toEqual(doc);
+  });
+
+  it('gives up rather than guessing at a truncated document', () => {
+    expect(firstJsonValue('{"runId":"wf_a","logs":[')).toBeUndefined();
+    expect(firstJsonValue('not json at all')).toBeUndefined();
+  });
+});
+
+describe('isLive', () => {
+  const window = { liveWindowSeconds: 60, nowMs: 1_000_000 };
+
+  it('counts a transcript written inside the window, and not one outside it', () => {
+    expect(isLive(1_000_000, window)).toBe(true);
+    expect(isLive(1_000_000 - 60_000, window)).toBe(true);
+    expect(isLive(1_000_000 - 60_001, window)).toBe(false);
+  });
+
+  it('tolerates a little clock skew but refuses a timestamp from the future', () => {
+    expect(isLive(1_000_000 + 59_000, window)).toBe(true);
+    expect(isLive(Date.parse('2035-01-01T00:00:00Z'), window)).toBe(false);
+  });
+
+  it('is false when the file could not be stat-ed at all', () => {
+    expect(isLive(undefined, window)).toBe(false);
   });
 });

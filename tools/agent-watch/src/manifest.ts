@@ -88,10 +88,46 @@ export function manifestPathFor(sessionDir: string, runId: string): string {
   return path.join(sessionDir, 'workflows', `${runId}.json`);
 }
 
+export function firstJsonValue(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    const end = endOfFirstObject(text);
+    if (end === undefined) return undefined;
+    try {
+      return JSON.parse(text.slice(0, end));
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+function endOfFirstObject(text: string): number | undefined {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === '{') depth += 1;
+    else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return index + 1;
+    }
+  }
+  return undefined;
+}
+
 export async function readManifest(sessionDir: string, runId: string): Promise<WorkflowManifest | undefined> {
   try {
     const text = await fs.readFile(manifestPathFor(sessionDir, runId), 'utf8');
-    return parseManifest(JSON.parse(text));
+    return parseManifest(firstJsonValue(text));
   } catch {
     return undefined;
   }

@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   buildEvents,
   buildSessionTree,
+  propagateActivity,
   completedToolUseIds,
   deriveLabel,
   erroredToolUseIds,
   spawnIdsIn,
 } from './model';
+import type { AgentNode, NodeStatus } from './model';
 import type { TranscriptLine } from './transcript';
 
 function assistant(blocks: unknown[]): TranscriptLine {
@@ -335,5 +337,51 @@ describe('erroredToolUseIds', () => {
       ],
     });
     expect(tree.children[0]?.status).toBe('done');
+  });
+});
+
+describe('propagateActivity', () => {
+  function node(id: string, status: NodeStatus, children: AgentNode[] = []): AgentNode {
+    return { id, kind: 'agent', label: id, status, events: [], children };
+  }
+
+  it('carries a working leaf all the way up to the root', () => {
+    const leaf = node('leaf', 'live');
+    const mid = node('mid', 'done', [leaf]);
+    const root = node('root', 'done', [mid]);
+
+    propagateActivity(root);
+
+    expect([root.status, mid.status, leaf.status]).toEqual(['live', 'live', 'live']);
+  });
+
+  it('leaves a branch alone when nothing under it is working', () => {
+    const quiet = node('quiet', 'done', [node('a', 'done'), node('b', 'done')]);
+    propagateActivity(quiet);
+    expect(quiet.status).toBe('done');
+  });
+
+  it('prefers live over running when a parent has both kinds of child', () => {
+    const root = node('root', 'done', [node('a', 'running'), node('b', 'live')]);
+    propagateActivity(root);
+    expect(root.status).toBe('live');
+  });
+
+  it('raises a done parent to running when its child is merely launched', () => {
+    const root = node('root', 'done', [node('a', 'running')]);
+    propagateActivity(root);
+    expect(root.status).toBe('running');
+  });
+
+  it('keeps a failure visible rather than painting over it', () => {
+    const failed = node('failed', 'error', [node('a', 'live')]);
+    propagateActivity(failed);
+    expect(failed.status).toBe('error');
+  });
+
+  it('still reports the activity under a failed node so the path above it stays green', () => {
+    const root = node('root', 'done', [node('failed', 'error', [node('a', 'live')])]);
+    propagateActivity(root);
+    expect(root.status).toBe('live');
   });
 });

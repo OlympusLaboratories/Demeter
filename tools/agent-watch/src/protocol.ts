@@ -4,6 +4,7 @@ import type { AgentEvent, NodeKind, NodeStatus } from './model';
 export interface RepoSummary {
   slug: string;
   label: string;
+  isWorkspace: boolean;
   liveCount: number;
   sessionCount: number;
   newestMtimeMs: number;

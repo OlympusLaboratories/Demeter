@@ -1,4 +1,5 @@
 import { NODE_HEIGHT, NODE_WIDTH } from './graphLayout';
+import type { NodeStatus } from './model';
 
 export interface Box {
   x: number;
@@ -91,4 +92,8 @@ export function sublabelCapacity(chrome: Chrome | boolean): number {
 
 export function nodeBounds(): Box {
   return { x: 0, y: 0, width: NODE_WIDTH, height: NODE_HEIGHT };
+}
+
+export function edgeClass(toStatus: NodeStatus): string {
+  return toStatus === 'live' || toStatus === 'running' ? `edge ${toStatus}` : 'edge';
 }

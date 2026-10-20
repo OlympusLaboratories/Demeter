@@ -56,6 +56,7 @@ export class AgentWatchPanel {
   private pending = debounce(() => undefined, 0);
   private refreshing = false;
   private queued = false;
+  private disposed = false;
   private openNodeId: string | undefined;
   private openDetailRevision: string | undefined;
 
@@ -65,6 +66,10 @@ export class AgentWatchPanel {
     private readonly store: Store,
     private preferredPath: string | undefined,
   ) {
+    this.panel.iconPath = {
+      light: vscode.Uri.joinPath(context.extensionUri, 'media', 'graph-light.svg'),
+      dark: vscode.Uri.joinPath(context.extensionUri, 'media', 'graph-dark.svg'),
+    };
     this.panel.webview.html = this.html();
     this.watcher = new PathWatcher(() => this.pending.call(), { pollMs: store.pollMs() });
     this.pending = debounce(() => {
@@ -86,11 +91,14 @@ export class AgentWatchPanel {
   }
 
   private startHeartbeat(): void {
-    if (this.heartbeat) return;
-    this.heartbeat = setInterval(() => {
-      void this.reload();
-    }, this.store.pollMs());
+    if (this.heartbeat || this.disposed) return;
+    this.heartbeat = setInterval(() => this.tick(), this.store.pollMs());
     if (typeof this.heartbeat === 'object' && 'unref' in this.heartbeat) this.heartbeat.unref();
+  }
+
+  private tick(): void {
+    if (this.refreshing || this.disposed) return;
+    void this.reload();
   }
 
   private stopHeartbeat(): void {
@@ -113,6 +121,7 @@ export class AgentWatchPanel {
   }
 
   async refresh(preferredPath?: string): Promise<void> {
+    if (this.disposed) return;
     if (preferredPath) this.preferredPath = preferredPath;
     this.store.invalidateGit();
     this.postState(true);
@@ -120,6 +129,7 @@ export class AgentWatchPanel {
   }
 
   private async reload(): Promise<void> {
+    if (this.disposed) return;
     if (this.refreshing) {
       this.queued = true;
       return;
@@ -128,9 +138,11 @@ export class AgentWatchPanel {
     try {
       do {
         this.queued = false;
+        if (this.disposed) return;
         await this.store.discover(this.preferredPath);
         await this.store.loadSelected();
         await this.watcher?.setTargets(this.store.watchTargets());
+        if (this.disposed) return;
         if (this.panel.visible) {
           this.watcher?.start();
           this.startHeartbeat();
@@ -204,9 +216,12 @@ export class AgentWatchPanel {
     const folders = (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath);
     if (!isInAnyFolder(folders, target.cwd)) {
       const open = 'Open Folder in New Window';
+      const where = target.cwd
+        ? `That session ran in ${target.cwd}, outside this window.`
+        : 'That session never recorded a working directory, so there is no way to tell which repo it belongs to.';
       const choice = await vscode.window.showWarningMessage(
-        `That session ran in ${target.cwd ?? 'another directory'}, outside this window. Resuming it here would attach it to this workspace instead.`,
-        open,
+        `${where} Resuming it here would attach it to this workspace instead.`,
+        ...(target.cwd ? [open] : []),
       );
       if (choice === open && target.cwd) {
         await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(target.cwd), {
@@ -225,6 +240,7 @@ export class AgentWatchPanel {
   }
 
   private post(message: HostMessage): void {
+    if (this.disposed) return;
     void this.panel.webview.postMessage(message);
   }
 
@@ -289,6 +305,7 @@ export class AgentWatchPanel {
   }
 
   private dispose(): void {
+    this.disposed = true;
     AgentWatchPanel.current = undefined;
     this.pending.cancel();
     this.stopHeartbeat();
@@ -332,12 +349,14 @@ header#scope { padding: 8px 12px 4px; border-bottom: 1px solid var(--vscode-pane
 .chip.selected { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: transparent; }
 .chip .live { color: var(--vscode-charts-green); margin-left: 4px; }
 .chip.repo { border-radius: 4px; font-weight: 600; }
+.chip.repo.home::before { content: ''; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--vscode-focusBorder); margin-right: 6px; vertical-align: middle; }
+.chip.repo.home.selected::before { background: var(--vscode-button-foreground); }
 .chip.worktree { border-radius: 999px; }
 .row.status { color: var(--vscode-descriptionForeground); font-size: 0.8em; gap: 10px; }
 .row.status .dot { color: var(--vscode-charts-green); }
 .row.status .hidden-count { color: var(--vscode-descriptionForeground); border-bottom: 1px dotted currentColor; cursor: help; }
 main { flex: 1; position: relative; overflow: hidden; }
-#canvas { position: absolute; inset: 0; overflow: hidden; cursor: grab; }
+#canvas { position: absolute; inset: 0; overflow: hidden; cursor: grab; user-select: none; -webkit-user-select: none; }
 #canvas.grabbing { cursor: grabbing; }
 .row.status .spacer { flex: 1; }
 svg { display: block; }
@@ -365,6 +384,8 @@ svg { display: block; }
 .node.done .glyph { fill: var(--vscode-descriptionForeground); }
 .node.error .glyph { fill: var(--vscode-errorForeground); }
 path.edge { fill: none; stroke: var(--vscode-panel-border); stroke-width: 1.5; }
+path.edge.live { stroke: var(--vscode-charts-green); stroke-width: 2.5; }
+path.edge.running { stroke: var(--vscode-charts-blue); stroke-width: 2.5; }
 #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--vscode-descriptionForeground); text-align: center; padding: 24px; }
 .hidden { display: none !important; }
 #overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 10; }

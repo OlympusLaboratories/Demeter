@@ -24,7 +24,15 @@ function layoutOf(rows: Array<{ id: string; x: number; y: number }>, edges: Arra
       expanded: true,
       totalChildren: 0,
     })),
-    edges: edges.map(([from, to]) => ({ from, to, fromX: 0, fromY: 0, toX: 0, toY: 0 })),
+    edges: edges.map(([from, to]) => ({
+      from,
+      to,
+      fromX: 0,
+      fromY: 0,
+      toX: 0,
+      toY: 0,
+      toStatus: 'done' as const,
+    })),
     width: 0,
     height: 0,
   };

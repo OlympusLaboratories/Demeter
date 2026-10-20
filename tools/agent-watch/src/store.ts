@@ -2,9 +2,10 @@ import type { AgentNode } from './model';
 import { type ProjectDir, scanProjects, withinDays } from './discovery';
 import { type LoadedSession, loadSession, peekProjectPath } from './loader';
 import { type WorktreeGroup, GitFacts, groupByWorktree, partitionSessions, repoRootFor } from './repos';
-import { layoutForest } from './graphLayout';
+import { DEFAULT_AUTO_COLLAPSE, layoutForest } from './graphLayout';
 import { TranscriptCache } from './tail';
 import type { NodeDetail, RepoSummary, ViewState, WorktreeSummary } from './protocol';
+import { FirstChildrenWatch } from './firstChildren';
 
 export interface StoreSettings {
   projectsDir: string;
@@ -27,7 +28,7 @@ interface RepoEntry {
 export class Store {
   private repos: RepoEntry[] = [];
   private groups: WorktreeGroup[] = [];
-  private nodesById = new Map<string, AgentNode>();
+  private nodesById: Map<string, AgentNode> = new Map();
   private selectedRepo?: string;
   private selectedWorktree?: string;
   private readonly cache = new TranscriptCache();
@@ -36,6 +37,9 @@ export class Store {
   private renderedExpansion = new Map<string, boolean>();
   private removedCount = 0;
   private readonly git = new GitFacts();
+  private readonly firstChildren = new FirstChildrenWatch();
+  private workspaceSlug?: string;
+  private workspaceFor?: string;
 
   constructor(private settings: StoreSettings) {}
 
@@ -62,8 +66,15 @@ export class Store {
       this.repos.push({ project, label: labelFor(resolved, project.slug), path: resolved });
     }
 
+    if (preferredPath !== undefined && this.workspaceFor !== preferredPath) {
+      this.workspaceFor = preferredPath;
+      this.workspaceSlug = await this.matchRepo(preferredPath);
+    } else if (this.workspaceSlug && !this.repos.some((repo) => repo.project.slug === this.workspaceSlug)) {
+      this.workspaceSlug = await this.matchRepo(this.workspaceFor);
+    }
+
     if (!this.selectedRepo || !this.repos.some((repo) => repo.project.slug === this.selectedRepo)) {
-      this.selectedRepo = (await this.matchRepo(preferredPath)) ?? this.repos[0]?.project.slug;
+      this.selectedRepo = this.workspaceSlug ?? this.repos[0]?.project.slug;
     }
   }
 
@@ -81,11 +92,13 @@ export class Store {
   }
 
   async loadSelected(): Promise<void> {
-    this.groups = [];
-    this.nodesById.clear();
-    this.removedCount = 0;
     const repo = this.repos.find((entry) => entry.project.slug === this.selectedRepo);
-    if (!repo) return;
+    if (!repo) {
+      this.groups = [];
+      this.nodesById.clear();
+      this.removedCount = 0;
+      return;
+    }
 
     const nowMs = Date.now();
     const sessions: LoadedSession[] = [];
@@ -109,15 +122,32 @@ export class Store {
     const { live, removed } = this.settings.hideDeletedWork
       ? partitionSessions(sessions, { knownRoots: roots, branches })
       : { live: sessions, removed: [] };
-    this.removedCount = removed.length;
-    this.groups = groupByWorktree(live, roots);
-    this.targets = [repo.project.dir, ...live.flatMap((entry) => entry.watchPaths)];
-    for (const group of this.groups) {
-      for (const session of group.sessions) index(session.tree, this.nodesById);
+    const groups = groupByWorktree(live, roots);
+    const nodesById = new Map<string, AgentNode>();
+    for (const group of groups) {
+      for (const session of group.sessions) index(session.tree, nodesById);
     }
+
+    this.removedCount = removed.length;
+    this.groups = groups;
+    this.nodesById = nodesById;
+    this.targets = [repo.project.dir, ...live.flatMap((entry) => entry.watchPaths)];
 
     if (!this.selectedWorktree || !this.groups.some((group) => group.key === this.selectedWorktree)) {
       this.selectedWorktree = this.groups[0]?.key;
+    }
+
+    const onScreen = new Map<string, AgentNode>();
+    const shown = this.groups.find((group) => group.key === this.selectedWorktree);
+    for (const session of shown?.sessions ?? []) index(session.tree, onScreen);
+
+    const arrivals = this.firstChildren.claim(
+      [...onScreen.values()].map((node) => ({ id: node.id, childCount: node.children.length })),
+    );
+    for (const id of arrivals) {
+      const node = onScreen.get(id);
+      if (!node || node.children.length > DEFAULT_AUTO_COLLAPSE) continue;
+      if (!this.overrides.has(id)) this.overrides.set(id, true);
     }
   }
 
@@ -134,6 +164,7 @@ export class Store {
     this.selectedRepo = slug;
     this.selectedWorktree = undefined;
     this.overrides.clear();
+    this.firstChildren.clear();
     this.cache.clear();
   }
 
@@ -174,13 +205,19 @@ export class Store {
 
   view(loading: boolean, message?: string): ViewState {
     const liveCutoff = Date.now() - this.settings.liveWindowSeconds * 1000;
-    const repos: RepoSummary[] = this.repos.map((entry) => ({
-      slug: entry.project.slug,
-      label: entry.label,
-      liveCount: entry.project.sessions.filter((session) => session.mtimeMs >= liveCutoff).length,
-      sessionCount: entry.project.sessions.length,
-      newestMtimeMs: entry.project.newestMtimeMs,
-    }));
+    const repos: RepoSummary[] = this.repos
+      .map((entry) => ({
+        slug: entry.project.slug,
+        label: entry.label,
+        isWorkspace: entry.project.slug === this.workspaceSlug,
+        liveCount: entry.project.sessions.filter((session) => session.mtimeMs >= liveCutoff).length,
+        sessionCount: entry.project.sessions.length,
+        newestMtimeMs: entry.project.newestMtimeMs,
+      }))
+      .sort((left, right) => {
+        if (left.isWorkspace !== right.isWorkspace) return left.isWorkspace ? -1 : 1;
+        return right.newestMtimeMs - left.newestMtimeMs;
+      });
 
     const worktrees: WorktreeSummary[] = this.groups.map((group) => ({
       key: group.key,

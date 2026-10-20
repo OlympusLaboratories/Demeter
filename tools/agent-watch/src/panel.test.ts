@@ -42,13 +42,13 @@ async function fixtureProjects(): Promise<string> {
   return path.join(root, 'projects');
 }
 
-function store(projects: string): Store {
+function store(projects: string, pollSeconds = 2): Store {
   return new Store({
     projectsDir: projects,
     liveWindowSeconds: 3600,
     recentDays: 3650,
     maxSessionsPerRepo: 12,
-    pollSeconds: 2,
+    pollSeconds,
     statusBarPriority: 110,
     initialDepth: 1,
     zoomSensitivity: 1,
@@ -86,6 +86,25 @@ describe('AgentWatchPanel', () => {
     expect(panel?.webview.html).toContain('/ext/dist/webview.js');
     expect(panel?.webview.html).toContain("default-src 'none'");
     expect(panel?.webview.html ?? '').not.toMatch(/<(?:script|link|img)[^>]+(?:src|href)="https?:/);
+  });
+
+  it('stops a pan from selecting the text it drags across, without silencing the modal', async () => {
+    const projects = await fixtureProjects();
+    AgentWatchPanel.show(context(), store(projects));
+    const html = createdPanels[0]?.webview.html ?? '';
+    const canvasRule = /#canvas \{[^}]*\}/.exec(html)?.[0] ?? '';
+
+    expect(canvasRule).toContain('user-select: none');
+    expect(/#overlay \{[^}]*user-select/.test(html)).toBe(false);
+  });
+
+  it('gives the tab its own icon rather than the editor default', async () => {
+    const projects = await fixtureProjects();
+    AgentWatchPanel.show(context(), store(projects));
+    const icon = createdPanels[0]?.iconPath;
+
+    expect(icon?.light.fsPath).toMatch(/media\/graph-light\.svg$/);
+    expect(icon?.dark.fsPath).toMatch(/media\/graph-dark\.svg$/);
   });
 
   it('gives the webview the labelled scope rows it addresses by id', async () => {
@@ -356,6 +375,48 @@ describe('resource use', () => {
     expect(reveal?.column).toBe(1);
     expect(reveal?.preserveFocus).toBe(false);
   });
+
+  it('stops polling when the tab closes while a reload is still in flight', async () => {
+    const projects = await fixtureProjects();
+    const shared = store(projects);
+    let discovers = 0;
+    const real = shared.discover.bind(shared);
+    shared.discover = async (preferredPath?: string) => {
+      discovers += 1;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return real(preferredPath);
+    };
+
+    const panel = AgentWatchPanel.show(context(), shared);
+    const stub = createdPanels[0]!;
+    const inflight = panel.refresh();
+    stub.onDidDispose.fire();
+    await inflight;
+
+    const before = discovers;
+    await new Promise((resolve) => setTimeout(resolve, 2600));
+    expect(discovers).toBe(before);
+  }, 20_000);
+
+  it('does not stack an extra pass because the clock ticked mid-reload', async () => {
+    const projects = await fixtureProjects();
+    const shared = store(projects, 1);
+    let discovers = 0;
+    const real = shared.discover.bind(shared);
+    shared.discover = async (preferredPath?: string) => {
+      discovers += 1;
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return real(preferredPath);
+    };
+
+    const panel = AgentWatchPanel.show(context(), shared);
+    await panel.refresh();
+    const settled = discovers;
+
+    await panel.refresh();
+
+    expect(discovers - settled).toBe(1);
+  }, 25_000);
 
   it('stops polling entirely once the tab is closed', async () => {
     const projects = await fixtureProjects();
