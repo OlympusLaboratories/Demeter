@@ -6,6 +6,8 @@ CODE ?= $(shell command -v code 2>/dev/null \
 EXT_DIR := $(HOME)/.vscode/extensions/claude-usage
 HERE := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 DEPS := node_modules/.package-lock.json
+REPO_URL := https://github.com/OlympusLaboratories/Demeter
+RAW_URL := https://raw.githubusercontent.com/OlympusLaboratories/Demeter
 
 .PHONY: setup build watch test typecheck check link unlink package install clean
 
@@ -39,7 +41,10 @@ unlink:
 	@echo "Removed $(EXT_DIR). Reload VS Code."
 
 package: check
-	npx --yes @vscode/vsce package --allow-missing-repository --skip-license -o claude-usage.vsix
+	npx --yes @vscode/vsce package --allow-missing-repository --skip-license \
+		--baseContentUrl $(REPO_URL)/blob/main/tools/claude-usage \
+		--baseImagesUrl $(RAW_URL)/main/tools/claude-usage \
+		-o claude-usage.vsix
 
 install: package
 	@command -v "$(CODE)" >/dev/null 2>&1 || [ -x "$(CODE)" ] || { \
