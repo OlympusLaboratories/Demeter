@@ -75,6 +75,11 @@
           "default": 1,
           "minimum": 0,
           "description": "Multiplier for scroll-wheel zoom. Lower is gentler; 0 disables wheel zoom and leaves the +/- and Fit controls."
+        },
+        "agentWatch.hideDeletedWork": {
+          "type": "boolean",
+          "default": true,
+          "description": "Hide work you have already cleaned up: sessions whose git worktree or branch no longer exists, and project directories that are not inside a git repository. The status line reports how many were hidden."
         }
       }
     }

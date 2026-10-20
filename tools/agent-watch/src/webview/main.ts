@@ -14,7 +14,7 @@ import type { SpeakerRole } from '../transcript';
 import { moreLabel, previewOf } from '../preview';
 import type { HostMessage, NodeDetail, ViewMessage, ViewState } from '../protocol';
 import { clampZoom, zoomFactorFor } from '../zoom';
-import { centerBox, expansionBox, frameBox, nodeBox } from '../focus';
+import { expansionBoxes, frameBox, siblingBoxes } from '../focus';
 
 declare function acquireVsCodeApi(): { postMessage(message: ViewMessage): void };
 
@@ -46,34 +46,50 @@ function byId<T extends HTMLElement>(id: string): T {
   return found as T;
 }
 
-function renderScope(state: ViewState): void {
-  const repos = byId('repos');
-  repos.replaceChildren();
-  for (const repo of state.repos) {
-    const chip = el('button', repo.slug === state.selectedRepo ? 'chip selected' : 'chip');
-    chip.type = 'button';
-    chip.append(document.createTextNode(repo.label));
-    if (repo.liveCount > 0) chip.append(el('span', 'live', `●${repo.liveCount}`));
-    chip.addEventListener('click', () => {
-      pendingFocus = undefined;
-      vscode.postMessage({ type: 'selectRepo', slug: repo.slug });
-    });
-    repos.append(chip);
-  }
+function chipFor(
+  kind: 'repo' | 'worktree',
+  label: string,
+  liveCount: number,
+  selected: boolean,
+  onPick: () => void,
+): HTMLButtonElement {
+  const chip = el('button', selected ? `chip ${kind} selected` : `chip ${kind}`);
+  chip.type = 'button';
+  chip.append(document.createTextNode(label));
+  if (liveCount > 0) chip.append(el('span', 'live', `●${liveCount}`));
+  chip.addEventListener('click', () => {
+    pendingFocus = undefined;
+    onPick();
+  });
+  return chip;
+}
 
-  const worktrees = byId('worktrees');
-  worktrees.replaceChildren();
-  for (const tree of state.worktrees) {
-    const chip = el('button', tree.key === state.selectedWorktree ? 'chip selected' : 'chip');
-    chip.type = 'button';
-    chip.append(document.createTextNode(tree.label));
-    if (tree.liveCount > 0) chip.append(el('span', 'live', `●${tree.liveCount}`));
-    chip.addEventListener('click', () => {
-      pendingFocus = undefined;
-      vscode.postMessage({ type: 'selectWorktree', key: tree.key });
-    });
-    worktrees.append(chip);
-  }
+function fillRow(rowId: string, chipsId: string, chips: HTMLButtonElement[]): void {
+  const host = byId(chipsId);
+  host.replaceChildren(...chips);
+  byId(rowId).classList.toggle('hidden', chips.length === 0);
+}
+
+function renderScope(state: ViewState): void {
+  fillRow(
+    'repo-row',
+    'repos',
+    state.repos.map((repo) =>
+      chipFor('repo', repo.label, repo.liveCount, repo.slug === state.selectedRepo, () =>
+        vscode.postMessage({ type: 'selectRepo', slug: repo.slug }),
+      ),
+    ),
+  );
+
+  fillRow(
+    'branch-row',
+    'worktrees',
+    state.worktrees.map((tree) =>
+      chipFor('worktree', tree.label, tree.liveCount, tree.key === state.selectedWorktree, () =>
+        vscode.postMessage({ type: 'selectWorktree', key: tree.key }),
+      ),
+    ),
+  );
 }
 
 interface Viewport {
@@ -97,18 +113,14 @@ function applyTransform(): void {
 }
 
 function fitToView(): void {
-  const canvas = byId('canvas');
-  const pad = 32;
-  const width = lastLayout.width + pad * 2;
-  const height = lastLayout.height + pad * 2;
-  if (width <= 0 || height <= 0) return;
-
-  const MIN_READABLE = 0.55;
-  const scale = Math.min(canvas.clientWidth / width, canvas.clientHeight / height, 1);
-  view.k = Math.max(MIN_READABLE, scale);
-  const scaledWidth = width * view.k;
-  view.tx = scaledWidth < canvas.clientWidth ? (canvas.clientWidth - scaledWidth) / 2 : pad;
-  view.ty = pad;
+  if (lastLayout.width <= 0 || lastLayout.height <= 0) return;
+  const frame = frameBox(
+    { x: 0, y: 0, width: lastLayout.width, height: lastLayout.height },
+    canvasSize(),
+  );
+  view.k = frame.k;
+  view.tx = frame.tx;
+  view.ty = frame.ty;
   userAdjusted = false;
   applyTransform();
 }
@@ -125,14 +137,15 @@ function applyFocus(layout: GraphLayout): boolean {
   const node = layout.nodes.find((entry) => entry.id === request.id);
   if (!node || node.expanded !== request.expanding) return false;
 
-  const box = request.expanding
-    ? expansionBox(layout, request.id)
-    : nodeBox(layout, request.id);
-  if (!box) return false;
+  const boxes = request.expanding
+    ? expansionBoxes(layout, request.id)
+    : siblingBoxes(layout, request.id);
+  if (!boxes) return false;
 
-  const frame = request.expanding
-    ? frameBox(box, canvasSize())
-    : centerBox(box, canvasSize(), view.k);
+  const frame = frameBox(boxes.row, canvasSize(), {
+    context: boxes.withParent,
+    anchor: boxes.anchor,
+  });
   pendingFocus = undefined;
   view.k = frame.k;
   view.tx = frame.tx;
@@ -220,6 +233,12 @@ function renderStatus(state: ViewState): void {
   if (liveTotal > 0) {
     const dot = el('span', 'dot', `● ${liveTotal} live`);
     status.append(dot);
+  }
+
+  if (state.removedCount > 0) {
+    const hidden = el('span', 'hidden-count', `${state.removedCount} deleted`);
+    hidden.title = `${state.removedCount} session${state.removedCount === 1 ? '' : 's'} hidden: the git worktree or branch it ran on no longer exists. Turn off agentWatch.hideDeletedWork to show them.`;
+    status.append(hidden);
   }
 
   const stamp = new Date(state.updatedAtMs).toLocaleTimeString();

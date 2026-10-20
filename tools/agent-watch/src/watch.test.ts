@@ -84,7 +84,7 @@ describe('PathWatcher', () => {
     watcher.dispose();
   });
 
-  it('forwards native watch events without waiting for the poll', async () => {
+  it('acts on a native watch event without waiting for the poll', async () => {
     const dir = await tempDir();
     const listeners: (() => void)[] = [];
     const onChange = vi.fn();
@@ -96,9 +96,34 @@ describe('PathWatcher', () => {
     });
     await watcher.setTargets([dir]);
 
+    await fs.writeFile(path.join(dir, 'new.jsonl'), 'x');
     listeners.forEach((listener) => listener());
+    for (let tick = 0; tick < 50 && onChange.mock.calls.length === 0; tick += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
     expect(onChange).toHaveBeenCalledTimes(1);
 
+    watcher.dispose();
+  });
+
+  it('ignores a native watch event that turns out to be nothing', async () => {
+    const dir = await tempDir();
+    const listeners: (() => void)[] = [];
+    const onChange = vi.fn();
+    const watcher = new PathWatcher(onChange, {
+      watchFactory: (_target, listener) => {
+        listeners.push(listener);
+        return { close: () => undefined };
+      },
+    });
+    await watcher.setTargets([dir]);
+
+    for (let burst = 0; burst < 10; burst += 1) {
+      listeners.forEach((listener) => listener());
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    expect(onChange).not.toHaveBeenCalled();
     watcher.dispose();
   });
 
@@ -199,21 +224,21 @@ describe('pausing', () => {
       },
     });
     await watcher.setTargets([dir]);
-    expect(watcher.polling).toBe(false);
+    expect(watcher.started).toBe(false);
 
     watcher.start();
     watcher.start();
     watcher.start();
-    expect(watcher.polling).toBe(true);
+    expect(watcher.started).toBe(true);
 
     watcher.stop();
-    expect(watcher.polling).toBe(false);
+    expect(watcher.started).toBe(false);
     expect(closed).toBe(opened);
 
     watcher.start();
-    expect(watcher.polling).toBe(true);
+    expect(watcher.started).toBe(true);
     watcher.dispose();
-    expect(watcher.polling).toBe(false);
+    expect(watcher.started).toBe(false);
   });
 
   it('keeps its baseline across a pause so nothing is missed while stopped', async () => {

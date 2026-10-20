@@ -53,6 +53,7 @@ export class PathWatcher {
   private timer: ReturnType<typeof setInterval> | undefined;
   private targets: string[] = [];
   private disposed = false;
+  private polling = false;
 
   constructor(
     private readonly onChange: () => void,
@@ -74,22 +75,30 @@ export class PathWatcher {
     const factory = this.options.watchFactory ?? nodeWatchFactory;
     for (const target of this.targets) {
       try {
-        this.handles.push(factory(target, () => this.onChange()));
+        this.handles.push(factory(target, () => this.verify()));
       } catch {
         continue;
       }
     }
   }
 
+  private verify(): void {
+    if (this.polling || this.disposed) return;
+    this.polling = true;
+    void this.poll()
+      .then((changed) => {
+        if (changed && !this.disposed) this.onChange();
+      })
+      .finally(() => {
+        this.polling = false;
+      });
+  }
+
   start(): void {
     if (this.timer || this.disposed) return;
     if (this.handles.length === 0) this.attach();
     const interval = this.options.pollMs ?? DEFAULT_POLL_MS;
-    this.timer = setInterval(() => {
-      void this.poll().then((changed) => {
-        if (changed) this.onChange();
-      });
-    }, interval);
+    this.timer = setInterval(() => this.verify(), interval);
     if (typeof this.timer === 'object' && 'unref' in this.timer) this.timer.unref();
   }
 
@@ -99,7 +108,7 @@ export class PathWatcher {
     this.closeHandles();
   }
 
-  get polling(): boolean {
+  get started(): boolean {
     return this.timer !== undefined;
   }
 

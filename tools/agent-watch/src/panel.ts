@@ -50,6 +50,7 @@ export class AgentWatchPanel {
 
   private disposables: vscode.Disposable[] = [];
   private watcher: PathWatcher | undefined;
+  private heartbeat: ReturnType<typeof setInterval> | undefined;
   private pending = debounce(() => undefined, 0);
   private refreshing = false;
   private queued = false;
@@ -82,20 +83,36 @@ export class AgentWatchPanel {
     );
   }
 
+  private startHeartbeat(): void {
+    if (this.heartbeat) return;
+    this.heartbeat = setInterval(() => {
+      void this.reload();
+    }, this.store.pollMs());
+    if (typeof this.heartbeat === 'object' && 'unref' in this.heartbeat) this.heartbeat.unref();
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeat) clearInterval(this.heartbeat);
+    this.heartbeat = undefined;
+  }
+
   private syncWatcherToVisibility(): void {
     if (!this.watcher) return;
     if (this.panel.visible) {
-      if (!this.watcher.polling) {
+      if (!this.watcher.started) {
         this.watcher.start();
+        this.startHeartbeat();
         void this.reload();
       }
       return;
     }
     this.watcher.stop();
+    this.stopHeartbeat();
   }
 
   async refresh(preferredPath?: string): Promise<void> {
     if (preferredPath) this.preferredPath = preferredPath;
+    this.store.invalidateGit();
     this.postState(true);
     await this.reload();
   }
@@ -112,8 +129,13 @@ export class AgentWatchPanel {
         await this.store.discover(this.preferredPath);
         await this.store.loadSelected();
         await this.watcher?.setTargets(this.store.watchTargets());
-        if (this.panel.visible) this.watcher?.start();
-        else this.watcher?.stop();
+        if (this.panel.visible) {
+          this.watcher?.start();
+          this.startHeartbeat();
+        } else {
+          this.watcher?.stop();
+          this.stopHeartbeat();
+        }
         this.postState(false);
       } while (this.queued);
     } catch (error) {
@@ -197,8 +219,8 @@ export class AgentWatchPanel {
 </head>
 <body>
 <header id="scope">
-  <div class="row" id="repos"></div>
-  <div class="row" id="worktrees"></div>
+  <div class="scope-row" id="repo-row"><span class="caption">repo</span><div class="chips" id="repos"></div></div>
+  <div class="scope-row" id="branch-row"><span class="caption">branch</span><div class="chips" id="worktrees"></div></div>
   <div class="row status" id="status">
     <span class="spacer"></span>
     <button class="chip" id="zoom-out" type="button">−</button>
@@ -229,6 +251,7 @@ export class AgentWatchPanel {
   private dispose(): void {
     AgentWatchPanel.current = undefined;
     this.pending.cancel();
+    this.stopHeartbeat();
     this.watcher?.dispose();
     this.watcher = undefined;
     this.panel.dispose();
@@ -258,13 +281,21 @@ function styles(): string {
   return `
 :root { color-scheme: light dark; }
 body { margin: 0; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); height: 100vh; display: flex; flex-direction: column; }
-header#scope { padding: 8px 12px 4px; border-bottom: 1px solid var(--vscode-panel-border); display: flex; flex-direction: column; gap: 4px; }
+header#scope { padding: 8px 12px 4px; border-bottom: 1px solid var(--vscode-panel-border); display: flex; flex-direction: column; gap: 5px; }
 .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.scope-row { display: grid; grid-template-columns: 3.6em 1fr; gap: 8px; align-items: start; }
+.scope-row.hidden { display: none; }
+.scope-row + .scope-row:not(.hidden) { border-top: 1px solid var(--vscode-panel-border); padding-top: 5px; }
+.scope-row .caption { font-size: 0.68em; text-transform: uppercase; letter-spacing: 0.08em; color: var(--vscode-descriptionForeground); text-align: right; padding-top: 5px; user-select: none; }
+.scope-row .chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; min-width: 0; }
 .chip { border: 1px solid var(--vscode-panel-border); background: transparent; color: var(--vscode-foreground); border-radius: 999px; padding: 2px 10px; cursor: pointer; font-size: 0.85em; }
 .chip.selected { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: transparent; }
 .chip .live { color: var(--vscode-charts-green); margin-left: 4px; }
+.chip.repo { border-radius: 4px; font-weight: 600; }
+.chip.worktree { border-radius: 999px; }
 .row.status { color: var(--vscode-descriptionForeground); font-size: 0.8em; gap: 10px; }
 .row.status .dot { color: var(--vscode-charts-green); }
+.row.status .hidden-count { color: var(--vscode-descriptionForeground); border-bottom: 1px dotted currentColor; cursor: help; }
 main { flex: 1; position: relative; overflow: hidden; }
 #canvas { position: absolute; inset: 0; overflow: hidden; cursor: grab; }
 #canvas.grabbing { cursor: grabbing; }

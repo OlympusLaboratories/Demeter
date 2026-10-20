@@ -28,9 +28,17 @@ rescan.
 - `Agent Watch: Open` — the same thing from the command palette.
 - `Agent Watch: Refresh` — forces a rescan.
 
+The view refreshes every `pollSeconds` while the tab is visible, whether or not anything
+was written. That matters for the two things a file watcher cannot see: a session going
+**stale** (liveness is a function of the clock, so a session that stops being written has
+to change colour with nothing happening on disk) and a **branch or worktree you deleted**
+(nothing under `~/.claude/projects` moves when you delete one — it leaves the view within
+15s, when the cached git answer expires). A full refresh costs 7ms, about a 2% duty cycle.
+
 Polling runs **only while the tab is visible**. Closing it, or switching to another tab,
-stops the watcher; returning restarts it with an immediate refresh. Opening Agent Watch
-repeatedly reveals the one tab rather than stacking panels or timers.
+stops both the watcher and the heartbeat; returning restarts them with an immediate
+refresh. Opening Agent Watch repeatedly reveals the one tab rather than stacking panels or
+timers.
 
 Node detail **follows the tail**: new events append as they land and the view stays at the
 bottom. Scroll up and it unsticks, with a `↓ Jump to latest` pill to re-follow. Panels you
@@ -51,6 +59,21 @@ expands itself.
 A workflow run bands into its declared phases, so opening a 96-agent `review-code` run
 gives Review (6) and Verify (90) rather than 96 siblings.
 
+Expanding frames what you just opened, rather than refitting the whole tree — the point of
+clicking a badge is the children, and a refit answers by zooming out until they are too
+small to read. The revealed row is centred and scaled to its full height, and never allowed
+to occupy less than a **third of the viewport**: two to four children magnify to exactly
+that, a single child goes to the 4× ceiling, and anything already larger is left at its
+natural size. The row is never magnified so far that it stops fitting across, so a short
+wide tree cannot be blown off both edges.
+
+Collapsing reframes the same way, on the row the node now sits in — its siblings, or every
+session when it is a root — so you land on the level you stepped back out to. The one
+asymmetry is what happens when a row will not fit at the minimum zoom: an expansion anchors
+to the row's **top**, since the first child is where you start reading, while a collapse
+keeps the **node you clicked** centred, so collapsing one agent inside a 90-sibling row
+does not throw you to that row's start.
+
 Drag to pan, scroll to zoom, `Fit` to reframe. Zoom tracks how far you actually scrolled
 rather than stepping a fixed amount per wheel event, so a trackpad gesture nudges it
 instead of flinging it; pinch responds faster than a scroll, and one huge delta can never
@@ -59,9 +82,26 @@ wheel zoom off and use the `+`/`−` buttons. The view refits itself whenever th
 shape changes, so switching from a large run to a single session does not leave you panning
 around an apparently blank canvas.
 
-The top row picks a repo, the second row a worktree within it. The repo for the current
+Each session node is named by the title on its Claude Code tab — the one the model wrote,
+or the one you typed over it — not by its UUID.
+
+The top row picks a repo, the second row a branch within it. The two are told apart by
+more than position, because both wrap: each row carries a caption in a fixed left gutter,
+they are separated by a hairline, and repo chips are square and bold against the branch
+chips' pills. Wrapping stays inside its own block, so the caption on the left always says
+which kind you are looking at. The repo for the current
 workspace is preselected, but every repo on the machine is reachable — sessions that ran
 elsewhere are visible without reopening VS Code. Click any node for its full event stream.
+
+**Work you have cleaned up stays hidden.** Deleting a branch or removing a worktree is the
+clearest signal there is that you are done with it, but its transcripts live on for
+`cleanupPeriodDays` afterwards. So a session is listed only while the worktree it ran in is
+still in `git worktree list` and the branch it ran on still exists, and a project directory
+is listed only when it is inside a git repository at all — which is what keeps scratchpad
+and `/tmp` directories out of the repo row. The status line reports the count it hid, and
+`agentWatch.hideDeletedWork` turns the whole filter off. Nothing is deleted: this is a
+display filter, and git is the authority, so a repo git cannot answer for is left alone
+rather than emptied.
 
 Depth runs left to right and siblings stack vertically, because swarms are wide and
 shallow: a real 96-agent run lays out 722px wide by 5936px tall, so breadth scrolls
@@ -78,6 +118,7 @@ instead of overflowing.
 | `agentWatch.pollSeconds` | `2` | How often watched transcripts are re-stat'd. This poll is the guarantee; native file watching is only an accelerator. |
 | `agentWatch.zoomSensitivity` | `1` | Multiplier for scroll-wheel zoom. Lower is gentler; `0` disables it. |
 | `agentWatch.initialDepth` | `1` | Levels below each session expanded on first render. `0` shows sessions alone. |
+| `agentWatch.hideDeletedWork` | `true` | Hide sessions whose git worktree or branch no longer exists, and project directories outside any git repository. The status line reports how many were hidden. |
 | `agentWatch.statusBarPriority` | `110` | Higher numbers sit further left within the right-hand group. The default clears claude-usage, which spans 50–101 at its own default priority, so the two tools' items stay grouped rather than interleaved. |
 
 ## Thinking text

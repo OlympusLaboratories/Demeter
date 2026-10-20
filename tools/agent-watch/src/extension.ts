@@ -14,6 +14,7 @@ function readSettings(): StoreSettings {
     statusBarPriority: config.get<number>('statusBarPriority') ?? 110,
     initialDepth: config.get<number>('initialDepth') ?? 1,
     zoomSensitivity: config.get<number>('zoomSensitivity') ?? 1,
+    hideDeletedWork: config.get<boolean>('hideDeletedWork') ?? true,
   };
 }
 

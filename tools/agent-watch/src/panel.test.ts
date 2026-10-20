@@ -44,6 +44,7 @@ function store(projects: string): Store {
     statusBarPriority: 110,
     initialDepth: 1,
     zoomSensitivity: 1,
+    hideDeletedWork: false,
   });
 }
 
@@ -77,6 +78,18 @@ describe('AgentWatchPanel', () => {
     expect(panel?.webview.html).toContain('/ext/dist/webview.js');
     expect(panel?.webview.html).toContain("default-src 'none'");
     expect(panel?.webview.html ?? '').not.toMatch(/<(?:script|link|img)[^>]+(?:src|href)="https?:/);
+  });
+
+  it('gives the webview the labelled scope rows it addresses by id', async () => {
+    const projects = await fixtureProjects();
+    AgentWatchPanel.show(context(), store(projects));
+    const html = createdPanels[0]?.webview.html ?? '';
+
+    for (const id of ['repo-row', 'repos', 'branch-row', 'worktrees']) {
+      expect(html).toContain(`id="${id}"`);
+    }
+    expect(html).toMatch(/<span class="caption">repo<\/span>/);
+    expect(html).toMatch(/<span class="caption">branch<\/span>/);
   });
 
   it('loads and posts a populated state on refresh', async () => {
@@ -253,6 +266,22 @@ describe('resource use', () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     expect(posted()).toBeGreaterThan(whileHidden);
+  });
+
+  it('keeps refreshing while visible even when nothing on disk changes', async () => {
+    const projects = await fixtureProjects();
+    const panel = AgentWatchPanel.show(context(), store(projects));
+    await panel.refresh();
+
+    const stub = createdPanels[0]!;
+    const posted = () => states(stub).filter((m) => m.type === 'state').length;
+    const before = posted();
+
+    for (let tick = 0; tick < 40 && posted() === before; tick += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    expect(posted()).toBeGreaterThan(before);
   });
 
   it('reveals the existing tab instead of opening a second one', async () => {

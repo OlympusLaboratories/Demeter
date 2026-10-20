@@ -38,6 +38,7 @@ export interface ViewState {
   recentDays: number;
   scopeKey: string;
   zoomSensitivity: number;
+  removedCount: number;
 }
 
 export type HostMessage =

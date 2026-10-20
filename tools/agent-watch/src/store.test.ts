@@ -34,6 +34,7 @@ function settings(projects: string): StoreSettings {
     statusBarPriority: 110,
     initialDepth: 1,
     zoomSensitivity: 1,
+    hideDeletedWork: false,
   };
 }
 
@@ -61,6 +62,27 @@ describe('Store', () => {
 
     expect(store.watchTargets()).toContain(transcript);
     expect(store.watchTargets()).toContain(subagents);
+  });
+
+  it('drops a project directory that is not inside a git repository', async () => {
+    const { projects } = await fixture();
+    const store = new Store({ ...settings(projects), hideDeletedWork: true });
+
+    await store.discover();
+    await store.loadSelected();
+
+    expect(store.view(false).repos).toHaveLength(0);
+  });
+
+  it('keeps that directory when the filter is turned off', async () => {
+    const { projects } = await fixture();
+    const store = new Store(settings(projects));
+
+    await store.discover();
+    await store.loadSelected();
+
+    expect(store.view(false).repos).toHaveLength(1);
+    expect(store.view(false).removedCount).toBe(0);
   });
 
   it('picks up a subagent that appears after the first load', async () => {

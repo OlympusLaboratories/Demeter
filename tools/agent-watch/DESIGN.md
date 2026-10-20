@@ -292,6 +292,39 @@ Opening the main checkout or any worktree still lands on the same repo, since bo
 through `git rev-parse --git-common-dir`. A workspace that is not a git repo at all falls
 back to no preselection — the switcher simply opens on the most recently active repo.
 
+### Work that has been cleaned up
+
+Deleting a branch or removing a worktree is the clearest statement available that a piece
+of work is finished, and it is one the transcripts do not get: they stay for
+`cleanupPeriodDays` (30) afterwards. Measured on this machine, **25 of the 49** retained
+gridmatic-dev sessions were on branches that no longer exist — half the list was closed
+tickets. Two rules, both answered by git rather than by guessing at path names:
+
+- the session's worktree must still appear in `git worktree list`;
+- the session's `gitBranch` must still appear in `git branch`.
+
+A project directory is listed only when its path is inside a git work tree at all, which is
+what removes `/private/tmp` and the per-session `…/scratchpad` directories from the repo
+row — they are not repos, so no name-matching on "tmp" is needed.
+
+Finding this exposed a grouping bug underneath. `worktreeRootFor` matched the longest
+*known* root first and only fell back to the worktree path pattern, but the main checkout
+is a path prefix of every worktree under it, so a **removed** worktree's cwd matched the
+main root and its sessions were filed under `main` — which is precisely why deleted tickets
+showed up where it was least expected. The pattern is now tried first, so a worktree path
+identifies its own root whether or not git still knows it.
+
+Both rules only apply when git answered: an empty `worktree list` or `branch` result means
+the question could not be asked, and nothing is hidden on the strength of a failed
+subprocess. Nothing is deleted either — `agentWatch.hideDeletedWork` turns the filter off,
+and the status line always reports the count it hid, so the UI never silently shrinks.
+
+The cost had to be paid down before it shipped. `reload()` runs on **every 2s poll**, so
+asking git per repo per tick would have meant ~35 process spawns every two seconds against
+the 1 the panel used before. `GitFacts` memoizes each answer per path for 15s and is
+cleared by the explicit refresh, which takes a real refresh cycle to 7 spawns and the four
+after it to zero.
+
 ---
 
 ## 5. UI
@@ -319,6 +352,13 @@ wide, and how deep the nesting went.
                                       └──────────────┘
 ```
 
+- **The two scope rows are told apart by more than position.** Repo chips and branch chips
+  started out identical pills on adjacent lines, which is legible only while neither row
+  wraps — and both do, at any realistic panel width. Each row now carries a caption in a
+  fixed left gutter (a two-column grid, so wrapped chips stay in their own block rather
+  than flowing under the label), a hairline separates the rows, and repo chips are square
+  and bold against the branch chips' pills. Checked by rendering the real stylesheet in
+  headless Chrome at 380px, where each row wraps to three lines and still reads correctly.
 - **Layout is a left-to-right layered tree.** Depth grows rightward, siblings stack
   vertically. This matters: a swarm is wide and shallow (16–27 siblings at depth 1), so
   breadth must land on the axis that scrolls naturally. Top-down would put 27 nodes
@@ -342,18 +382,37 @@ wide, and how deep the nesting went.
   results, text output, and thinking summary when present. The modal is where "a lot of
   information" lives, keeping the graph itself scannable — which is the whole point of
   choosing a graph over nested line items.
+- **A row never occupies less than a third of the viewport.** Framing by fit alone caps at
+  100%, which leaves one or two children as a couple of small boxes adrift on a large
+  canvas — technically framed, practically still lost. The scale is therefore raised until
+  the row covers at least `MIN_HEIGHT_FRACTION` (1/3) of the canvas height, bounded twice:
+  never past `MAX_ZOOM` (4), the same ceiling the wheel stops at, and never so far that the
+  box stops fitting *across*, which is what keeps a short wide tree from being magnified
+  off both edges. On a 1200×700 canvas that puts 2–4 children at exactly 33% (zoom 2.16,
+  1.37, 1.01), a single child at the zoom ceiling and 26%, and 6 or more already past a
+  third at 100%, so they are left alone. `fitToView` runs through the same function, so a
+  lone session node opens at 4× rather than marooned at 1×.
 - **Expanding a node frames what it just revealed**, rather than refitting the whole tree.
   Refitting was the obvious thing and the wrong one: the point of clicking expand is the
   children, and a refit answers by zooming *out* until they are too small to read. The new
-  view is built from the children's bounding box, widened leftward to the parent so the
-  edge into the row stays visible — centred and scaled to the row's full height when it
-  fits, capped at 100% so a single child does not fill the canvas, and floored at the same
-  0.55 as `Fit` when it cannot. Past that floor the row is anchored at its **top** instead
+  view is scaled from the children's bounding box and centred on the wider box that reaches
+  back to the parent, so the edge into the row stays visible — but only while that wider box
+  still fits across; past that the parent is dropped and the children are centred alone,
+  since the children are what the click asked for. Floored at the same 0.55 as `Fit`. Past
+  that floor the row is anchored at its **top** instead
   of centred, so a 96-child expansion starts at the first child and scrolls down rather
   than dropping you in the middle of a row with no way to tell which end you are at.
-  Collapsing instead pans the toggled node to the centre at the **current** zoom: the tree
-  reflows underneath a collapse, so holding the raw transform drifts, and rescaling would
-  punish a click that asked for less on screen, not more.
+  Collapsing reframes the same way, on the row the toggled node now sits in — its siblings,
+  or every session when it is a root — so the view lands on the level you just stepped back
+  out to. Holding the raw transform instead would drift, since the tree reflows underneath
+  a collapse.
+
+  The one asymmetry is what happens when the row will not fit. An expansion anchors to the
+  row's top, because the first child is where you start reading. A collapse anchors to the
+  **node you clicked**: collapsing one agent inside a 90-sibling row would otherwise throw
+  the view to the top of that row and lose your place entirely. So `frameBox` takes an
+  optional `anchor` — the sub-box to keep centred when the row overflows — and only the
+  collapse path passes one.
 - **Pan and zoom**, with a `Fit` control. The viewport refits automatically whenever the
   graph's *shape* changes — scope key plus node count plus dimensions — because a zoom
   level chosen for a 96-node run leaves a single-node session off-screen on an apparently
@@ -482,8 +541,39 @@ Two signature rules, both learned from failures rather than guessed:
   appending to its existing transcript — the main thing to watch during a swarm — would
   otherwise be invisible.
 
+A native event is **not** trusted on its own: its listener re-runs the signature check and
+calls back only if something really moved. On macOS `fs.watch` fires on a directory merely
+being read, so the reload's own `readdir` calls made the watcher re-trigger itself — into a
+300 ms debounce that resets on every call, which can starve indefinitely under a burst.
+That is why refreshes looked erratic: they were driven by a feedback loop rather than by
+the data. Treating the native event as a *hint to check* rather than as the change itself
+makes `fs.watch` a true accelerator, which is what the repo rule says it has to be.
+
 Cost is not a concern: a real 96-agent run yields 98 targets and one full poll measures
 **0.5 ms**, a 0.027% duty cycle at the 2s interval.
+
+### A file-change watcher cannot carry time-derived state
+
+Watching files answers "has anything been written?". Two things the UI shows are not
+answers to that question:
+
+- **Liveness is a function of the clock.** A session is live while its transcript's mtime
+  is under `liveWindowSeconds` old, so a session that *stops* being written has to change
+  colour with nothing happening on disk. Under change-driven refresh alone it never did —
+  it stayed green until some unrelated event forced a reload, which is exactly the "I have
+  to click around between repo tabs" symptom.
+- **Deleted branches and worktrees live in git, not in the transcripts.** Nothing under
+  `~/.claude/projects` moves when a branch is deleted, so no watcher can notice.
+
+So the panel runs its own heartbeat: a reload every `pollSeconds` while the tab is visible,
+calling `reload()` directly rather than through the debounce, so an event storm can never
+starve it. A full reload — rescan, reload the selected repo, relayout — measures **7 ms
+warm**, and 16 ticks at the real 2s cadence against this machine's projects directory
+measure a **2.2% duty cycle**. `GitFacts` keeps that honest: branch and worktree lists
+expire after 15s, so a deleted branch leaves the UI within 15s, while whether a path is a
+git repo at all is cached for 5 minutes, since it effectively never changes. Measured over
+32s of polling, that is **9 git invocations total** — 5 one-off repo probes, then
+`worktree list` and `branch` twice each.
 
 ### Polling only runs when someone is looking
 
@@ -497,9 +587,10 @@ Three guarantees, each covered by a test:
   with one immediate refresh, so the view is never stale on return — when it comes back.
   Signatures survive the pause, so a change made while hidden is caught on resume rather
   than missed.
-- **Timers cannot stack.** `start()` is a no-op while a timer exists, and `show()` reveals
-  the existing panel instead of constructing a second one, so repeated opens converge on a
-  single watcher.
+- **Timers cannot stack.** `start()` is a no-op while a timer exists, `startHeartbeat()`
+  is a no-op while the heartbeat exists, and `show()` reveals the existing panel instead of
+  constructing a second one, so repeated opens converge on a single watcher and a single
+  heartbeat. Both stop on hide and on dispose.
 
 ### Performance
 

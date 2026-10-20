@@ -1,7 +1,7 @@
 import type { AgentNode } from './model';
 import { type ProjectDir, scanProjects, withinDays } from './discovery';
 import { type LoadedSession, loadSession, peekProjectPath } from './loader';
-import { type WorktreeGroup, groupByWorktree, repoRootFor, worktreeRoots } from './repos';
+import { type WorktreeGroup, GitFacts, groupByWorktree, partitionSessions, repoRootFor } from './repos';
 import { layoutForest } from './graphLayout';
 import { TranscriptCache } from './tail';
 import type { NodeDetail, RepoSummary, ViewState, WorktreeSummary } from './protocol';
@@ -15,6 +15,7 @@ export interface StoreSettings {
   statusBarPriority: number;
   initialDepth: number;
   zoomSensitivity: number;
+  hideDeletedWork: boolean;
 }
 
 interface RepoEntry {
@@ -33,11 +34,17 @@ export class Store {
   private targets: string[] = [];
   private overrides = new Map<string, boolean>();
   private renderedExpansion = new Map<string, boolean>();
+  private removedCount = 0;
+  private readonly git = new GitFacts();
 
   constructor(private settings: StoreSettings) {}
 
   updateSettings(settings: StoreSettings): void {
     this.settings = settings;
+  }
+
+  invalidateGit(): void {
+    this.git.invalidate();
   }
 
   async discover(preferredPath?: string): Promise<void> {
@@ -51,6 +58,7 @@ export class Store {
     this.repos = [];
     for (const project of chosen) {
       const resolved = await peekProjectPath(project);
+      if (this.settings.hideDeletedWork && !(resolved && (await this.git.isInsideWorkTree(resolved)))) continue;
       this.repos.push({ project, label: labelFor(resolved, project.slug), path: resolved });
     }
 
@@ -75,6 +83,7 @@ export class Store {
   async loadSelected(): Promise<void> {
     this.groups = [];
     this.nodesById.clear();
+    this.removedCount = 0;
     const repo = this.repos.find((entry) => entry.project.slug === this.selectedRepo);
     if (!repo) return;
 
@@ -94,9 +103,15 @@ export class Store {
       );
     }
 
-    const roots = repo.path ? await worktreeRoots(repo.path) : [];
-    this.groups = groupByWorktree(sessions, roots);
-    this.targets = [repo.project.dir, ...sessions.flatMap((entry) => entry.watchPaths)];
+    const roots = repo.path ? await this.git.worktreeRoots(repo.path) : [];
+    const branches =
+      repo.path && this.settings.hideDeletedWork ? await this.git.branchNames(repo.path) : new Set<string>();
+    const { live, removed } = this.settings.hideDeletedWork
+      ? partitionSessions(sessions, { knownRoots: roots, branches })
+      : { live: sessions, removed: [] };
+    this.removedCount = removed.length;
+    this.groups = groupByWorktree(live, roots);
+    this.targets = [repo.project.dir, ...live.flatMap((entry) => entry.watchPaths)];
     for (const group of this.groups) {
       for (const session of group.sessions) index(session.tree, this.nodesById);
     }
@@ -188,6 +203,7 @@ export class Store {
       recentDays: this.settings.recentDays,
       scopeKey: this.scopeKey(),
       zoomSensitivity: this.settings.zoomSensitivity,
+      removedCount: this.removedCount,
     };
   }
 }
