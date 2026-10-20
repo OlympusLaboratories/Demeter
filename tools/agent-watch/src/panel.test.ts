@@ -126,3 +126,71 @@ describe('AgentWatchPanel', () => {
     expect(states(stub).length).toBe(before);
   });
 });
+
+describe('live detail', () => {
+  it('re-pushes the open node detail on every refresh, flagged as a refresh', async () => {
+    const projects = await fixtureProjects();
+    const panel = AgentWatchPanel.show(context(), store(projects));
+    await panel.refresh();
+
+    const stub = createdPanels[0]!;
+    const state = states(stub).find((m) => m.type === 'state' && m.state.graph.nodes.length > 0);
+    if (state?.type !== 'state') throw new Error('expected a populated state');
+    const nodeId = state.state.graph.nodes[0]!.id;
+
+    stub.webview.onDidReceiveMessage.fire({ type: 'selectNode', id: nodeId });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const first = states(stub).filter((m) => m.type === 'detail');
+    expect(first).toHaveLength(1);
+    expect(first[0]?.type === 'detail' && first[0].refreshed).toBe(false);
+
+    await panel.refresh();
+
+    const all = states(stub).filter((m) => m.type === 'detail');
+    expect(all.length).toBeGreaterThan(1);
+    const latest = all[all.length - 1];
+    expect(latest?.type === 'detail' && latest.refreshed).toBe(true);
+    expect(latest?.type === 'detail' && latest.detail.id).toBe(nodeId);
+  });
+
+  it('stops pushing detail once the webview closes the modal', async () => {
+    const projects = await fixtureProjects();
+    const panel = AgentWatchPanel.show(context(), store(projects));
+    await panel.refresh();
+
+    const stub = createdPanels[0]!;
+    const state = states(stub).find((m) => m.type === 'state' && m.state.graph.nodes.length > 0);
+    if (state?.type !== 'state') throw new Error('expected a populated state');
+
+    stub.webview.onDidReceiveMessage.fire({ type: 'selectNode', id: state.state.graph.nodes[0]!.id });
+    await new Promise((resolve) => setImmediate(resolve));
+    stub.webview.onDidReceiveMessage.fire({ type: 'closeDetail' });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const before = states(stub).filter((m) => m.type === 'detail').length;
+    await panel.refresh();
+    expect(states(stub).filter((m) => m.type === 'detail')).toHaveLength(before);
+  });
+
+  it('tells the webview to close when the open node disappears from the graph', async () => {
+    const projects = await fixtureProjects();
+    const panel = AgentWatchPanel.show(context(), store(projects));
+    await panel.refresh();
+
+    const stub = createdPanels[0]!;
+    stub.webview.onDidReceiveMessage.fire({ type: 'selectNode', id: 'session:does-not-exist' });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(states(stub).some((m) => m.type === 'detail')).toBe(false);
+
+    const state = states(stub).find((m) => m.type === 'state' && m.state.graph.nodes.length > 0);
+    if (state?.type !== 'state') throw new Error('expected a populated state');
+    stub.webview.onDidReceiveMessage.fire({ type: 'selectNode', id: state.state.graph.nodes[0]!.id });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    stub.webview.onDidReceiveMessage.fire({ type: 'selectWorktree', key: 'nope' });
+    await new Promise((resolve) => setImmediate(resolve));
+    await panel.refresh();
+    expect(states(stub).filter((m) => m.type === 'detail').length).toBeGreaterThan(0);
+  });
+});

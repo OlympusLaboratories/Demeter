@@ -217,3 +217,25 @@ describe('group expansion', () => {
     expect(store.view(false).graph.nodes.some((node) => node.id.startsWith('group:'))).toBe(true);
   });
 });
+
+describe('transcript lookup', () => {
+  it('maps a session node and each agent node to the file behind it', async () => {
+    const { projects, transcript, subagents } = await fixture();
+    await fs.writeFile(path.join(subagents, 'agent-a9.meta.json'), JSON.stringify({ description: 'w' }));
+    const agentFile = path.join(subagents, 'agent-a9.jsonl');
+    await fs.writeFile(agentFile, '');
+
+    const store = new Store(settings(projects));
+    await store.discover();
+    await store.loadSelected();
+
+    const nodes = store.view(false).graph.nodes;
+    const sessionNode = nodes.find((node) => node.kind === 'session');
+    const agentNode = nodes.find((node) => node.kind === 'agent');
+
+    expect(store.transcriptFor(sessionNode!.id)).toBe(transcript);
+    expect(store.transcriptFor(agentNode!.id)).toBe(agentFile);
+    expect(store.transcriptFor('nope')).toBeUndefined();
+    expect(store.detail(sessionNode!.id)?.hasTranscript).toBe(true);
+  });
+});

@@ -8,6 +8,23 @@ const VIEW_TYPE = 'agentWatch.graph';
 export class AgentWatchPanel {
   private static current: AgentWatchPanel | undefined;
 
+  static readonly viewType = VIEW_TYPE;
+
+  static restore(
+    context: vscode.ExtensionContext,
+    store: Store,
+    panel: vscode.WebviewPanel,
+    preferredPath?: string,
+  ): AgentWatchPanel {
+    AgentWatchPanel.current?.dispose();
+    panel.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'dist')],
+    };
+    AgentWatchPanel.current = new AgentWatchPanel(context, panel, store, preferredPath);
+    return AgentWatchPanel.current;
+  }
+
   static show(context: vscode.ExtensionContext, store: Store, preferredPath?: string): AgentWatchPanel {
     if (AgentWatchPanel.current) {
       AgentWatchPanel.current.panel.reveal(vscode.ViewColumn.Active);
@@ -35,6 +52,7 @@ export class AgentWatchPanel {
   private pending = debounce(() => undefined, 0);
   private refreshing = false;
   private queued = false;
+  private openNodeId: string | undefined;
 
   private constructor(
     private readonly context: vscode.ExtensionContext,
@@ -59,7 +77,7 @@ export class AgentWatchPanel {
 
   async refresh(preferredPath?: string): Promise<void> {
     if (preferredPath) this.preferredPath = preferredPath;
-    this.post({ type: 'state', state: this.store.view(true) });
+    this.postState(true);
     await this.reload();
   }
 
@@ -76,11 +94,11 @@ export class AgentWatchPanel {
         await this.store.loadSelected();
         await this.watcher?.setTargets(this.store.watchTargets());
         this.watcher?.start();
-        this.post({ type: 'state', state: this.store.view(false) });
+        this.postState(false);
       } while (this.queued);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.post({ type: 'state', state: this.store.view(false, message) });
+      this.postState(false, message);
     } finally {
       this.refreshing = false;
     }
@@ -94,27 +112,50 @@ export class AgentWatchPanel {
         return;
       case 'selectRepo':
         this.store.selectRepo(message.slug);
-        this.post({ type: 'state', state: this.store.view(true) });
+        this.openNodeId = undefined;
+        this.postState(true);
         await this.reload();
         return;
       case 'selectWorktree':
         this.store.selectWorktree(message.key);
-        this.post({ type: 'state', state: this.store.view(false) });
+        this.openNodeId = undefined;
+        this.postState(false);
         return;
       case 'selectNode': {
         const detail = this.store.detail(message.id);
-        if (detail) this.post({ type: 'detail', detail });
+        if (!detail) return;
+        this.openNodeId = message.id;
+        this.post({ type: 'detail', detail, refreshed: false });
+        return;
+      }
+      case 'closeDetail':
+        this.openNodeId = undefined;
+        return;
+      case 'revealTranscript': {
+        const target = this.store.transcriptFor(message.id);
+        if (target) await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(target));
         return;
       }
       case 'toggleGroup':
         this.store.toggleGroup(message.id);
-        this.post({ type: 'state', state: this.store.view(false) });
+        this.postState(false);
         return;
     }
   }
 
   private post(message: HostMessage): void {
     void this.panel.webview.postMessage(message);
+  }
+
+  private postState(loading: boolean, message?: string): void {
+    this.post({ type: 'state', state: this.store.view(loading, message) });
+    if (loading || !this.openNodeId) return;
+    const detail = this.store.detail(this.openNodeId);
+    if (detail) this.post({ type: 'detail', detail, refreshed: true });
+    else {
+      this.openNodeId = undefined;
+      this.post({ type: 'detailClosed' });
+    }
   }
 
   private html(): string {
@@ -148,8 +189,15 @@ export class AgentWatchPanel {
 </main>
 <div id="overlay" class="hidden">
   <section id="modal">
-    <header><h2 id="modal-title"></h2><button id="modal-close" type="button">Close</button></header>
+    <header>
+      <h2 id="modal-title"></h2>
+      <div class="actions">
+        <button id="reveal" class="hidden" type="button">Reveal transcript</button>
+        <button id="modal-close" type="button">Close</button>
+      </div>
+    </header>
     <div id="modal-body"></div>
+    <button id="jump" class="hidden" type="button">↓ Jump to latest</button>
   </section>
 </div>
 <script nonce="${nonce}" src="${script.toString()}"></script>
@@ -212,7 +260,9 @@ path.edge { fill: none; stroke: var(--vscode-panel-border); stroke-width: 1.5; }
 #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--vscode-descriptionForeground); text-align: center; padding: 24px; }
 .hidden { display: none !important; }
 #overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 10; }
-#modal { background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-panel-border); border-radius: 8px; width: min(820px, 92vw); max-height: 82vh; display: flex; flex-direction: column; }
+#modal { background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-panel-border); border-radius: 8px; width: min(820px, 92vw); max-height: 82vh; display: flex; flex-direction: column; position: relative; }
+#modal .actions { display: flex; gap: 6px; }
+#jump { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 5px 12px; border-radius: 999px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.35); }
 #modal header { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--vscode-panel-border); }
 #modal h2 { margin: 0; font-size: 1em; }
 #modal button { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; }

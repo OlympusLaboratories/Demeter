@@ -4,8 +4,8 @@ A VS Code extension that opens an editor tab showing, live, what every Claude Co
 session in the current workspace is doing — including the subagents each one spawns,
 whether through the `Agent` tool or a `Workflow` swarm.
 
-Status: **M1–M3 built** — discovery, graph, live updating, phase banding, collapsing,
-pan/zoom, and collapsible node detail. M4 outstanding; see §9.
+Status: **M1–M4 built.** Discovery, graph, live updating, phase banding, collapsing,
+pan/zoom, live-following node detail, panel restore, and reveal-transcript.
 
 ---
 
@@ -507,9 +507,21 @@ status glyphs, auto-expand of live nodes.
 **M3 — legible.** Node detail modals, per-tool summaries, truncation with expand, worktree
 tabs with badges, pan/zoom and fit-to-view, wide-fan-out grouping, theme tokens.
 
-**M4 — fit and finish.** Retention sweep (§7) with dry-run command, panel restore across
-reloads, "reveal transcript file" and "copy agent prompt" actions, empty states,
-`README.md`, `make install` wired into installer step 10.
+**M4 — fit and finish.** Done, minus two items that turned out to need nothing:
+
+- The modal now **follows the tail**. An open node's detail is re-pushed on every refresh,
+  the body sticks to the bottom as events arrive, scrolling up unsticks it, and a
+  `↓ Jump to latest` pill re-sticks. Open `<details>` panels and scroll position survive a
+  refresh, so expanding an output does not get undone two seconds later.
+- Panel restore via `registerWebviewPanelSerializer`, `Reveal transcript` per node,
+  scope-aware empty states.
+- **No retention sweep** — §7 resolved that to a settings change, already made.
+- **No installer change.** Step 10 is generic: `tool_has_install_target` looks for a
+  Makefile `install:` rule and `run_tool_install` uses `mise exec` when a `.mise.toml` is
+  present. agent-watch has both, so it is picked up with no edit to `install.sh`.
+
+Not done: a "copy agent prompt" action. `Reveal transcript` reaches the same content and
+more, so it did not earn its own button.
 
 M1–M2 is the point at which it is worth using daily; M3 is the point at which it beats
 `wfwatch` outright.
@@ -543,3 +555,10 @@ M1–M2 is the point at which it is worth using daily; M3 is the point at which 
    988x5936px — 23 nodes instead of 100.
 7. **~~Modals render everything inline~~ — RESOLVED in M3.** Arguments and output are
    behind `<details>` toggles labelled with their size, collapsed by default.
+8. **~~The modal was a dead snapshot~~ — RESOLVED in M4.** It did not update as new
+   events landed, and reading the newest entry meant scrolling the whole history. The
+   panel now re-pushes the open node's detail on every refresh and the view tails the
+   bottom by default; scrolling up unsticks it and raises a `↓ Jump to latest` pill. The
+   subtlety worth keeping: a naive re-render would collapse every open `<details>` and
+   reset scroll on each 2s tick, so the renderer records which panels are open and
+   restores both.

@@ -5,7 +5,7 @@ import type { AgentNode, NodeStatus } from './model';
 
 function session(id: string, cwd: string, status: NodeStatus = 'done', mtimeMs = 0): LoadedSession {
   const tree: AgentNode = { id, kind: 'session', label: id, status, events: [], children: [] };
-  return { sessionId: id, transcriptPath: `/t/${id}.jsonl`, mtimeMs, cwd, tree, watchPaths: [] };
+  return { sessionId: id, transcriptPath: `/t/${id}.jsonl`, mtimeMs, cwd, tree, watchPaths: [], transcriptsByNodeId: new Map() };
 }
 
 describe('worktreeRootFor', () => {

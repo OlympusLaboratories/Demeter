@@ -28,6 +28,17 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
+  if (typeof vscode.window.registerWebviewPanelSerializer === 'function') {
+    context.subscriptions.push(
+      vscode.window.registerWebviewPanelSerializer(AgentWatchPanel.viewType, {
+        async deserializeWebviewPanel(panel: vscode.WebviewPanel) {
+          const restored = AgentWatchPanel.restore(context, store, panel, preferredWorkspacePath());
+          await restored.refresh();
+        },
+      }),
+    );
+  }
+
   context.subscriptions.push(
     vscode.commands.registerCommand('agentWatch.open', () => {
       AgentWatchPanel.show(context, store, preferredWorkspacePath());

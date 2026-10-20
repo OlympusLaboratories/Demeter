@@ -68,6 +68,7 @@ export const createdPanels: StubPanel[] = [];
 export interface StubPanel {
   webview: {
     html: string;
+    options: Record<string, unknown>;
     cspSource: string;
     asWebviewUri(uri: Uri): Uri;
     postMessage(message: unknown): Promise<boolean>;
@@ -79,12 +80,19 @@ export interface StubPanel {
   onDidDispose: StubEvent<void>;
 }
 
+export const registeredSerializers = new Map<string, unknown>();
+
 export const window = {
+  registerWebviewPanelSerializer(viewType: string, serializer: unknown) {
+    registeredSerializers.set(viewType, serializer);
+    return { dispose: () => registeredSerializers.delete(viewType) };
+  },
   createWebviewPanel(): StubPanel {
     const posted: unknown[] = [];
     const panel: StubPanel = {
       webview: {
         html: '',
+        options: {} as Record<string, unknown>,
         cspSource: 'vscode-resource:',
         asWebviewUri: (uri: Uri) => uri,
         postMessage: async (message: unknown) => {
@@ -114,6 +122,7 @@ export const extensions = {
 export function resetStub(): void {
   configValues.clear();
   registeredCommands.clear();
+  registeredSerializers.clear();
   createdPanels.length = 0;
   workspace.workspaceFolders = undefined;
 }

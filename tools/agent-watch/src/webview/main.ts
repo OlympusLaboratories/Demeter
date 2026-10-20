@@ -174,7 +174,11 @@ function renderGraph(state: ViewState): void {
       ? state.message
       : state.loading
         ? 'Scanning…'
-        : 'No sessions in the selected scope.';
+        : state.repos.length === 0
+          ? 'No Claude Code sessions found. Check agentWatch.projectsDir if your transcripts live elsewhere.'
+          : state.worktrees.length === 0
+            ? `No sessions in the last ${state.recentDays} days for this repo.`
+            : 'No sessions in this worktree.';
     lastLayout = state.graph;
     return;
   }
@@ -251,22 +255,60 @@ function truncate(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }
 
-function renderDetail(detail: NodeDetail): void {
-  byId('modal-title').textContent = detail.sublabel ? `${detail.label} — ${detail.sublabel}` : detail.label;
-  const body = byId('modal-body');
-  body.replaceChildren();
+let following = true;
+let openDetailId: string | undefined;
 
+function atBottom(element: HTMLElement, slack = 24): boolean {
+  return element.scrollHeight - element.scrollTop - element.clientHeight <= slack;
+}
+
+function scrollToLatest(): void {
+  const body = byId('modal-body');
+  body.scrollTop = body.scrollHeight;
+  following = true;
+  byId('jump').classList.add('hidden');
+}
+
+function renderDetail(detail: NodeDetail, refreshed: boolean): void {
+  const body = byId('modal-body');
+  const isSameNode = refreshed && openDetailId === detail.id;
+  const keepScroll = isSameNode ? body.scrollTop : 0;
+  if (!isSameNode) following = true;
+  openDetailId = detail.id;
+
+  byId('modal-title').textContent = detail.sublabel ? `${detail.label} — ${detail.sublabel}` : detail.label;
+  byId('reveal').classList.toggle('hidden', !detail.hasTranscript);
+
+  const open = new Set<number>();
+  if (isSameNode) {
+    body.querySelectorAll('details[open]').forEach((node) => {
+      const index = Number((node as HTMLElement).dataset['index']);
+      if (!Number.isNaN(index)) open.add(index);
+    });
+  }
+
+  body.replaceChildren();
   if (detail.events.length === 0) {
     body.append(el('p', undefined, 'No recorded activity for this node.'));
   }
+  detail.events.forEach((event, index) => body.append(renderEvent(event, index, open)));
 
-  for (const event of detail.events) {
-    body.append(renderEvent(event));
-  }
   byId('overlay').classList.remove('hidden');
+  if (following) scrollToLatest();
+  else {
+    body.scrollTop = keepScroll;
+    byId('jump').classList.toggle('hidden', atBottom(body));
+  }
 }
 
-function renderEvent(event: AgentEvent): HTMLElement {
+function closeDetail(): void {
+  byId('overlay').classList.add('hidden');
+  openDetailId = undefined;
+  following = true;
+  vscode.postMessage({ type: 'closeDetail' });
+}
+
+function renderEvent(event: AgentEvent, index: number, open: ReadonlySet<number>): HTMLElement {
   const wrapper = el('div', `event ${event.kind}${event.isError ? ' err' : ''}`);
   const head = el('div', 'head');
 
@@ -298,6 +340,8 @@ function renderEvent(event: AgentEvent): HTMLElement {
 
   for (const panel of panels) {
     const details = el('details');
+    details.dataset['index'] = String(index);
+    if (open.has(index)) details.open = true;
     const summary = el('summary', undefined, `${panel.label} · ${lineCount(panel.body)}`);
     const pre = el('pre');
     pre.textContent = panel.body;
@@ -314,12 +358,21 @@ function lineCount(body: string): string {
 
 function wire(): void {
   wireViewport();
-  byId('modal-close').addEventListener('click', () => byId('overlay').classList.add('hidden'));
+  byId('modal-close').addEventListener('click', () => closeDetail());
   byId('overlay').addEventListener('click', (event) => {
-    if (event.target === byId('overlay')) byId('overlay').classList.add('hidden');
+    if (event.target === byId('overlay')) closeDetail();
   });
   window.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') byId('overlay').classList.add('hidden');
+    if (event.key === 'Escape' && !byId('overlay').classList.contains('hidden')) closeDetail();
+  });
+  byId('jump').addEventListener('click', () => scrollToLatest());
+  byId('reveal').addEventListener('click', () => {
+    if (openDetailId) vscode.postMessage({ type: 'revealTranscript', id: openDetailId });
+  });
+  byId('modal-body').addEventListener('scroll', () => {
+    const body = byId('modal-body');
+    following = atBottom(body);
+    byId('jump').classList.toggle('hidden', following);
   });
 
   window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
@@ -329,7 +382,10 @@ function wire(): void {
       renderStatus(message.state);
       renderGraph(message.state);
     } else if (message.type === 'detail') {
-      renderDetail(message.detail);
+      renderDetail(message.detail, message.refreshed);
+    } else if (message.type === 'detailClosed') {
+      byId('overlay').classList.add('hidden');
+      openDetailId = undefined;
     }
   });
 

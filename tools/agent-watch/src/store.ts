@@ -24,6 +24,7 @@ export class Store {
   private repos: RepoEntry[] = [];
   private groups: WorktreeGroup[] = [];
   private nodesById = new Map<string, AgentNode>();
+  private transcriptByNodeId = new Map<string, string>();
   private selectedRepo?: string;
   private selectedWorktree?: string;
   private readonly cache = new TranscriptCache();
@@ -71,6 +72,7 @@ export class Store {
   async loadSelected(): Promise<void> {
     this.groups = [];
     this.nodesById.clear();
+    this.transcriptByNodeId.clear();
     const repo = this.repos.find((entry) => entry.project.slug === this.selectedRepo);
     if (!repo) return;
 
@@ -94,7 +96,15 @@ export class Store {
     this.groups = groupByWorktree(sessions, roots);
     this.targets = [repo.project.dir, ...sessions.flatMap((entry) => entry.watchPaths)];
     for (const group of this.groups) {
-      for (const session of group.sessions) index(session.tree, this.nodesById);
+      for (const session of group.sessions) {
+        index(session.tree, this.nodesById);
+        this.transcriptByNodeId.set(session.tree.id, session.transcriptPath);
+      }
+    }
+    for (const session of sessions) {
+      for (const [nodeId, transcript] of session.transcriptsByNodeId) {
+        this.transcriptByNodeId.set(nodeId, transcript);
+      }
     }
 
     if (!this.selectedWorktree || !this.groups.some((group) => group.key === this.selectedWorktree)) {
@@ -129,6 +139,10 @@ export class Store {
     return this.expanded.has(parentId);
   }
 
+  transcriptFor(id: string): string | undefined {
+    return this.transcriptByNodeId.get(id);
+  }
+
   detail(id: string): NodeDetail | undefined {
     const node = this.nodesById.get(id);
     if (!node) return undefined;
@@ -139,6 +153,7 @@ export class Store {
       label: node.label,
       sublabel: node.sublabel,
       events: node.events,
+      hasTranscript: this.transcriptByNodeId.has(node.id),
     };
   }
 
@@ -174,6 +189,7 @@ export class Store {
       message,
       watchedCount: this.targets.length,
       updatedAtMs: Date.now(),
+      recentDays: this.settings.recentDays,
     };
   }
 }

@@ -18,12 +18,17 @@ workflow runs, collapsing of wide layers, pan/zoom, and a node detail modal whos
 arguments and output stay collapsed until asked for. `Agent Watch: Refresh` forces a
 rescan.
 
-Outstanding: M4 (panel restore, reveal-transcript actions, empty states, installer wiring).
+**M4.** The detail modal follows live output, the tab survives a window reload, and each
+node can reveal the transcript behind it.
 
 ## Use
 
 - `Agent Watch: Open` — opens the graph in an editor tab.
 - `Agent Watch: Refresh` — rescans.
+
+Node detail **follows the tail**: new events append as they land and the view stays at the
+bottom. Scroll up and it unsticks, with a `↓ Jump to latest` pill to re-follow. Panels you
+expanded stay expanded across refreshes.
 
 A workflow run bands into its declared phases — a 96-agent `review-code` run reads as
 Review (6) then Verify (90) rather than 96 siblings — and any layer wider than 12
