@@ -10,6 +10,7 @@ function readSettings(): StoreSettings {
     liveWindowSeconds: config.get<number>('liveWindowSeconds') ?? 60,
     recentDays: config.get<number>('recentDays') ?? 7,
     maxSessionsPerRepo: config.get<number>('maxSessionsPerRepo') ?? 12,
+    pollSeconds: config.get<number>('pollSeconds') ?? 2,
   };
 }
 

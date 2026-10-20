@@ -50,6 +50,12 @@
           "default": 12,
           "minimum": 1,
           "description": "Most recent sessions to load per repo."
+        },
+        "agentWatch.pollSeconds": {
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "description": "How often to re-stat watched transcripts. This poll is what guarantees updates; native file watching is only an accelerator."
         }
       }
     }

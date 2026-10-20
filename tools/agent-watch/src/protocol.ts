@@ -33,7 +33,8 @@ export interface ViewState {
   selectedWorktree?: string;
   graph: GraphLayout;
   message?: string;
-  footprintBytes?: number;
+  watchedCount: number;
+  updatedAtMs: number;
 }
 
 export type HostMessage =

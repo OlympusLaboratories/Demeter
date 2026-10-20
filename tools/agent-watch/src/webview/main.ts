@@ -56,6 +56,26 @@ function renderScope(state: ViewState): void {
   }
 }
 
+function renderStatus(state: ViewState): void {
+  const status = byId('status');
+  status.replaceChildren();
+
+  const liveTotal = state.worktrees.reduce((total, tree) => total + tree.liveCount, 0);
+  if (liveTotal > 0) {
+    const dot = el('span', 'dot', `● ${liveTotal} live`);
+    status.append(dot);
+  }
+
+  const stamp = new Date(state.updatedAtMs).toLocaleTimeString();
+  status.append(
+    el(
+      'span',
+      undefined,
+      state.loading ? 'refreshing…' : `updated ${stamp} · watching ${state.watchedCount} paths`,
+    ),
+  );
+}
+
 function renderGraph(state: ViewState): void {
   const svg = document.getElementById('graph') as SVGSVGElement | null;
   const empty = byId('empty');
@@ -189,6 +209,7 @@ function wire(): void {
     const message = event.data;
     if (message.type === 'state') {
       renderScope(message.state);
+      renderStatus(message.state);
       renderGraph(message.state);
     } else if (message.type === 'detail') {
       renderDetail(message.detail);

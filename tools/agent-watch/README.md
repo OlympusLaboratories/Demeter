@@ -12,8 +12,11 @@ worktree scoping rules, and what is deliberately out of scope.
 
 ## Status
 
-**M1 — read-only snapshot.** Global discovery, session and subagent enumeration, the
-graph, and a per-node detail modal. No live tailing yet; use `Agent Watch: Refresh`.
+**M1 + M2.** Global discovery, session and subagent enumeration, the graph, a per-node
+detail modal, and **live updating** — transcripts are tailed incrementally and the view
+refreshes itself as agents work. `Agent Watch: Refresh` forces a rescan.
+
+Outstanding: M3 (node detail collapsing, pan/zoom, wide-fan-out grouping) and M4 (polish).
 
 ## Use
 
@@ -36,6 +39,7 @@ instead of overflowing.
 | `agentWatch.liveWindowSeconds` | `60` | A transcript written this recently counts as live. |
 | `agentWatch.recentDays` | `7` | Only sessions touched this recently are listed. |
 | `agentWatch.maxSessionsPerRepo` | `12` | Most recent sessions loaded per repo. |
+| `agentWatch.pollSeconds` | `2` | How often watched transcripts are re-stat'd. This poll is the guarantee; native file watching is only an accelerator. |
 
 ## Thinking text
 

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { HostMessage, ViewMessage } from './protocol';
 import type { Store } from './store';
+import { PathWatcher, debounce } from './watch';
 
 const VIEW_TYPE = 'agentWatch.graph';
 
@@ -30,6 +31,10 @@ export class AgentWatchPanel {
   }
 
   private disposables: vscode.Disposable[] = [];
+  private watcher: PathWatcher | undefined;
+  private pending = debounce(() => undefined, 0);
+  private refreshing = false;
+  private queued = false;
 
   private constructor(
     private readonly context: vscode.ExtensionContext,
@@ -38,6 +43,10 @@ export class AgentWatchPanel {
     private preferredPath: string | undefined,
   ) {
     this.panel.webview.html = this.html();
+    this.watcher = new PathWatcher(() => this.pending.call(), { pollMs: store.pollMs() });
+    this.pending = debounce(() => {
+      void this.reload();
+    }, 300);
     this.panel.onDidDispose(() => this.dispose(), undefined, this.disposables);
     this.panel.webview.onDidReceiveMessage(
       (message: ViewMessage) => {
@@ -51,13 +60,29 @@ export class AgentWatchPanel {
   async refresh(preferredPath?: string): Promise<void> {
     if (preferredPath) this.preferredPath = preferredPath;
     this.post({ type: 'state', state: this.store.view(true) });
+    await this.reload();
+  }
+
+  private async reload(): Promise<void> {
+    if (this.refreshing) {
+      this.queued = true;
+      return;
+    }
+    this.refreshing = true;
     try {
-      await this.store.discover(this.preferredPath);
-      await this.store.loadSelected();
-      this.post({ type: 'state', state: this.store.view(false) });
+      do {
+        this.queued = false;
+        await this.store.discover(this.preferredPath);
+        await this.store.loadSelected();
+        await this.watcher?.setTargets(this.store.watchTargets());
+        this.watcher?.start();
+        this.post({ type: 'state', state: this.store.view(false) });
+      } while (this.queued);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.post({ type: 'state', state: this.store.view(false, message) });
+    } finally {
+      this.refreshing = false;
     }
   }
 
@@ -70,8 +95,7 @@ export class AgentWatchPanel {
       case 'selectRepo':
         this.store.selectRepo(message.slug);
         this.post({ type: 'state', state: this.store.view(true) });
-        await this.store.loadSelected();
-        this.post({ type: 'state', state: this.store.view(false) });
+        await this.reload();
         return;
       case 'selectWorktree':
         this.store.selectWorktree(message.key);
@@ -106,6 +130,7 @@ export class AgentWatchPanel {
 <header id="scope">
   <div class="row" id="repos"></div>
   <div class="row" id="worktrees"></div>
+  <div class="row status" id="status"></div>
 </header>
 <main>
   <div id="canvas"><svg id="graph" xmlns="http://www.w3.org/2000/svg"></svg></div>
@@ -124,6 +149,9 @@ export class AgentWatchPanel {
 
   private dispose(): void {
     AgentWatchPanel.current = undefined;
+    this.pending.cancel();
+    this.watcher?.dispose();
+    this.watcher = undefined;
     this.panel.dispose();
     for (const disposable of this.disposables) disposable.dispose();
     this.disposables = [];
@@ -148,11 +176,15 @@ header#scope { padding: 8px 12px 4px; border-bottom: 1px solid var(--vscode-pane
 .chip { border: 1px solid var(--vscode-panel-border); background: transparent; color: var(--vscode-foreground); border-radius: 999px; padding: 2px 10px; cursor: pointer; font-size: 0.85em; }
 .chip.selected { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: transparent; }
 .chip .live { color: var(--vscode-charts-green); margin-left: 4px; }
+.row.status { color: var(--vscode-descriptionForeground); font-size: 0.8em; gap: 10px; }
+.row.status .dot { color: var(--vscode-charts-green); }
 main { flex: 1; position: relative; overflow: hidden; }
 #canvas { position: absolute; inset: 0; overflow: auto; }
 svg { display: block; }
 .node rect { fill: var(--vscode-editorWidget-background); stroke: var(--vscode-panel-border); stroke-width: 1.5; rx: 6; cursor: pointer; }
-.node.live rect { stroke: var(--vscode-charts-green); stroke-width: 2.5; }
+.node.live rect { stroke: var(--vscode-charts-green); stroke-width: 2.5; animation: pulse 1.8s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { stroke-opacity: 1; } 50% { stroke-opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .node.live rect { animation: none; } }
 .node.running rect { stroke: var(--vscode-charts-blue); stroke-width: 2.5; }
 .node.error rect { stroke: var(--vscode-errorForeground); stroke-width: 2.5; }
 .node text { pointer-events: none; }

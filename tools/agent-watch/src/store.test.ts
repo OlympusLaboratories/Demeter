@@ -1,0 +1,159 @@
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { Store, type StoreSettings } from './store';
+
+const temps: string[] = [];
+
+async function fixture(): Promise<{ projects: string; transcript: string; subagents: string }> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-watch-store-'));
+  temps.push(root);
+  const projects = path.join(root, 'projects');
+  const slug = '-tmp-repo';
+  const sessionId = 'aaaaaaaa-1111-2222-3333-444444444444';
+  const dir = path.join(projects, slug);
+  const subagents = path.join(dir, sessionId, 'subagents');
+  await fs.mkdir(subagents, { recursive: true });
+
+  const transcript = path.join(dir, `${sessionId}.jsonl`);
+  await fs.writeFile(
+    transcript,
+    `${JSON.stringify({ type: 'user', cwd: '/tmp/repo', gitBranch: 'main', message: { content: [{ type: 'text', text: 'hi' }] } })}\n`,
+  );
+  return { projects, transcript, subagents };
+}
+
+function settings(projects: string): StoreSettings {
+  return {
+    projectsDir: projects,
+    liveWindowSeconds: 3600,
+    recentDays: 3650,
+    maxSessionsPerRepo: 12,
+    pollSeconds: 2,
+  };
+}
+
+afterEach(async () => {
+  while (temps.length > 0) {
+    const dir = temps.pop();
+    if (dir) await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+describe('Store', () => {
+  it('discovers a repo, loads its session, and exposes what to watch', async () => {
+    const { projects, transcript, subagents } = await fixture();
+    const store = new Store(settings(projects));
+
+    await store.discover();
+    await store.loadSelected();
+    const view = store.view(false);
+
+    expect(view.repos).toHaveLength(1);
+    expect(view.repos[0]?.label).toBe('repo');
+    expect(view.worktrees).toHaveLength(1);
+    expect(view.graph.nodes).toHaveLength(1);
+    expect(view.graph.nodes[0]?.status).toBe('live');
+
+    expect(store.watchTargets()).toContain(transcript);
+    expect(store.watchTargets()).toContain(subagents);
+  });
+
+  it('picks up a subagent that appears after the first load', async () => {
+    const { projects, subagents } = await fixture();
+    const store = new Store(settings(projects));
+
+    await store.discover();
+    await store.loadSelected();
+    expect(store.view(false).graph.nodes).toHaveLength(1);
+
+    await fs.writeFile(
+      path.join(subagents, 'agent-a1.meta.json'),
+      JSON.stringify({ agentType: 'Explore', description: 'look around', spawnDepth: 1 }),
+    );
+    await fs.writeFile(
+      path.join(subagents, 'agent-a1.jsonl'),
+      `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'found it' }] } })}\n`,
+    );
+
+    await store.discover();
+    await store.loadSelected();
+    const nodes = store.view(false).graph.nodes;
+
+    expect(nodes).toHaveLength(2);
+    expect(nodes.map((node) => node.label)).toContain('look around');
+  });
+
+  it('reflects transcript growth without re-reading from the start', async () => {
+    const { projects, transcript } = await fixture();
+    const store = new Store(settings(projects));
+
+    await store.discover();
+    await store.loadSelected();
+    const before = store.view(false).graph.nodes[0]?.eventCount ?? 0;
+
+    await fs.appendFile(
+      transcript,
+      `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }] } })}\n`,
+    );
+
+    await store.loadSelected();
+    expect(store.view(false).graph.nodes[0]?.eventCount).toBe(before + 1);
+  });
+
+  it('returns an empty view rather than throwing when the projects dir is missing', async () => {
+    const store = new Store(settings('/definitely/not/here'));
+    await store.discover();
+    await store.loadSelected();
+
+    const view = store.view(false);
+    expect(view.repos).toEqual([]);
+    expect(view.graph.nodes).toEqual([]);
+    expect(view.watchedCount).toBe(0);
+  });
+
+  it('exposes the poll interval in milliseconds with a floor of one second', () => {
+    expect(new Store({ ...settings('/x'), pollSeconds: 5 }).pollMs()).toBe(5000);
+    expect(new Store({ ...settings('/x'), pollSeconds: 0 }).pollMs()).toBe(1000);
+  });
+});
+
+describe('watch coverage', () => {
+  it('watches each subagent transcript, not just the directory holding them', async () => {
+    const { projects, subagents } = await fixture();
+    await fs.writeFile(
+      path.join(subagents, 'agent-a1.meta.json'),
+      JSON.stringify({ agentType: 'Explore', description: 'look', spawnDepth: 1 }),
+    );
+    const agentTranscript = path.join(subagents, 'agent-a1.jsonl');
+    await fs.writeFile(agentTranscript, `${JSON.stringify({ type: 'assistant', message: { content: [] } })}\n`);
+
+    const store = new Store(settings(projects));
+    await store.discover();
+    await store.loadSelected();
+
+    expect(store.watchTargets()).toContain(agentTranscript);
+  });
+
+  it('sees an existing subagent transcript grow, with no new files added', async () => {
+    const { projects, subagents } = await fixture();
+    await fs.writeFile(path.join(subagents, 'agent-a1.meta.json'), JSON.stringify({ description: 'look' }));
+    const agentTranscript = path.join(subagents, 'agent-a1.jsonl');
+    await fs.writeFile(agentTranscript, `${JSON.stringify({ type: 'assistant', message: { content: [] } })}\n`);
+
+    const store = new Store(settings(projects));
+    await store.discover();
+    await store.loadSelected();
+    const before = store.view(false).graph.nodes.find((node) => node.label === 'look')?.eventCount;
+
+    await fs.appendFile(
+      agentTranscript,
+      `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'x', name: 'Grep', input: { pattern: 'p' } }] } })}\n`,
+    );
+    await store.loadSelected();
+
+    const after = store.view(false).graph.nodes.find((node) => node.label === 'look')?.eventCount;
+    expect(after).toBe((before ?? 0) + 1);
+  });
+});

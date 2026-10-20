@@ -3,6 +3,7 @@ import { type ProjectDir, scanProjects, withinDays } from './discovery';
 import { type LoadedSession, loadSession, peekProjectPath } from './loader';
 import { type WorktreeGroup, groupByWorktree, repoRootFor, worktreeRoots } from './repos';
 import { layoutForest } from './graphLayout';
+import { TranscriptCache } from './tail';
 import type { NodeDetail, RepoSummary, ViewState, WorktreeSummary } from './protocol';
 
 export interface StoreSettings {
@@ -10,6 +11,7 @@ export interface StoreSettings {
   liveWindowSeconds: number;
   recentDays: number;
   maxSessionsPerRepo: number;
+  pollSeconds: number;
 }
 
 interface RepoEntry {
@@ -24,6 +26,8 @@ export class Store {
   private nodesById = new Map<string, AgentNode>();
   private selectedRepo?: string;
   private selectedWorktree?: string;
+  private readonly cache = new TranscriptCache();
+  private targets: string[] = [];
 
   constructor(private settings: StoreSettings) {}
 
@@ -80,12 +84,14 @@ export class Store {
         await loadSession(session, {
           liveWindowSeconds: this.settings.liveWindowSeconds,
           nowMs,
+          cache: this.cache,
         }),
       );
     }
 
     const roots = repo.path ? await worktreeRoots(repo.path) : [];
     this.groups = groupByWorktree(sessions, roots);
+    this.targets = [repo.project.dir, ...sessions.flatMap((entry) => entry.watchPaths)];
     for (const group of this.groups) {
       for (const session of group.sessions) index(session.tree, this.nodesById);
     }
@@ -95,10 +101,19 @@ export class Store {
     }
   }
 
+  watchTargets(): string[] {
+    return this.targets;
+  }
+
+  pollMs(): number {
+    return Math.max(1, this.settings.pollSeconds) * 1000;
+  }
+
   selectRepo(slug: string): void {
     if (this.selectedRepo === slug) return;
     this.selectedRepo = slug;
     this.selectedWorktree = undefined;
+    this.cache.clear();
   }
 
   selectWorktree(key: string): void {
@@ -146,6 +161,8 @@ export class Store {
       selectedWorktree: this.selectedWorktree,
       graph,
       message,
+      watchedCount: this.targets.length,
+      updatedAtMs: Date.now(),
     };
   }
 }

@@ -43,6 +43,7 @@ export interface SubagentInput {
   agentId: string;
   meta: SubagentMeta;
   lines: TranscriptLine[];
+  transcriptPath?: string;
 }
 
 export interface JournalEntry {
@@ -54,6 +55,7 @@ export interface WorkflowInput {
   runId: string;
   journal: JournalEntry[];
   agents: SubagentInput[];
+  dir?: string;
 }
 
 export interface SessionInput {

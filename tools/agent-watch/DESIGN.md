@@ -4,8 +4,8 @@ A VS Code extension that opens an editor tab showing, live, what every Claude Co
 session in the current workspace is doing — including the subagents each one spawns,
 whether through the `Agent` tool or a `Workflow` swarm.
 
-Status: **M1 built** (global discovery, session/subagent enumeration, graph, detail modal).
-M2–M4 outstanding — see §9.
+Status: **M1 + M2 built** — discovery, graph, detail modal, and live updating.
+M3–M4 outstanding; see §9 and the open questions in §10.
 
 ---
 
@@ -371,12 +371,26 @@ messages rather than parsing a 1.5 MB transcript in full.
 
 ### Watching
 
-`fs.watch` on the project directory plus a **`stat` poll every 2s** over the known live
-files. Per the repo rule, the poll is the guarantee and `fs.watch` is the optimization
-that is allowed to do nothing — `make install` runs the test suite, so a test that
-asserts inotify delivered an event turns an install into a hard failure on a box where
-watches are unavailable. Tests assert the poll keeps the view current with `fs.watch`
+`fs.watch` on each target plus a **`stat` poll every 2s** (`agentWatch.pollSeconds`). Per
+the repo rule, the poll is the guarantee and `fs.watch` is the optimization that is
+allowed to do nothing — `make install` runs the test suite, so a test asserting inotify
+delivered an event turns an install into a hard failure on a box where watches are
+unavailable. The suite asserts the poll keeps the view current with the watch factory
 stubbed to throw `ENOSPC`.
+
+Two signature rules, both learned from failures rather than guessed:
+
+- **Files** are `mtime:size`. **Directories** are `count:hash(sorted names)` — *not*
+  mtime. Directory mtime is millisecond-truncated, so a file created in the same
+  millisecond as the baseline reads as unchanged; that surfaced as a test failing 2 runs
+  in 5 before the signature changed.
+- **Every agent transcript is watched individually**, not just the directory holding it.
+  A directory signature only moves when entries are added, removed or renamed, so an agent
+  appending to its existing transcript — the main thing to watch during a swarm — would
+  otherwise be invisible.
+
+Cost is not a concern: a real 96-agent run yields 98 targets and one full poll measures
+**0.5 ms**, a 0.027% duty cycle at the 2s interval.
 
 ### Performance
 
@@ -497,3 +511,15 @@ M1–M2 is the point at which it is worth using daily; M3 is the point at which 
 5. **Multi-root workspaces** are now a non-issue: discovery is global (§4), so several
    folders simply mean several repos already present in the switcher, with the first
    folder's repo preselected.
+6. **The fan-out is flat, and that is structural.** The Workflow harness is the parent of
+   every agent it launches, so a two-stage pipeline renders as one wide layer: a real run
+   measured 6 reviewers + (30 findings x 3 skeptics) = 96 siblings. Review -> verify is a
+   data dependency, not a spawn edge, so the graph cannot infer it. Two ways out, not
+   exclusive: band the layer by stage in the view (recoverable today from prompt text —
+   `one reviewer...` vs `skeptic #N...` — but prompt-sniffing is brittle), or have the
+   workflow-authoring skills emit a real stage/parent marker into the journal so the
+   hierarchy is data rather than inference. The second is the durable fix and belongs with
+   the skills, not here. Deferred past M3.
+7. **Modals render everything inline.** Tool commands and their outputs should be
+   collapsed to a one-line summary by default and expand on click; today the full result
+   (to the 2 KB cap) is always in the DOM. Fold into M3.
