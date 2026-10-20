@@ -1,4 +1,5 @@
 import { NODE_HEIGHT, NODE_WIDTH } from '../graphLayout';
+import type { GraphLayout } from '../graphLayout';
 import type { AgentEvent, NodeStatus } from '../model';
 import type { HostMessage, NodeDetail, ViewMessage, ViewState } from '../protocol';
 
@@ -56,6 +57,91 @@ function renderScope(state: ViewState): void {
   }
 }
 
+interface Viewport {
+  k: number;
+  tx: number;
+  ty: number;
+}
+
+const view: Viewport = { k: 1, tx: 0, ty: 0 };
+let lastLayout: GraphLayout = { nodes: [], edges: [], width: 0, height: 0 };
+let userAdjusted = false;
+
+function applyTransform(): void {
+  const root = document.getElementById('viewport');
+  if (root) root.setAttribute('transform', `translate(${view.tx},${view.ty}) scale(${view.k})`);
+  const level = document.getElementById('zoom-level');
+  if (level) level.textContent = `${Math.round(view.k * 100)}%`;
+}
+
+function fitToView(): void {
+  const canvas = byId('canvas');
+  const pad = 32;
+  const width = lastLayout.width + pad * 2;
+  const height = lastLayout.height + pad * 2;
+  if (width <= 0 || height <= 0) return;
+
+  const scale = Math.min(canvas.clientWidth / width, canvas.clientHeight / height, 1);
+  view.k = Math.max(0.1, scale);
+  view.tx = pad * view.k + (canvas.clientWidth - width * view.k) / 2;
+  view.ty = pad * view.k;
+  userAdjusted = false;
+  applyTransform();
+}
+
+function zoomAt(factor: number, clientX: number, clientY: number): void {
+  const canvas = byId('canvas');
+  const rect = canvas.getBoundingClientRect();
+  const x = clientX - rect.left;
+  const y = clientY - rect.top;
+  const next = Math.min(4, Math.max(0.1, view.k * factor));
+  view.tx = x - ((x - view.tx) / view.k) * next;
+  view.ty = y - ((y - view.ty) / view.k) * next;
+  view.k = next;
+  userAdjusted = true;
+  applyTransform();
+}
+
+function wireViewport(): void {
+  const canvas = byId('canvas');
+  let dragging = false;
+  let originX = 0;
+  let originY = 0;
+
+  canvas.addEventListener('mousedown', (event) => {
+    if (event.button !== 0) return;
+    dragging = true;
+    originX = event.clientX - view.tx;
+    originY = event.clientY - view.ty;
+    canvas.classList.add('grabbing');
+  });
+  window.addEventListener('mousemove', (event) => {
+    if (!dragging) return;
+    view.tx = event.clientX - originX;
+    view.ty = event.clientY - originY;
+    userAdjusted = true;
+    applyTransform();
+  });
+  window.addEventListener('mouseup', () => {
+    dragging = false;
+    canvas.classList.remove('grabbing');
+  });
+  canvas.addEventListener('wheel', (event) => {
+    event.preventDefault();
+    zoomAt(event.deltaY < 0 ? 1.12 : 1 / 1.12, event.clientX, event.clientY);
+  });
+
+  byId('fit').addEventListener('click', () => fitToView());
+  byId('zoom-in').addEventListener('click', () => {
+    const rect = byId('canvas').getBoundingClientRect();
+    zoomAt(1.2, rect.left + rect.width / 2, rect.top + rect.height / 2);
+  });
+  byId('zoom-out').addEventListener('click', () => {
+    const rect = byId('canvas').getBoundingClientRect();
+    zoomAt(1 / 1.2, rect.left + rect.width / 2, rect.top + rect.height / 2);
+  });
+}
+
 function renderStatus(state: ViewState): void {
   const status = byId('status');
   status.replaceChildren();
@@ -89,15 +175,17 @@ function renderGraph(state: ViewState): void {
       : state.loading
         ? 'Scanning…'
         : 'No sessions in the selected scope.';
-    svg.setAttribute('width', '0');
-    svg.setAttribute('height', '0');
+    lastLayout = state.graph;
     return;
   }
 
   empty.classList.add('hidden');
-  const pad = 20;
-  svg.setAttribute('width', String(state.graph.width + pad * 2));
-  svg.setAttribute('height', String(state.graph.height + pad * 2));
+  const pad = 0;
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', '100%');
+  const viewport = svgEl('g');
+  viewport.setAttribute('id', 'viewport');
+  svg.append(viewport);
 
   for (const edge of state.graph.edges) {
     const path = svgEl('path');
@@ -107,12 +195,13 @@ function renderGraph(state: ViewState): void {
       `M${edge.fromX + pad},${edge.fromY + pad} C${midX + pad},${edge.fromY + pad} ${midX + pad},${edge.toY + pad} ${edge.toX + pad},${edge.toY + pad}`,
     );
     path.setAttribute('class', 'edge');
-    svg.append(path);
+    viewport.append(path);
   }
 
   for (const node of state.graph.nodes) {
     const group = svgEl('g');
-    group.setAttribute('class', `node ${node.status}`);
+    const isGroup = node.group !== undefined;
+    group.setAttribute('class', `node ${node.status}${isGroup ? ' grouped' : ''}`);
     group.setAttribute('transform', `translate(${node.x + pad},${node.y + pad})`);
 
     const rect = svgEl('rect');
@@ -146,9 +235,16 @@ function renderGraph(state: ViewState): void {
     title.textContent = node.sublabel ? `${node.label}\n${node.sublabel}` : node.label;
     group.append(title);
 
-    group.addEventListener('click', () => vscode.postMessage({ type: 'selectNode', id: node.id }));
-    svg.append(group);
+    group.addEventListener('click', () => {
+      if (node.group) vscode.postMessage({ type: 'toggleGroup', id: node.id });
+      else vscode.postMessage({ type: 'selectNode', id: node.id });
+    });
+    viewport.append(group);
   }
+
+  lastLayout = state.graph;
+  if (!userAdjusted) fitToView();
+  else applyTransform();
 }
 
 function truncate(value: string, max: number): string {
@@ -187,16 +283,37 @@ function renderEvent(event: AgentEvent): HTMLElement {
   }
   wrapper.append(head);
 
-  const text = event.kind === 'tool' ? event.result : event.text;
-  if (text) {
+  const panels: { label: string; body: string }[] = [];
+  if (event.kind === 'tool') {
+    if (event.detail) panels.push({ label: 'arguments', body: event.detail });
+    if (event.result) {
+      panels.push({
+        label: event.isError ? 'error output' : 'output',
+        body: event.resultTruncated ? `${event.result}\n…truncated` : event.result,
+      });
+    }
+  } else if (event.text) {
+    panels.push({ label: event.kind === 'thinking' ? 'summary' : 'text', body: event.text });
+  }
+
+  for (const panel of panels) {
+    const details = el('details');
+    const summary = el('summary', undefined, `${panel.label} · ${lineCount(panel.body)}`);
     const pre = el('pre');
-    pre.textContent = event.resultTruncated ? `${text}\n…truncated` : text;
-    wrapper.append(pre);
+    pre.textContent = panel.body;
+    details.append(summary, pre);
+    wrapper.append(details);
   }
   return wrapper;
 }
 
+function lineCount(body: string): string {
+  const lines = body.split('\n').length;
+  return lines === 1 ? `${body.length} chars` : `${lines} lines`;
+}
+
 function wire(): void {
+  wireViewport();
   byId('modal-close').addEventListener('click', () => byId('overlay').classList.add('hidden'));
   byId('overlay').addEventListener('click', (event) => {
     if (event.target === byId('overlay')) byId('overlay').classList.add('hidden');

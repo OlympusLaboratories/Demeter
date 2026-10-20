@@ -2,6 +2,7 @@ import type { Dirent } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { ProjectDir, SessionFile } from './discovery';
+import { manifestPathFor, readManifest } from './manifest';
 import {
   type AgentNode,
   type JournalEntry,
@@ -87,7 +88,11 @@ async function loadSubagentDir(dir: string, cache?: TranscriptCache): Promise<Su
   return agents;
 }
 
-async function loadWorkflows(subagentsDir: string, cache?: TranscriptCache): Promise<WorkflowInput[]> {
+async function loadWorkflows(
+  subagentsDir: string,
+  sessionDir: string,
+  cache?: TranscriptCache,
+): Promise<WorkflowInput[]> {
   const workflowsDir = path.join(subagentsDir, 'workflows');
   let entries: Dirent[];
   try {
@@ -103,7 +108,8 @@ async function loadWorkflows(subagentsDir: string, cache?: TranscriptCache): Pro
     const journal = parseJsonl(await readText(path.join(runDir, 'journal.jsonl'))) as JournalEntry[];
     const agents = await loadSubagentDir(runDir, cache);
     if (journal.length === 0 && agents.length === 0) continue;
-    workflows.push({ runId: entry.name, journal, agents, dir: runDir });
+    const manifest = await readManifest(sessionDir, entry.name);
+    workflows.push({ runId: entry.name, journal, agents, dir: runDir, manifest });
   }
   return workflows;
 }
@@ -112,13 +118,10 @@ export async function loadSession(session: SessionFile, options: LoadOptions): P
   const lines = options.cache
     ? await options.cache.read(session.transcriptPath)
     : parseJsonl(await readText(session.transcriptPath));
-  const subagentsDir = path.join(
-    path.dirname(session.transcriptPath),
-    session.sessionId,
-    'subagents',
-  );
+  const sessionDir = path.join(path.dirname(session.transcriptPath), session.sessionId);
+  const subagentsDir = path.join(sessionDir, 'subagents');
   const subagents = await loadSubagentDir(subagentsDir, options.cache);
-  const workflows = await loadWorkflows(subagentsDir, options.cache);
+  const workflows = await loadWorkflows(subagentsDir, sessionDir, options.cache);
 
   const tree = buildSessionTree({
     sessionId: session.sessionId,
@@ -135,6 +138,7 @@ export async function loadSession(session: SessionFile, options: LoadOptions): P
     if (agent.transcriptPath) watchPaths.push(agent.transcriptPath);
   }
   for (const workflow of workflows) {
+    watchPaths.push(manifestPathFor(sessionDir, workflow.runId));
     if (workflow.dir) watchPaths.push(workflow.dir, path.join(workflow.dir, 'journal.jsonl'));
     for (const agent of workflow.agents) {
       if (agent.transcriptPath) watchPaths.push(agent.transcriptPath);

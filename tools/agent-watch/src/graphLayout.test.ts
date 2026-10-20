@@ -9,7 +9,7 @@ function node(id: string, children: AgentNode[] = []): AgentNode {
 describe('layoutTree', () => {
   it('places depth on the horizontal axis so wide fan-outs scroll vertically', () => {
     const wide = node('root', Array.from({ length: 27 }, (_unused, index) => node(`child-${index}`)));
-    const layout = layoutTree(wide);
+    const layout = layoutTree(wide, { groupThreshold: 1000 });
 
     expect(layout.nodes).toHaveLength(28);
     const root = layout.nodes.find((candidate) => candidate.id === 'root');
@@ -51,5 +51,51 @@ describe('layoutForest', () => {
 
   it('returns an empty layout for no sessions', () => {
     expect(layoutForest([])).toEqual({ nodes: [], edges: [], width: 0, height: 0 });
+  });
+});
+
+describe('wide fan-out collapsing', () => {
+  function wide(count: number): AgentNode {
+    return node('phase', Array.from({ length: count }, (_u, index) => node(`agent-${index}`)));
+  }
+
+  it('replaces the tail of a wide layer with one counted group node', () => {
+    const layout = layoutTree(wide(90), { groupThreshold: 12 });
+    const children = layout.nodes.filter((positioned) => positioned.id !== 'phase');
+
+    expect(children).toHaveLength(13);
+    const group = children.find((child) => child.id.startsWith('group:'));
+    expect(group?.label).toBe('+78 more');
+    expect(group?.group?.parentId).toBe('phase');
+  });
+
+  it('shows every child once its parent is expanded', () => {
+    const layout = layoutTree(wide(90), { groupThreshold: 12, expanded: new Set(['phase']) });
+    expect(layout.nodes).toHaveLength(91);
+    expect(layout.nodes.some((positioned) => positioned.id.startsWith('group:'))).toBe(false);
+  });
+
+  it('leaves a layer at or under the threshold untouched', () => {
+    const layout = layoutTree(wide(12), { groupThreshold: 12 });
+    expect(layout.nodes).toHaveLength(13);
+    expect(layout.nodes.some((positioned) => positioned.id.startsWith('group:'))).toBe(false);
+  });
+
+  it('surfaces running work in the collapsed group so it is never hidden silently', () => {
+    const children = Array.from({ length: 30 }, (_u, index) => node(`agent-${index}`));
+    children[20] = { ...children[20]!, status: 'running' };
+    const layout = layoutTree(node('phase', children), { groupThreshold: 5 });
+    const group = layout.nodes.find((positioned) => positioned.id.startsWith('group:'));
+
+    expect(group?.sublabel).toBe('1 running');
+    expect(group?.status).toBe('running');
+  });
+
+  it('cuts a 96-agent run down to a scrollable height', () => {
+    const run = node('workflow', [node('Review', Array.from({ length: 6 }, (_u, i) => node(`r${i}`))), node('Verify', Array.from({ length: 90 }, (_u, i) => node(`v${i}`)))]);
+    const collapsed = layoutTree(run, { groupThreshold: 12 });
+    const full = layoutTree(run, { groupThreshold: 1000 });
+
+    expect(collapsed.height).toBeLessThan(full.height / 3);
   });
 });

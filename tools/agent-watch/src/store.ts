@@ -2,7 +2,7 @@ import type { AgentNode } from './model';
 import { type ProjectDir, scanProjects, withinDays } from './discovery';
 import { type LoadedSession, loadSession, peekProjectPath } from './loader';
 import { type WorktreeGroup, groupByWorktree, repoRootFor, worktreeRoots } from './repos';
-import { layoutForest } from './graphLayout';
+import { layoutForest, parentOfGroupId } from './graphLayout';
 import { TranscriptCache } from './tail';
 import type { NodeDetail, RepoSummary, ViewState, WorktreeSummary } from './protocol';
 
@@ -28,6 +28,7 @@ export class Store {
   private selectedWorktree?: string;
   private readonly cache = new TranscriptCache();
   private targets: string[] = [];
+  private expanded = new Set<string>();
 
   constructor(private settings: StoreSettings) {}
 
@@ -113,11 +114,19 @@ export class Store {
     if (this.selectedRepo === slug) return;
     this.selectedRepo = slug;
     this.selectedWorktree = undefined;
+    this.expanded.clear();
     this.cache.clear();
   }
 
   selectWorktree(key: string): void {
     this.selectedWorktree = key;
+  }
+
+  toggleGroup(groupId: string): boolean {
+    const parentId = parentOfGroupId(groupId) ?? groupId;
+    if (this.expanded.has(parentId)) this.expanded.delete(parentId);
+    else this.expanded.add(parentId);
+    return this.expanded.has(parentId);
   }
 
   detail(id: string): NodeDetail | undefined {
@@ -151,7 +160,9 @@ export class Store {
     }));
 
     const active = this.groups.find((group) => group.key === this.selectedWorktree);
-    const graph = layoutForest((active?.sessions ?? []).map((session) => session.tree));
+    const graph = layoutForest((active?.sessions ?? []).map((session) => session.tree), {
+      expanded: this.expanded,
+    });
 
     return {
       loading,

@@ -1,3 +1,5 @@
+import type { ManifestAgent, WorkflowManifest } from './manifest';
+import { statusFromState } from './manifest';
 import { RESULT_LIMIT, clip, resultToText, summarizeToolUse } from './summarize';
 import {
   type ContentBlock,
@@ -10,7 +12,7 @@ import {
 } from './transcript';
 
 export type NodeStatus = 'live' | 'running' | 'done' | 'error' | 'idle';
-export type NodeKind = 'session' | 'agent' | 'workflow';
+export type NodeKind = 'session' | 'agent' | 'workflow' | 'phase';
 
 export interface AgentEvent {
   kind: 'text' | 'thinking' | 'tool';
@@ -56,6 +58,7 @@ export interface WorkflowInput {
   journal: JournalEntry[];
   agents: SubagentInput[];
   dir?: string;
+  manifest?: WorkflowManifest;
 }
 
 export interface SessionInput {
@@ -276,28 +279,94 @@ export function buildSessionTree(input: SessionInput): AgentNode {
   }
 
   for (const workflow of input.workflows) {
-    const started = new Set<string>();
-    const finished = new Set<string>();
-    for (const entry of workflow.journal) {
-      if (!entry.agentId) continue;
-      if (entry.type === 'started') started.add(entry.agentId);
-      if (entry.type === 'result') finished.add(entry.agentId);
-    }
-    const children = workflow.agents.map((agent) =>
-      subagentNode(agent, started.has(agent.agentId) && !finished.has(agent.agentId)),
-    );
-    const running = children.filter((child) => child.status === 'running').length;
-    const total = Math.max(started.size, workflow.agents.length);
-    root.children.push({
-      id: `workflow:${workflow.runId}`,
-      kind: 'workflow',
-      label: workflow.runId,
-      sublabel: `${finished.size}/${total} done`,
-      status: running > 0 ? 'running' : 'done',
-      events: [],
-      children,
-    });
+    root.children.push(buildWorkflowNode(workflow));
   }
 
   return root;
+}
+
+function workflowAgentNode(
+  agent: SubagentInput,
+  entry: ManifestAgent | undefined,
+  journalRunning: boolean,
+): AgentNode {
+  const node = subagentNode(agent, journalRunning);
+  const fromManifest = statusFromState(entry?.state);
+  if (fromManifest) node.status = fromManifest;
+  if (entry?.label) node.label = clip(entry.label, 48);
+  const detail = node.status === 'running' ? entry?.lastToolName : undefined;
+  if (detail) node.sublabel = detail;
+  else if (entry?.label) node.sublabel = undefined;
+  return node;
+}
+
+export function buildWorkflowNode(workflow: WorkflowInput): AgentNode {
+  const started = new Set<string>();
+  const finished = new Set<string>();
+  for (const entry of workflow.journal) {
+    if (!entry.agentId) continue;
+    if (entry.type === 'started') started.add(entry.agentId);
+    if (entry.type === 'result') finished.add(entry.agentId);
+  }
+
+  const manifest = workflow.manifest;
+  const nodes = workflow.agents.map((agent) =>
+    workflowAgentNode(
+      agent,
+      manifest?.agents.get(agent.agentId),
+      started.has(agent.agentId) && !finished.has(agent.agentId),
+    ),
+  );
+
+  const byAgentId = new Map(workflow.agents.map((agent, index) => [agent.agentId, nodes[index] as AgentNode]));
+  const children = groupIntoPhases(byAgentId, manifest) ?? nodes;
+
+  const running = nodes.filter((node) => node.status === 'running').length;
+  const total = Math.max(started.size, workflow.agents.length);
+  const summary = manifest?.logs[0] ?? `${finished.size}/${total} done`;
+
+  return {
+    id: `workflow:${workflow.runId}`,
+    kind: 'workflow',
+    label: manifest?.workflowName ?? workflow.runId,
+    sublabel: clip(summary, 60),
+    status: running > 0 ? 'running' : manifest?.status === 'killed' ? 'error' : 'done',
+    events: [],
+    children,
+  };
+}
+
+function groupIntoPhases(
+  byAgentId: Map<string, AgentNode>,
+  manifest: WorkflowManifest | undefined,
+): AgentNode[] | undefined {
+  if (!manifest || manifest.phases.length < 2) return undefined;
+
+  const buckets = new Map<string, AgentNode[]>();
+  for (const [agentId, node] of byAgentId) {
+    const title = manifest.agents.get(agentId)?.phaseTitle;
+    if (!title) return undefined;
+    const bucket = buckets.get(title);
+    if (bucket) bucket.push(node);
+    else buckets.set(title, [node]);
+  }
+
+  const phases: AgentNode[] = [];
+  for (const title of manifest.phases) {
+    const members = buckets.get(title);
+    if (!members || members.length === 0) continue;
+    const running = members.filter((member) => member.status === 'running').length;
+    const errored = members.filter((member) => member.status === 'error').length;
+    phases.push({
+      id: `phase:${manifest.runId}:${title}`,
+      kind: 'phase',
+      label: title,
+      sublabel: `${members.length} agents${errored > 0 ? ` · ${errored} failed` : ''}`,
+      status: running > 0 ? 'running' : errored > 0 ? 'error' : 'done',
+      events: [],
+      children: members,
+    });
+  }
+
+  return phases.length > 0 ? phases : undefined;
 }

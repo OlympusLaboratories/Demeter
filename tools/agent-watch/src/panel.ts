@@ -106,6 +106,10 @@ export class AgentWatchPanel {
         if (detail) this.post({ type: 'detail', detail });
         return;
       }
+      case 'toggleGroup':
+        this.store.toggleGroup(message.id);
+        this.post({ type: 'state', state: this.store.view(false) });
+        return;
     }
   }
 
@@ -130,7 +134,13 @@ export class AgentWatchPanel {
 <header id="scope">
   <div class="row" id="repos"></div>
   <div class="row" id="worktrees"></div>
-  <div class="row status" id="status"></div>
+  <div class="row status" id="status">
+    <span class="spacer"></span>
+    <button class="chip" id="zoom-out" type="button">−</button>
+    <span id="zoom-level">100%</span>
+    <button class="chip" id="zoom-in" type="button">+</button>
+    <button class="chip" id="fit" type="button">Fit</button>
+  </div>
 </header>
 <main>
   <div id="canvas"><svg id="graph" xmlns="http://www.w3.org/2000/svg"></svg></div>
@@ -179,7 +189,9 @@ header#scope { padding: 8px 12px 4px; border-bottom: 1px solid var(--vscode-pane
 .row.status { color: var(--vscode-descriptionForeground); font-size: 0.8em; gap: 10px; }
 .row.status .dot { color: var(--vscode-charts-green); }
 main { flex: 1; position: relative; overflow: hidden; }
-#canvas { position: absolute; inset: 0; overflow: auto; }
+#canvas { position: absolute; inset: 0; overflow: hidden; cursor: grab; }
+#canvas.grabbing { cursor: grabbing; }
+.row.status .spacer { flex: 1; }
 svg { display: block; }
 .node rect { fill: var(--vscode-editorWidget-background); stroke: var(--vscode-panel-border); stroke-width: 1.5; rx: 6; cursor: pointer; }
 .node.live rect { stroke: var(--vscode-charts-green); stroke-width: 2.5; animation: pulse 1.8s ease-in-out infinite; }
@@ -188,6 +200,7 @@ svg { display: block; }
 .node.running rect { stroke: var(--vscode-charts-blue); stroke-width: 2.5; }
 .node.error rect { stroke: var(--vscode-errorForeground); stroke-width: 2.5; }
 .node text { pointer-events: none; }
+.node.grouped rect { stroke-dasharray: 4 3; fill: transparent; }
 .node .label { fill: var(--vscode-foreground); font-size: 12px; }
 .node .sublabel { fill: var(--vscode-descriptionForeground); font-size: 10.5px; }
 .node .glyph { font-size: 12px; }
@@ -204,6 +217,9 @@ path.edge { fill: none; stroke: var(--vscode-panel-border); stroke-width: 1.5; }
 #modal h2 { margin: 0; font-size: 1em; }
 #modal button { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; }
 #modal-body { overflow: auto; padding: 10px 14px; }
+#modal-body details { margin-top: 4px; }
+#modal-body summary { cursor: pointer; color: var(--vscode-textLink-foreground); font-size: 0.85em; }
+#modal-body details[open] summary { margin-bottom: 4px; }
 .event { border-bottom: 1px solid var(--vscode-panel-border); padding: 6px 0; }
 .event:last-child { border-bottom: none; }
 .event .head { display: flex; gap: 8px; align-items: baseline; }

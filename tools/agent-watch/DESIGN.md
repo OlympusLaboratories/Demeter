@@ -4,8 +4,8 @@ A VS Code extension that opens an editor tab showing, live, what every Claude Co
 session in the current workspace is doing — including the subagents each one spawns,
 whether through the `Agent` tool or a `Workflow` swarm.
 
-Status: **M1 + M2 built** — discovery, graph, detail modal, and live updating.
-M3–M4 outstanding; see §9 and the open questions in §10.
+Status: **M1–M3 built** — discovery, graph, live updating, phase banding, collapsing,
+pan/zoom, and collapsible node detail. M4 outstanding; see §9.
 
 ---
 
@@ -49,6 +49,9 @@ session's working directory with `/` and `.` replaced by `-`
 ~/.claude/projects/<slug>/
   <session-uuid>.jsonl                                  main session transcript
   <session-uuid>/
+    workflows/
+      wf_<runId>.json                                   run manifest — phases, per-agent label + state
+      scripts/<name>-wf_<runId>.js                      script snapshot
     subagents/
       agent-<id>.jsonl                                  Agent-tool subagent transcript
       agent-<id>.meta.json                              { agentType, description, toolUseId, spawnDepth }
@@ -95,6 +98,25 @@ without the extension tracking recursion itself.
 Workflow subagents have no `toolUseId` (they are launched by the harness, not by a
 tool call in the parent transcript); their grouping is the `<runId>` directory, and
 `journal.jsonl` supplies launch and completion events keyed by `agentId`.
+
+### The run manifest is the real structure
+
+`<session>/workflows/wf_<runId>.json` carries a `workflowProgress` array with one row per
+agent, and it is **written during the run**, not only at the end — a killed run's manifest
+shows its Draft phase `done` and its Cross-examine phase mid-flight:
+
+```json
+{"type":"workflow_agent","agentId":"a950f4e4902132002","label":"review:correctness",
+ "phaseIndex":1,"phaseTitle":"Review","state":"done","model":"claude-opus-5",
+ "lastToolName":"StructuredOutput"}
+```
+
+All 57 manifests on this machine carry it, and `agentId` joins 96/96 against the agent
+files of the largest run. This supersedes every heuristic: labels come from `label`
+instead of prompt-sniffing, status from `state` (`done` / `error` / `progress` / `start`)
+instead of inference, and the run's own `logs[0]` is a ready-made summary line
+("review-code: 6 lenses, 30 candidate findings, 0 out-of-scope, 15 confirmed"). The
+journal remains the fallback when a manifest is absent.
 
 ### Liveness
 
@@ -511,15 +533,13 @@ M1–M2 is the point at which it is worth using daily; M3 is the point at which 
 5. **Multi-root workspaces** are now a non-issue: discovery is global (§4), so several
    folders simply mean several repos already present in the switcher, with the first
    folder's repo preselected.
-6. **The fan-out is flat, and that is structural.** The Workflow harness is the parent of
-   every agent it launches, so a two-stage pipeline renders as one wide layer: a real run
-   measured 6 reviewers + (30 findings x 3 skeptics) = 96 siblings. Review -> verify is a
-   data dependency, not a spawn edge, so the graph cannot infer it. Two ways out, not
-   exclusive: band the layer by stage in the view (recoverable today from prompt text —
-   `one reviewer...` vs `skeptic #N...` — but prompt-sniffing is brittle), or have the
-   workflow-authoring skills emit a real stage/parent marker into the journal so the
-   hierarchy is data rather than inference. The second is the durable fix and belongs with
-   the skills, not here. Deferred past M3.
-7. **Modals render everything inline.** Tool commands and their outputs should be
-   collapsed to a one-line summary by default and expand on click; today the full result
-   (to the 2 KB cap) is always in the DOM. Fold into M3.
+6. **~~The fan-out is flat~~ — RESOLVED in M3, and it needed no skill change.** The plan
+   was to have the workflow-authoring skills emit stage markers. They already do:
+   `review-code`, `review-kludge` and `changes-description` all declare `meta.phases` and
+   pass `phase:` + `label:` on every `agent()` call, identically across all three profiles,
+   and the harness persists both into the run manifest. The gap was purely that
+   agent-watch was not reading it. The 96-agent run now bands into Review (6) and
+   Verify (90), and with wide layers collapsed it lays out at 988x1162px instead of
+   988x5936px — 23 nodes instead of 100.
+7. **~~Modals render everything inline~~ — RESOLVED in M3.** Arguments and output are
+   behind `<details>` toggles labelled with their size, collapsed by default.

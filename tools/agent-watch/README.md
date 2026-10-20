@@ -12,16 +12,23 @@ worktree scoping rules, and what is deliberately out of scope.
 
 ## Status
 
-**M1 + M2.** Global discovery, session and subagent enumeration, the graph, a per-node
-detail modal, and **live updating** — transcripts are tailed incrementally and the view
-refreshes itself as agents work. `Agent Watch: Refresh` forces a rescan.
+**M1–M3.** Global discovery, session and subagent enumeration, the graph, **live
+updating** (transcripts are tailed incrementally as agents work), **phase banding** of
+workflow runs, collapsing of wide layers, pan/zoom, and a node detail modal whose
+arguments and output stay collapsed until asked for. `Agent Watch: Refresh` forces a
+rescan.
 
-Outstanding: M3 (node detail collapsing, pan/zoom, wide-fan-out grouping) and M4 (polish).
+Outstanding: M4 (panel restore, reveal-transcript actions, empty states, installer wiring).
 
 ## Use
 
 - `Agent Watch: Open` — opens the graph in an editor tab.
 - `Agent Watch: Refresh` — rescans.
+
+A workflow run bands into its declared phases — a 96-agent `review-code` run reads as
+Review (6) then Verify (90) rather than 96 siblings — and any layer wider than 12
+collapses behind a `+N more` node that says how many are still running. Drag to pan,
+scroll to zoom, `Fit` to reframe.
 
 The top row picks a repo, the second row a worktree within it. The repo for the current
 workspace is preselected, but every repo on the machine is reachable — sessions that ran

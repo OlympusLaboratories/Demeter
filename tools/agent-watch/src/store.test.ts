@@ -157,3 +157,63 @@ describe('watch coverage', () => {
     expect(after).toBe((before ?? 0) + 1);
   });
 });
+
+describe('group expansion', () => {
+  async function wideFixture(): Promise<string> {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-watch-wide-'));
+    temps.push(root);
+    const sessionId = 'cccccccc-1111-2222-3333-444444444444';
+    const dir = path.join(root, 'projects', '-tmp-repo');
+    const subagents = path.join(dir, sessionId, 'subagents');
+    await fs.mkdir(subagents, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, `${sessionId}.jsonl`),
+      `${JSON.stringify({ type: 'user', cwd: '/tmp/repo', message: { content: [] } })}\n`,
+    );
+
+    for (let index = 0; index < 30; index += 1) {
+      await fs.writeFile(
+        path.join(subagents, `agent-a${index}.meta.json`),
+        JSON.stringify({ description: `worker ${index}`, spawnDepth: 1 }),
+      );
+      await fs.writeFile(path.join(subagents, `agent-a${index}.jsonl`), '');
+    }
+    return path.join(root, 'projects');
+  }
+
+  it('collapses a wide layer and expands it on toggle', async () => {
+    const projects = await wideFixture();
+    const store = new Store(settings(projects));
+    await store.discover();
+    await store.loadSelected();
+
+    const collapsed = store.view(false).graph.nodes;
+    const group = collapsed.find((node) => node.id.startsWith('group:'));
+    expect(group).toBeDefined();
+    expect(group?.label).toBe('+18 more');
+
+    store.toggleGroup(group!.id);
+    const expanded = store.view(false).graph.nodes;
+    expect(expanded.length).toBeGreaterThan(collapsed.length);
+    expect(expanded.some((node) => node.id.startsWith('group:'))).toBe(false);
+
+    store.toggleGroup(group!.id);
+    expect(store.view(false).graph.nodes.some((node) => node.id.startsWith('group:'))).toBe(true);
+  });
+
+  it('forgets expansion when the repo changes', async () => {
+    const projects = await wideFixture();
+    const store = new Store(settings(projects));
+    await store.discover();
+    await store.loadSelected();
+
+    const group = store.view(false).graph.nodes.find((node) => node.id.startsWith('group:'));
+    store.toggleGroup(group!.id);
+    expect(store.view(false).graph.nodes.some((node) => node.id.startsWith('group:'))).toBe(false);
+
+    store.selectRepo('something-else');
+    store.selectRepo('-tmp-repo');
+    await store.loadSelected();
+    expect(store.view(false).graph.nodes.some((node) => node.id.startsWith('group:'))).toBe(true);
+  });
+});

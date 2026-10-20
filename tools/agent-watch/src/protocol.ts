@@ -46,4 +46,5 @@ export type ViewMessage =
   | { type: 'refresh' }
   | { type: 'selectRepo'; slug: string }
   | { type: 'selectWorktree'; key: string }
-  | { type: 'selectNode'; id: string };
+  | { type: 'selectNode'; id: string }
+  | { type: 'toggleGroup'; id: string };
