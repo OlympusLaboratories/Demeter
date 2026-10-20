@@ -13,7 +13,9 @@
     "Other"
   ],
   "main": "./dist/extension.js",
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "commands": [
       {
@@ -56,6 +58,23 @@
           "default": 2,
           "minimum": 1,
           "description": "How often to re-stat watched transcripts. This poll is what guarantees updates; native file watching is only an accelerator."
+        },
+        "agentWatch.statusBarPriority": {
+          "type": "number",
+          "default": 110,
+          "description": "Status bar priority. Higher numbers sit further left within the right-hand group. The default clears claude-usage, which spans 50-101 at its own default priority."
+        },
+        "agentWatch.initialDepth": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0,
+          "description": "How many levels below each session are expanded on first render. 0 shows sessions alone; 1 adds their workflow runs and agents. Deeper levels start collapsed and expand on click."
+        },
+        "agentWatch.zoomSensitivity": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0,
+          "description": "Multiplier for scroll-wheel zoom. Lower is gentler; 0 disables wheel zoom and leaves the +/- and Fit controls."
         }
       }
     }

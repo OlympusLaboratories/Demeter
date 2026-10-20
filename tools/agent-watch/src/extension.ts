@@ -11,6 +11,9 @@ function readSettings(): StoreSettings {
     recentDays: config.get<number>('recentDays') ?? 7,
     maxSessionsPerRepo: config.get<number>('maxSessionsPerRepo') ?? 12,
     pollSeconds: config.get<number>('pollSeconds') ?? 2,
+    statusBarPriority: config.get<number>('statusBarPriority') ?? 110,
+    initialDepth: config.get<number>('initialDepth') ?? 1,
+    zoomSensitivity: config.get<number>('zoomSensitivity') ?? 1,
   };
 }
 
@@ -21,6 +24,16 @@ function preferredWorkspacePath(): string | undefined {
 
 export function activate(context: vscode.ExtensionContext): void {
   const store = new Store(readSettings());
+
+  const status = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Right,
+    readSettings().statusBarPriority,
+  );
+  status.text = '$(type-hierarchy) Agents';
+  status.tooltip = 'Agent Watch — show what Claude Code sessions and their agents are doing';
+  status.command = 'agentWatch.open';
+  status.show();
+  context.subscriptions.push(status);
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {

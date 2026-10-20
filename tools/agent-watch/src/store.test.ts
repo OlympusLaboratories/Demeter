@@ -31,6 +31,9 @@ function settings(projects: string): StoreSettings {
     recentDays: 3650,
     maxSessionsPerRepo: 12,
     pollSeconds: 2,
+    statusBarPriority: 110,
+    initialDepth: 1,
+    zoomSensitivity: 1,
   };
 }
 
@@ -158,7 +161,7 @@ describe('watch coverage', () => {
   });
 });
 
-describe('group expansion', () => {
+describe('progressive expansion', () => {
   async function wideFixture(): Promise<string> {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-watch-wide-'));
     temps.push(root);
@@ -170,7 +173,6 @@ describe('group expansion', () => {
       path.join(dir, `${sessionId}.jsonl`),
       `${JSON.stringify({ type: 'user', cwd: '/tmp/repo', message: { content: [] } })}\n`,
     );
-
     for (let index = 0; index < 30; index += 1) {
       await fs.writeFile(
         path.join(subagents, `agent-a${index}.meta.json`),
@@ -181,24 +183,34 @@ describe('group expansion', () => {
     return path.join(root, 'projects');
   }
 
-  it('collapses a wide layer and expands it on toggle', async () => {
+  it('starts a wide layer collapsed and opens it on toggle', async () => {
     const projects = await wideFixture();
     const store = new Store(settings(projects));
     await store.discover();
     await store.loadSelected();
 
     const collapsed = store.view(false).graph.nodes;
-    const group = collapsed.find((node) => node.id.startsWith('group:'));
-    expect(group).toBeDefined();
-    expect(group?.label).toBe('+18 more');
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0]?.expanded).toBe(false);
+    expect(collapsed[0]?.totalChildren).toBe(30);
 
-    store.toggleGroup(group!.id);
+    store.toggleNode(collapsed[0]!.id);
     const expanded = store.view(false).graph.nodes;
-    expect(expanded.length).toBeGreaterThan(collapsed.length);
-    expect(expanded.some((node) => node.id.startsWith('group:'))).toBe(false);
+    expect(expanded).toHaveLength(31);
 
-    store.toggleGroup(group!.id);
-    expect(store.view(false).graph.nodes.some((node) => node.id.startsWith('group:'))).toBe(true);
+    store.toggleNode(collapsed[0]!.id);
+    expect(store.view(false).graph.nodes).toHaveLength(1);
+  });
+
+  it('ignores a toggle on a leaf node', async () => {
+    const { projects } = await fixture();
+    const store = new Store(settings(projects));
+    await store.discover();
+    await store.loadSelected();
+
+    const leaf = store.view(false).graph.nodes[0]!;
+    expect(store.toggleNode(leaf.id)).toBe(false);
+    expect(store.view(false).graph.nodes).toHaveLength(1);
   });
 
   it('forgets expansion when the repo changes', async () => {
@@ -207,35 +219,24 @@ describe('group expansion', () => {
     await store.discover();
     await store.loadSelected();
 
-    const group = store.view(false).graph.nodes.find((node) => node.id.startsWith('group:'));
-    store.toggleGroup(group!.id);
-    expect(store.view(false).graph.nodes.some((node) => node.id.startsWith('group:'))).toBe(false);
+    const id = store.view(false).graph.nodes[0]!.id;
+    store.toggleNode(id);
+    expect(store.view(false).graph.nodes).toHaveLength(31);
 
     store.selectRepo('something-else');
     store.selectRepo('-tmp-repo');
     await store.loadSelected();
-    expect(store.view(false).graph.nodes.some((node) => node.id.startsWith('group:'))).toBe(true);
+    expect(store.view(false).graph.nodes).toHaveLength(1);
   });
-});
 
-describe('transcript lookup', () => {
-  it('maps a session node and each agent node to the file behind it', async () => {
-    const { projects, transcript, subagents } = await fixture();
-    await fs.writeFile(path.join(subagents, 'agent-a9.meta.json'), JSON.stringify({ description: 'w' }));
-    const agentFile = path.join(subagents, 'agent-a9.jsonl');
-    await fs.writeFile(agentFile, '');
-
+  it('reports a scope key that changes with the selected repo and worktree', async () => {
+    const { projects } = await fixture();
     const store = new Store(settings(projects));
     await store.discover();
     await store.loadSelected();
 
-    const nodes = store.view(false).graph.nodes;
-    const sessionNode = nodes.find((node) => node.kind === 'session');
-    const agentNode = nodes.find((node) => node.kind === 'agent');
-
-    expect(store.transcriptFor(sessionNode!.id)).toBe(transcript);
-    expect(store.transcriptFor(agentNode!.id)).toBe(agentFile);
-    expect(store.transcriptFor('nope')).toBeUndefined();
-    expect(store.detail(sessionNode!.id)?.hasTranscript).toBe(true);
+    const before = store.view(false).scopeKey;
+    store.selectRepo('other');
+    expect(store.view(false).scopeKey).not.toBe(before);
   });
 });

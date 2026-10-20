@@ -24,6 +24,7 @@ function stubEvent<T>(): StubEvent<T> {
 }
 
 export const ViewColumn = { Active: -1, Beside: -2, One: 1 } as const;
+export const StatusBarAlignment = { Left: 1, Right: 2 } as const;
 
 export class Uri {
   private constructor(public readonly fsPath: string) {}
@@ -65,7 +66,26 @@ export const commands = {
 
 export const createdPanels: StubPanel[] = [];
 
+export interface StubStatusBarItem {
+  alignment: number | undefined;
+  priority: number | undefined;
+  text: string;
+  tooltip: string | undefined;
+  command: string | undefined;
+  shown: boolean;
+  show(): void;
+  hide(): void;
+  dispose(): void;
+}
+
+export const statusBarItems: StubStatusBarItem[] = [];
+
 export interface StubPanel {
+  visible: boolean;
+  viewColumn: number | undefined;
+  onDidChangeViewState: StubEvent<void>;
+  reveal(column?: number, preserveFocus?: boolean): void;
+  revealCalls: { column?: number; preserveFocus?: boolean }[];
   webview: {
     html: string;
     options: Record<string, unknown>;
@@ -75,7 +95,6 @@ export interface StubPanel {
     onDidReceiveMessage: StubEvent<unknown>;
     posted: unknown[];
   };
-  reveal(): void;
   dispose(): void;
   onDidDispose: StubEvent<void>;
 }
@@ -83,13 +102,42 @@ export interface StubPanel {
 export const registeredSerializers = new Map<string, unknown>();
 
 export const window = {
+  createStatusBarItem(alignment?: number, priority?: number): StubStatusBarItem {
+    const item: StubStatusBarItem = {
+      alignment,
+      priority,
+      text: '',
+      tooltip: undefined,
+      command: undefined,
+      shown: false,
+      show() {
+        this.shown = true;
+      },
+      hide() {
+        this.shown = false;
+      },
+      dispose() {
+        this.shown = false;
+      },
+    };
+    statusBarItems.push(item);
+    return item;
+  },
   registerWebviewPanelSerializer(viewType: string, serializer: unknown) {
     registeredSerializers.set(viewType, serializer);
     return { dispose: () => registeredSerializers.delete(viewType) };
   },
   createWebviewPanel(): StubPanel {
     const posted: unknown[] = [];
+    const revealCalls: { column?: number; preserveFocus?: boolean }[] = [];
     const panel: StubPanel = {
+      visible: true,
+      viewColumn: 1,
+      onDidChangeViewState: stubEvent<void>(),
+      revealCalls,
+      reveal: (column?: number, preserveFocus?: boolean) => {
+        revealCalls.push({ column, preserveFocus });
+      },
       webview: {
         html: '',
         options: {} as Record<string, unknown>,
@@ -102,7 +150,6 @@ export const window = {
         onDidReceiveMessage: stubEvent<unknown>(),
         posted,
       },
-      reveal: () => undefined,
       dispose: () => undefined,
       onDidDispose: stubEvent<void>(),
     };
@@ -124,5 +171,6 @@ export function resetStub(): void {
   registeredCommands.clear();
   registeredSerializers.clear();
   createdPanels.length = 0;
+  statusBarItems.length = 0;
   workspace.workspaceFolders = undefined;
 }

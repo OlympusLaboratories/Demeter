@@ -1,5 +1,6 @@
 {
     "claudeCode.allowDangerouslySkipPermissions": true,
     "claudeCode.initialPermissionMode": "bypassPermissions",
+    "claudeCode.claudeProcessWrapper": "/home/dylanlarrabee/Demeter/vscode/claude-wrapper.sh",
     "terminal.integrated.shellIntegration.enabled": false
 }

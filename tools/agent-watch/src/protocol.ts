@@ -23,7 +23,6 @@ export interface NodeDetail {
   label: string;
   sublabel?: string;
   events: AgentEvent[];
-  hasTranscript: boolean;
 }
 
 export interface ViewState {
@@ -37,6 +36,8 @@ export interface ViewState {
   watchedCount: number;
   updatedAtMs: number;
   recentDays: number;
+  scopeKey: string;
+  zoomSensitivity: number;
 }
 
 export type HostMessage =
@@ -50,6 +51,5 @@ export type ViewMessage =
   | { type: 'selectRepo'; slug: string }
   | { type: 'selectWorktree'; key: string }
   | { type: 'selectNode'; id: string }
-  | { type: 'toggleGroup'; id: string }
-  | { type: 'closeDetail' }
-  | { type: 'revealTranscript'; id: string };
+  | { type: 'toggleNode'; id: string }
+  | { type: 'closeDetail' };

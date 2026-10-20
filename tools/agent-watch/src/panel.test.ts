@@ -30,6 +30,9 @@ function store(projects: string): Store {
     recentDays: 3650,
     maxSessionsPerRepo: 12,
     pollSeconds: 2,
+    statusBarPriority: 110,
+    initialDepth: 1,
+    zoomSensitivity: 1,
   });
 }
 
@@ -192,5 +195,60 @@ describe('live detail', () => {
     await new Promise((resolve) => setImmediate(resolve));
     await panel.refresh();
     expect(states(stub).filter((m) => m.type === 'detail').length).toBeGreaterThan(0);
+  });
+});
+
+describe('resource use', () => {
+  it('polls only while the tab is visible', async () => {
+    const projects = await fixtureProjects();
+    const panel = AgentWatchPanel.show(context(), store(projects));
+    await panel.refresh();
+
+    const stub = createdPanels[0]!;
+    const posted = () => states(stub).filter((m) => m.type === 'state').length;
+
+    stub.visible = false;
+    stub.onDidChangeViewState.fire();
+    await new Promise((resolve) => setImmediate(resolve));
+    const whileHidden = posted();
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(posted()).toBe(whileHidden);
+
+    stub.visible = true;
+    stub.onDidChangeViewState.fire();
+    for (let tick = 0; tick < 50 && posted() === whileHidden; tick += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(posted()).toBeGreaterThan(whileHidden);
+  });
+
+  it('reveals the existing tab instead of opening a second one', async () => {
+    const projects = await fixtureProjects();
+    const ctx = context();
+    const shared = store(projects);
+
+    const first = AgentWatchPanel.show(ctx, shared);
+    await first.refresh();
+    const second = AgentWatchPanel.show(ctx, shared);
+
+    expect(createdPanels).toHaveLength(1);
+    expect(second).toBe(first);
+    const reveal = createdPanels[0]!.revealCalls.at(-1);
+    expect(reveal?.column).toBe(1);
+    expect(reveal?.preserveFocus).toBe(false);
+  });
+
+  it('stops polling entirely once the tab is closed', async () => {
+    const projects = await fixtureProjects();
+    const panel = AgentWatchPanel.show(context(), store(projects));
+    await panel.refresh();
+
+    const stub = createdPanels[0]!;
+    stub.onDidDispose.fire();
+    const before = states(stub).length;
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(states(stub).length).toBe(before);
   });
 });

@@ -9,7 +9,7 @@ function node(id: string, children: AgentNode[] = []): AgentNode {
 describe('layoutTree', () => {
   it('places depth on the horizontal axis so wide fan-outs scroll vertically', () => {
     const wide = node('root', Array.from({ length: 27 }, (_unused, index) => node(`child-${index}`)));
-    const layout = layoutTree(wide, { groupThreshold: 1000 });
+    const layout = layoutTree(wide, { autoCollapseThreshold: 1000, initialDepth: 99 });
 
     expect(layout.nodes).toHaveLength(28);
     const root = layout.nodes.find((candidate) => candidate.id === 'root');
@@ -54,48 +54,133 @@ describe('layoutForest', () => {
   });
 });
 
-describe('wide fan-out collapsing', () => {
+describe('progressive expansion', () => {
   function wide(count: number): AgentNode {
     return node('phase', Array.from({ length: count }, (_u, index) => node(`agent-${index}`)));
   }
 
-  it('replaces the tail of a wide layer with one counted group node', () => {
-    const layout = layoutTree(wide(90), { groupThreshold: 12 });
-    const children = layout.nodes.filter((positioned) => positioned.id !== 'phase');
+  it('hides the children of a layer wider than the threshold, and says how many', () => {
+    const layout = layoutTree(wide(90), { autoCollapseThreshold: 12, initialDepth: 99 });
 
-    expect(children).toHaveLength(13);
-    const group = children.find((child) => child.id.startsWith('group:'));
-    expect(group?.label).toBe('+78 more');
-    expect(group?.group?.parentId).toBe('phase');
+    expect(layout.nodes).toHaveLength(1);
+    const phase = layout.nodes[0];
+    expect(phase?.expanded).toBe(false);
+    expect(phase?.hiddenChildren).toBe(90);
+    expect(phase?.totalChildren).toBe(90);
   });
 
-  it('shows every child once its parent is expanded', () => {
-    const layout = layoutTree(wide(90), { groupThreshold: 12, expanded: new Set(['phase']) });
+  it('expands that layer when explicitly overridden', () => {
+    const layout = layoutTree(wide(90), {
+      autoCollapseThreshold: 12,
+      initialDepth: 99,
+      overrides: new Map([['phase', true]]),
+    });
+
     expect(layout.nodes).toHaveLength(91);
-    expect(layout.nodes.some((positioned) => positioned.id.startsWith('group:'))).toBe(false);
+    expect(layout.nodes[0]?.expanded).toBe(true);
+    expect(layout.nodes[0]?.hiddenChildren).toBe(0);
   });
 
-  it('leaves a layer at or under the threshold untouched', () => {
-    const layout = layoutTree(wide(12), { groupThreshold: 12 });
-    expect(layout.nodes).toHaveLength(13);
-    expect(layout.nodes.some((positioned) => positioned.id.startsWith('group:'))).toBe(false);
+  it('collapses a narrow layer when explicitly overridden shut', () => {
+    const layout = layoutTree(wide(3), {
+      autoCollapseThreshold: 12,
+      initialDepth: 99,
+      overrides: new Map([['phase', false]]),
+    });
+
+    expect(layout.nodes).toHaveLength(1);
+    expect(layout.nodes[0]?.hiddenChildren).toBe(3);
   });
 
-  it('surfaces running work in the collapsed group so it is never hidden silently', () => {
-    const children = Array.from({ length: 30 }, (_u, index) => node(`agent-${index}`));
-    children[20] = { ...children[20]!, status: 'running' };
-    const layout = layoutTree(node('phase', children), { groupThreshold: 5 });
-    const group = layout.nodes.find((positioned) => positioned.id.startsWith('group:'));
-
-    expect(group?.sublabel).toBe('1 running');
-    expect(group?.status).toBe('running');
+  it('leaves a narrow layer open by default', () => {
+    const layout = layoutTree(wide(5), { autoCollapseThreshold: 12, initialDepth: 99 });
+    expect(layout.nodes).toHaveLength(6);
+    expect(layout.nodes[0]?.expanded).toBe(true);
   });
 
-  it('cuts a 96-agent run down to a scrollable height', () => {
-    const run = node('workflow', [node('Review', Array.from({ length: 6 }, (_u, i) => node(`r${i}`))), node('Verify', Array.from({ length: 90 }, (_u, i) => node(`v${i}`)))]);
-    const collapsed = layoutTree(run, { groupThreshold: 12 });
-    const full = layoutTree(run, { groupThreshold: 1000 });
+  it('reports zero children for a leaf and treats it as expanded', () => {
+    const layout = layoutTree(node('leaf'));
+    expect(layout.nodes[0]?.totalChildren).toBe(0);
+    expect(layout.nodes[0]?.expanded).toBe(true);
+    expect(layout.nodes[0]?.hiddenChildren).toBe(0);
+  });
 
-    expect(collapsed.height).toBeLessThan(full.height / 3);
+  it('lets a 96-agent run open one phase at a time', () => {
+    const run = node('workflow', [
+      node('Review', Array.from({ length: 6 }, (_u, i) => node(`r${i}`))),
+      node('Verify', Array.from({ length: 90 }, (_u, i) => node(`v${i}`))),
+    ]);
+
+    const shut = layoutTree(run, { autoCollapseThreshold: 12, initialDepth: 99 });
+    expect(shut.nodes.find((n) => n.id === 'Review')?.expanded).toBe(true);
+    expect(shut.nodes.find((n) => n.id === 'Verify')?.expanded).toBe(false);
+    expect(shut.nodes.find((n) => n.id === 'Verify')?.hiddenChildren).toBe(90);
+    expect(shut.nodes).toHaveLength(9);
+
+    const opened = layoutTree(run, {
+      autoCollapseThreshold: 12,
+      initialDepth: 99,
+      overrides: new Map([['Verify', true]]),
+    });
+    expect(opened.nodes).toHaveLength(99);
+    expect(opened.height).toBeGreaterThan(shut.height * 3);
+  });
+});
+
+describe('initial depth', () => {
+  function run(): AgentNode {
+    return node('session', [
+      node('workflow', [
+        node('Review', [node('r0'), node('r1')]),
+        node('Verify', [node('v0'), node('v1')]),
+      ]),
+    ]);
+  }
+
+  it('shows sessions and one level below them by default', () => {
+    const layout = layoutForest([run()]);
+    expect(layout.nodes.map((positioned) => positioned.id)).toEqual(['session', 'workflow']);
+    expect(layout.nodes.find((positioned) => positioned.id === 'workflow')?.expanded).toBe(false);
+    expect(layout.nodes.find((positioned) => positioned.id === 'workflow')?.hiddenChildren).toBe(2);
+  });
+
+  it('shows sessions alone at depth 0', () => {
+    const layout = layoutForest([run()], { initialDepth: 0 });
+    expect(layout.nodes.map((positioned) => positioned.id)).toEqual(['session']);
+    expect(layout.nodes[0]?.hiddenChildren).toBe(1);
+  });
+
+  it('opens one branch at a time without disturbing its siblings', () => {
+    const layout = layoutForest([run()], { overrides: new Map([['workflow', true]]) });
+    expect(layout.nodes.map((positioned) => positioned.id)).toEqual([
+      'session',
+      'workflow',
+      'Review',
+      'Verify',
+    ]);
+    expect(layout.nodes.find((positioned) => positioned.id === 'Review')?.expanded).toBe(false);
+  });
+
+  it('keeps a deep layout small enough to read without zooming out', () => {
+    const wide = node('session', [
+      node('workflow', Array.from({ length: 8 }, (_u, index) =>
+        node(`phase-${index}`, Array.from({ length: 40 }, (_v, inner) => node(`a-${index}-${inner}`))),
+      )),
+    ]);
+
+    const initial = layoutForest([wide]);
+    const everything = layoutForest([wide], { initialDepth: 99, autoCollapseThreshold: 1000 });
+
+    expect(initial.nodes).toHaveLength(2);
+    expect(everything.nodes.length).toBeGreaterThan(300);
+    expect(initial.height).toBeLessThan(everything.height / 50);
+  });
+
+  it('still lets an explicit override win over the depth rule', () => {
+    const layout = layoutForest([run()], {
+      initialDepth: 0,
+      overrides: new Map([['session', true]]),
+    });
+    expect(layout.nodes.map((positioned) => positioned.id)).toEqual(['session', 'workflow']);
   });
 });

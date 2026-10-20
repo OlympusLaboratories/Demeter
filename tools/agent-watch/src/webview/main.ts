@@ -1,7 +1,17 @@
 import { NODE_HEIGHT, NODE_WIDTH } from '../graphLayout';
+import {
+  GLYPH_X,
+  LABEL_BASELINE,
+  SUBLABEL_BASELINE,
+  TEXT_X,
+  badgeBox,
+  labelCapacity,
+  sublabelCapacity,
+} from '../nodeChrome';
 import type { GraphLayout } from '../graphLayout';
 import type { AgentEvent, NodeStatus } from '../model';
 import type { HostMessage, NodeDetail, ViewMessage, ViewState } from '../protocol';
+import { clampZoom, zoomFactorFor } from '../zoom';
 
 declare function acquireVsCodeApi(): { postMessage(message: ViewMessage): void };
 
@@ -66,6 +76,8 @@ interface Viewport {
 const view: Viewport = { k: 1, tx: 0, ty: 0 };
 let lastLayout: GraphLayout = { nodes: [], edges: [], width: 0, height: 0 };
 let userAdjusted = false;
+let lastShape = '';
+let zoomSensitivity = 1;
 
 function applyTransform(): void {
   const root = document.getElementById('viewport');
@@ -81,10 +93,12 @@ function fitToView(): void {
   const height = lastLayout.height + pad * 2;
   if (width <= 0 || height <= 0) return;
 
+  const MIN_READABLE = 0.55;
   const scale = Math.min(canvas.clientWidth / width, canvas.clientHeight / height, 1);
-  view.k = Math.max(0.1, scale);
-  view.tx = pad * view.k + (canvas.clientWidth - width * view.k) / 2;
-  view.ty = pad * view.k;
+  view.k = Math.max(MIN_READABLE, scale);
+  const scaledWidth = width * view.k;
+  view.tx = scaledWidth < canvas.clientWidth ? (canvas.clientWidth - scaledWidth) / 2 : pad;
+  view.ty = pad;
   userAdjusted = false;
   applyTransform();
 }
@@ -94,7 +108,8 @@ function zoomAt(factor: number, clientX: number, clientY: number): void {
   const rect = canvas.getBoundingClientRect();
   const x = clientX - rect.left;
   const y = clientY - rect.top;
-  const next = Math.min(4, Math.max(0.1, view.k * factor));
+  const next = clampZoom(view.k * factor);
+  if (next === view.k) return;
   view.tx = x - ((x - view.tx) / view.k) * next;
   view.ty = y - ((y - view.ty) / view.k) * next;
   view.k = next;
@@ -126,10 +141,23 @@ function wireViewport(): void {
     dragging = false;
     canvas.classList.remove('grabbing');
   });
-  canvas.addEventListener('wheel', (event) => {
-    event.preventDefault();
-    zoomAt(event.deltaY < 0 ? 1.12 : 1 / 1.12, event.clientX, event.clientY);
-  });
+  canvas.addEventListener(
+    'wheel',
+    (event) => {
+      event.preventDefault();
+      const factor = zoomFactorFor(
+        {
+          deltaY: event.deltaY,
+          deltaMode: event.deltaMode,
+          ctrlKey: event.ctrlKey,
+          pageHeight: canvas.clientHeight,
+        },
+        zoomSensitivity,
+      );
+      if (factor !== 1) zoomAt(factor, event.clientX, event.clientY);
+    },
+    { passive: false },
+  );
 
   byId('fit').addEventListener('click', () => fitToView());
   byId('zoom-in').addEventListener('click', () => {
@@ -180,6 +208,7 @@ function renderGraph(state: ViewState): void {
             ? `No sessions in the last ${state.recentDays} days for this repo.`
             : 'No sessions in this worktree.';
     lastLayout = state.graph;
+    lastShape = '';
     return;
   }
 
@@ -204,8 +233,7 @@ function renderGraph(state: ViewState): void {
 
   for (const node of state.graph.nodes) {
     const group = svgEl('g');
-    const isGroup = node.group !== undefined;
-    group.setAttribute('class', `node ${node.status}${isGroup ? ' grouped' : ''}`);
+    group.setAttribute('class', `node ${node.status}${node.expanded ? '' : ' collapsed'}`);
     group.setAttribute('transform', `translate(${node.x + pad},${node.y + pad})`);
 
     const rect = svgEl('rect');
@@ -215,38 +243,75 @@ function renderGraph(state: ViewState): void {
 
     const glyph = svgEl('text');
     glyph.setAttribute('class', 'glyph');
-    glyph.setAttribute('x', '10');
-    glyph.setAttribute('y', '19');
+    glyph.setAttribute('x', String(GLYPH_X));
+    glyph.setAttribute('y', String(LABEL_BASELINE));
     glyph.textContent = GLYPHS[node.status];
     group.append(glyph);
 
     const label = svgEl('text');
     label.setAttribute('class', 'label');
-    label.setAttribute('x', '26');
-    label.setAttribute('y', '19');
-    label.textContent = truncate(node.label, 22);
+    label.setAttribute('x', String(TEXT_X));
+    label.setAttribute('y', String(LABEL_BASELINE));
+    label.textContent = truncate(node.label, labelCapacity(node.totalChildren > 0));
     group.append(label);
 
     const sub = svgEl('text');
     sub.setAttribute('class', 'sublabel');
-    sub.setAttribute('x', '26');
-    sub.setAttribute('y', '34');
+    sub.setAttribute('x', String(TEXT_X));
+    sub.setAttribute('y', String(SUBLABEL_BASELINE));
     const counts = node.childCount > 0 ? `${node.childCount} agents` : `${node.eventCount} events`;
-    sub.textContent = truncate(node.sublabel ? `${node.sublabel} · ${counts}` : counts, 26);
+    sub.textContent = truncate(
+      node.sublabel ? `${node.sublabel} · ${counts}` : counts,
+      sublabelCapacity(node.totalChildren > 0),
+    );
     group.append(sub);
 
     const title = svgEl('title');
     title.textContent = node.sublabel ? `${node.label}\n${node.sublabel}` : node.label;
     group.append(title);
 
-    group.addEventListener('click', () => {
-      if (node.group) vscode.postMessage({ type: 'toggleGroup', id: node.id });
-      else vscode.postMessage({ type: 'selectNode', id: node.id });
-    });
+    if (node.totalChildren > 0) {
+      const box = badgeBox();
+      const badge = svgEl('g');
+      badge.setAttribute('class', 'badge');
+      badge.setAttribute('transform', `translate(${box.x},${box.y})`);
+
+      const pill = svgEl('rect');
+      pill.setAttribute('width', String(box.width));
+      pill.setAttribute('height', String(box.height));
+      pill.setAttribute('rx', String(box.height / 2));
+      badge.append(pill);
+
+      const count = svgEl('text');
+      count.setAttribute('x', String(box.width / 2));
+      count.setAttribute('y', String(box.height - 4));
+      count.setAttribute('text-anchor', 'middle');
+      count.textContent = `${node.expanded ? '▾' : '▸'}${node.totalChildren}`;
+      badge.append(count);
+
+      const hint = svgEl('title');
+      hint.textContent = node.expanded
+        ? `Collapse ${node.totalChildren} children`
+        : `Expand ${node.totalChildren} children`;
+      badge.append(hint);
+
+      badge.addEventListener('click', (event) => {
+        event.stopPropagation();
+        vscode.postMessage({ type: 'toggleNode', id: node.id });
+      });
+      group.append(badge);
+    }
+
+    group.addEventListener('click', () => vscode.postMessage({ type: 'selectNode', id: node.id }));
     viewport.append(group);
   }
 
   lastLayout = state.graph;
+  const shape = `${state.scopeKey}|${state.graph.nodes.length}|${Math.round(state.graph.width)}x${Math.round(state.graph.height)}`;
+  if (shape !== lastShape) {
+    lastShape = shape;
+    userAdjusted = false;
+  }
   if (!userAdjusted) fitToView();
   else applyTransform();
 }
@@ -277,7 +342,6 @@ function renderDetail(detail: NodeDetail, refreshed: boolean): void {
   openDetailId = detail.id;
 
   byId('modal-title').textContent = detail.sublabel ? `${detail.label} — ${detail.sublabel}` : detail.label;
-  byId('reveal').classList.toggle('hidden', !detail.hasTranscript);
 
   const open = new Set<number>();
   if (isSameNode) {
@@ -316,16 +380,14 @@ function renderEvent(event: AgentEvent, index: number, open: ReadonlySet<number>
     head.append(el('span', 'tool', event.name ?? 'tool'));
     if (event.summary) head.append(el('span', 'summary', event.summary));
   } else if (event.kind === 'thinking') {
-    head.append(el('span', 'tool', 'thinking'));
-    head.append(
-      el('span', 'summary', event.text ? '' : `${event.thinkingChars ?? 0} chars withheld by the API`),
-    );
+    head.append(el('span', 'tool', 'thought'));
+    if (!event.text) head.append(el('span', 'summary muted', 'not recorded'));
   } else {
     head.append(el('span', 'tool', 'said'));
   }
   wrapper.append(head);
 
-  const panels: { label: string; body: string }[] = [];
+  const panels: { label: string; body: string; openByDefault?: boolean }[] = [];
   if (event.kind === 'tool') {
     if (event.detail) panels.push({ label: 'arguments', body: event.detail });
     if (event.result) {
@@ -335,13 +397,17 @@ function renderEvent(event: AgentEvent, index: number, open: ReadonlySet<number>
       });
     }
   } else if (event.text) {
-    panels.push({ label: event.kind === 'thinking' ? 'summary' : 'text', body: event.text });
+    panels.push({
+      label: event.kind === 'thinking' ? 'summary' : 'text',
+      body: event.text,
+      openByDefault: event.kind === 'text',
+    });
   }
 
   for (const panel of panels) {
     const details = el('details');
     details.dataset['index'] = String(index);
-    if (open.has(index)) details.open = true;
+    details.open = open.has(index) || panel.openByDefault === true;
     const summary = el('summary', undefined, `${panel.label} · ${lineCount(panel.body)}`);
     const pre = el('pre');
     pre.textContent = panel.body;
@@ -366,9 +432,6 @@ function wire(): void {
     if (event.key === 'Escape' && !byId('overlay').classList.contains('hidden')) closeDetail();
   });
   byId('jump').addEventListener('click', () => scrollToLatest());
-  byId('reveal').addEventListener('click', () => {
-    if (openDetailId) vscode.postMessage({ type: 'revealTranscript', id: openDetailId });
-  });
   byId('modal-body').addEventListener('scroll', () => {
     const body = byId('modal-body');
     following = atBottom(body);
@@ -378,6 +441,7 @@ function wire(): void {
   window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
     const message = event.data;
     if (message.type === 'state') {
+      zoomSensitivity = message.state.zoomSensitivity;
       renderScope(message.state);
       renderStatus(message.state);
       renderGraph(message.state);

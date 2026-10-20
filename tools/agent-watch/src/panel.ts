@@ -27,9 +27,10 @@ export class AgentWatchPanel {
 
   static show(context: vscode.ExtensionContext, store: Store, preferredPath?: string): AgentWatchPanel {
     if (AgentWatchPanel.current) {
-      AgentWatchPanel.current.panel.reveal(vscode.ViewColumn.Active);
-      void AgentWatchPanel.current.refresh(preferredPath);
-      return AgentWatchPanel.current;
+      const existing = AgentWatchPanel.current;
+      existing.panel.reveal(existing.panel.viewColumn, false);
+      void existing.refresh(preferredPath);
+      return existing;
     }
 
     const panel = vscode.window.createWebviewPanel(
@@ -66,6 +67,11 @@ export class AgentWatchPanel {
       void this.reload();
     }, 300);
     this.panel.onDidDispose(() => this.dispose(), undefined, this.disposables);
+    this.panel.onDidChangeViewState(
+      () => this.syncWatcherToVisibility(),
+      undefined,
+      this.disposables,
+    );
     this.panel.webview.onDidReceiveMessage(
       (message: ViewMessage) => {
         void this.handle(message);
@@ -73,6 +79,18 @@ export class AgentWatchPanel {
       undefined,
       this.disposables,
     );
+  }
+
+  private syncWatcherToVisibility(): void {
+    if (!this.watcher) return;
+    if (this.panel.visible) {
+      if (!this.watcher.polling) {
+        this.watcher.start();
+        void this.reload();
+      }
+      return;
+    }
+    this.watcher.stop();
   }
 
   async refresh(preferredPath?: string): Promise<void> {
@@ -93,7 +111,8 @@ export class AgentWatchPanel {
         await this.store.discover(this.preferredPath);
         await this.store.loadSelected();
         await this.watcher?.setTargets(this.store.watchTargets());
-        this.watcher?.start();
+        if (this.panel.visible) this.watcher?.start();
+        else this.watcher?.stop();
         this.postState(false);
       } while (this.queued);
     } catch (error) {
@@ -131,13 +150,8 @@ export class AgentWatchPanel {
       case 'closeDetail':
         this.openNodeId = undefined;
         return;
-      case 'revealTranscript': {
-        const target = this.store.transcriptFor(message.id);
-        if (target) await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(target));
-        return;
-      }
-      case 'toggleGroup':
-        this.store.toggleGroup(message.id);
+      case 'toggleNode':
+        this.store.toggleNode(message.id);
         this.postState(false);
         return;
     }
@@ -191,10 +205,7 @@ export class AgentWatchPanel {
   <section id="modal">
     <header>
       <h2 id="modal-title"></h2>
-      <div class="actions">
-        <button id="reveal" class="hidden" type="button">Reveal transcript</button>
-        <button id="modal-close" type="button">Close</button>
-      </div>
+      <button id="modal-close" type="button">Close</button>
     </header>
     <div id="modal-body"></div>
     <button id="jump" class="hidden" type="button">↓ Jump to latest</button>
@@ -248,7 +259,11 @@ svg { display: block; }
 .node.running rect { stroke: var(--vscode-charts-blue); stroke-width: 2.5; }
 .node.error rect { stroke: var(--vscode-errorForeground); stroke-width: 2.5; }
 .node text { pointer-events: none; }
-.node.grouped rect { stroke-dasharray: 4 3; fill: transparent; }
+.node.collapsed rect { stroke-dasharray: 5 3; }
+.node .badge { cursor: pointer; }
+.node .badge rect { fill: var(--vscode-badge-background); stroke: none; }
+.node .badge text { fill: var(--vscode-badge-foreground); font-size: 11px; }
+.node .badge:hover rect { fill: var(--vscode-button-background); }
 .node .label { fill: var(--vscode-foreground); font-size: 12px; }
 .node .sublabel { fill: var(--vscode-descriptionForeground); font-size: 10.5px; }
 .node .glyph { font-size: 12px; }
@@ -261,7 +276,6 @@ path.edge { fill: none; stroke: var(--vscode-panel-border); stroke-width: 1.5; }
 .hidden { display: none !important; }
 #overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 10; }
 #modal { background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-panel-border); border-radius: 8px; width: min(820px, 92vw); max-height: 82vh; display: flex; flex-direction: column; position: relative; }
-#modal .actions { display: flex; gap: 6px; }
 #jump { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 5px 12px; border-radius: 999px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.35); }
 #modal header { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--vscode-panel-border); }
 #modal h2 { margin: 0; font-size: 1em; }
@@ -275,6 +289,7 @@ path.edge { fill: none; stroke: var(--vscode-panel-border); stroke-width: 1.5; }
 .event .head { display: flex; gap: 8px; align-items: baseline; }
 .event .tool { font-weight: 600; }
 .event .summary { color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+.event .summary.muted { opacity: 0.6; font-style: italic; }
 .event pre { background: var(--vscode-textCodeBlock-background); padding: 6px 8px; border-radius: 4px; overflow-x: auto; margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .event.thinking .summary { font-style: italic; }
 .event.err .tool { color: var(--vscode-errorForeground); }

@@ -185,3 +185,50 @@ describe('append detection', () => {
     watcher.dispose();
   });
 });
+
+describe('pausing', () => {
+  it('stops polling on stop and resumes on start, without stacking timers', async () => {
+    const dir = await tempDir();
+    let opened = 0;
+    let closed = 0;
+    const watcher = new PathWatcher(() => undefined, {
+      pollMs: 10_000,
+      watchFactory: () => {
+        opened += 1;
+        return { close: () => { closed += 1; } };
+      },
+    });
+    await watcher.setTargets([dir]);
+    expect(watcher.polling).toBe(false);
+
+    watcher.start();
+    watcher.start();
+    watcher.start();
+    expect(watcher.polling).toBe(true);
+
+    watcher.stop();
+    expect(watcher.polling).toBe(false);
+    expect(closed).toBe(opened);
+
+    watcher.start();
+    expect(watcher.polling).toBe(true);
+    watcher.dispose();
+    expect(watcher.polling).toBe(false);
+  });
+
+  it('keeps its baseline across a pause so nothing is missed while stopped', async () => {
+    const dir = await tempDir();
+    const file = path.join(dir, 'a.jsonl');
+    await fs.writeFile(file, 'one\n');
+
+    const watcher = new PathWatcher(() => undefined, { watchFactory: () => ({ close: () => undefined }) });
+    await watcher.setTargets([file]);
+    watcher.start();
+    watcher.stop();
+
+    await fs.appendFile(file, 'two\n');
+    expect(await watcher.poll()).toBe(true);
+
+    watcher.dispose();
+  });
+});

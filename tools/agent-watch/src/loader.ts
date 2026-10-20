@@ -29,7 +29,6 @@ export interface LoadedSession {
   branch?: string;
   tree: AgentNode;
   watchPaths: string[];
-  transcriptsByNodeId: Map<string, string>;
 }
 
 async function readText(filePath: string): Promise<string> {
@@ -134,16 +133,6 @@ export async function loadSession(session: SessionFile, options: LoadOptions): P
     nowMs: options.nowMs,
   });
 
-  const transcriptsByNodeId = new Map<string, string>();
-  for (const agent of subagents) {
-    if (agent.transcriptPath) transcriptsByNodeId.set(`agent:${agent.agentId}`, agent.transcriptPath);
-  }
-  for (const workflow of workflows) {
-    for (const agent of workflow.agents) {
-      if (agent.transcriptPath) transcriptsByNodeId.set(`agent:${agent.agentId}`, agent.transcriptPath);
-    }
-  }
-
   const watchPaths = [session.transcriptPath, subagentsDir];
   for (const agent of subagents) {
     if (agent.transcriptPath) watchPaths.push(agent.transcriptPath);
@@ -164,6 +153,5 @@ export async function loadSession(session: SessionFile, options: LoadOptions): P
     branch: latestBranch(lines),
     tree,
     watchPaths,
-    transcriptsByNodeId,
   };
 }

@@ -453,6 +453,48 @@ By default it borrows the login Claude Code already has: the `Claude Code-creden
 
 Installed the same way as any tool here, and configurable down to the bar glyphs. See [tools/claude-usage/README.md](tools/claude-usage/README.md) for the full settings table and the copy-paste sign-in fallback.
 
+### Agent Watch Extension
+
+`tools/agent-watch/` renders every Claude Code session on the machine — and the agents
+each one spawns — as a live node-and-edge graph in an editor tab. It reads the JSONL
+transcripts under `~/.claude/projects` and never writes to them. See its `README.md` and
+`DESIGN.md` for the data model and the worktree scoping rules.
+
+#### Seeing what agents were thinking (opt-in)
+
+Thinking blocks are empty on disk by default: the API returns them that way, because
+`thinking.display` defaults to `"omitted"`. agent-watch renders those as `thought · not
+recorded` rather than inventing content.
+
+`vscode/claude-wrapper.sh` launches Claude Code with `--thinking-display summarized`,
+which makes the API return a readable summary of the reasoning that then persists to the
+transcript and shows up in agent-watch. It resolves the binary the editor would have used
+(newest `anthropic.claude-code-*` extension bundle, else `claude` on PATH), **probes the
+flag before using it**, and launches normally if the installed build does not accept it —
+the flag is undocumented and its accepted values already changed between 2.1.250 and
+2.1.304.
+
+It is **enabled**, via `claudeCode.claudeProcessWrapper`. That setting is declared
+`"scope": "machine"` by the Claude Code extension, which is what makes this safe to commit:
+machine-scoped settings are never synced between machines, and over Remote-SSH they are
+read from the **remote** machine rather than the client. So each machine gets its own
+correct absolute path:
+
+| Machine | File | Value |
+|---|---|---|
+| macOS | `vscode/settings.json` | `/Users/dylanlarrabee/Demeter/vscode/claude-wrapper.sh` |
+| Linux / rdev | `vscode/machine-settings.json` → `~/.vscode-server/data/Machine/settings.json` | `/home/dylanlarrabee/Demeter/vscode/claude-wrapper.sh` |
+
+Get the path wrong and **Claude Code does not launch at all** in the editor — a far worse
+failure than the other machine-specific absolute path in that file
+(`claudemeter.debugLogFile`, where a wrong value merely costs a log). If the repo ever
+moves, update both values. Delete the line on either side to revert that machine.
+
+The flag applies to Claude Code sessions started after the change; existing sessions keep
+the display mode they launched with.
+
+The raw chain of thought is never available on any model; `summarized` is the ceiling.
+
 ### Worktree Sync Extension
 
 `tools/worktree-sync/` is a VS Code extension that keeps the active **Claude Code tab** and the active **terminal** on the same worktree in both directions, so you can't type a prompt into one worktree's session while running commands in another. It is shared by every profile.

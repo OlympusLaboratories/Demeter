@@ -4,8 +4,8 @@ A VS Code extension that opens an editor tab showing, live, what every Claude Co
 session in the current workspace is doing — including the subagents each one spawns,
 whether through the `Agent` tool or a `Workflow` swarm.
 
-Status: **M1–M4 built.** Discovery, graph, live updating, phase banding, collapsing,
-pan/zoom, live-following node detail, panel restore, and reveal-transcript.
+Status: **M1–M4 built**, plus a polish pass: progressive expansion, viewport refit on
+scope change, default-open prose, and honest thinking markers.
 
 ---
 
@@ -333,13 +333,41 @@ wide, and how deep the nesting went.
   results, text output, and thinking summary when present. The modal is where "a lot of
   information" lives, keeping the graph itself scannable — which is the whole point of
   choosing a graph over nested line items.
-- **Pan and zoom**, with "fit to view" and "focus live" controls. A 27-node fan-out does
-  not fit a default viewport.
-- **Wide fan-out collapses.** A node with more than ~12 children renders them as a stacked
-  group with a count badge that expands in place, so one big swarm cannot push everything
-  else off screen.
+- **Pan and zoom**, with a `Fit` control. The viewport refits automatically whenever the
+  graph's *shape* changes — scope key plus node count plus dimensions — because a zoom
+  level chosen for a 96-node run leaves a single-node session off-screen on an apparently
+  blank canvas. Manual pan/zoom is preserved within a shape, and discarded when it changes.
+- **The graph opens collapsed, by depth.** Width was the wrong rule: with every layer under
+  the 12-child threshold, a real `gridmatic-dev` view expanded to **33 nodes at
+  988x1348px**, which fit-to-view then shrank below readability. Depth is what controls
+  size. `initialDepth` (default 1) expands each session and one level below it; the same
+  view now opens at **3 nodes, 456x108px**, at full zoom. The width rule still applies
+  within an expanded level.
+- **Every node with children carries a count badge** (`▸90` / `▾90`) that expands or
+  collapses that branch in place. Clicking the badge toggles; clicking the node body opens
+  its detail. An explicit toggle always beats both default rules. The badge sits in the
+  top-right corner, clear of the sublabel row — it was first placed vertically centred,
+  where it sat directly on top of the second line of text. Its geometry and the resulting
+  text capacities live in `nodeChrome.ts` as pure functions, with a test asserting the
+  badge box does not intersect the sublabel row, so the overlap cannot silently return
+  when a font size or node dimension changes.
+- **Zoom is proportional, not per-event.** The first implementation applied a fixed 1.12x
+  per wheel event, which is fine for a mouse and violent on a trackpad, where one gesture
+  fires dozens of events. It now exponentiates the real pixel delta (normalizing line and
+  page scroll modes), caps any single event at 8%, and treats a pinch — which arrives as
+  ctrl+wheel — as a deliberate gesture that responds faster. The maths lives in `zoom.ts`
+  as a pure function so the feel is unit-tested: 20 trackpad ticks must stay under 1.15x,
+  and scrolling back must land exactly where it started.
+- **Fit never shrinks past readability.** It clamps at 0.55 and anchors top-left when the
+  graph is larger than the viewport, rather than scaling an arbitrarily large tree down to
+  an unreadable smudge.
 - **Tool results are truncated to ~2 KB in the modal** with an explicit "show full" — a
   single `Bash` result can be hundreds of KB and will otherwise lock the webview.
+- **A status bar entry** (`$(type-hierarchy) Agents`) opens the tab, or focuses it when it
+  is already open. Priority is **110**, not an arbitrary number: status bar priority puts
+  higher values further left on *both* sides, and claude-usage occupies 50–101 at its
+  default (new-chat `priority + 1`, meters `priority - index`, freshness 50). Anything
+  inside that span interleaves with its meters instead of sitting beside them.
 - **Two levels of scope above the graph**: a repo switcher (all 25 project dirs, sorted by
   recent activity, live counts shown) and, under it, worktree tabs for the selected repo.
   The current workspace's repo is preselected but never limits what is reachable.
@@ -413,6 +441,22 @@ Two signature rules, both learned from failures rather than guessed:
 
 Cost is not a concern: a real 96-agent run yields 98 targets and one full poll measures
 **0.5 ms**, a 0.027% duty cycle at the 2s interval.
+
+### Polling only runs when someone is looking
+
+Three guarantees, each covered by a test:
+
+- **Nothing polls with the tab closed.** The watcher belongs to the panel; `onDidDispose`
+  clears the interval and closes every native handle.
+- **Nothing polls while the tab is hidden.** `retainContextWhenHidden` keeps the webview
+  alive behind another tab, which would otherwise mean polling forever in the background.
+  `onDidChangeViewState` stops the watcher when the panel goes invisible and restarts it —
+  with one immediate refresh, so the view is never stale on return — when it comes back.
+  Signatures survive the pause, so a change made while hidden is caught on resume rather
+  than missed.
+- **Timers cannot stack.** `start()` is a no-op while a timer exists, and `show()` reveals
+  the existing panel instead of constructing a second one, so repeated opens converge on a
+  single watcher.
 
 ### Performance
 
@@ -513,15 +557,16 @@ tabs with badges, pan/zoom and fit-to-view, wide-fan-out grouping, theme tokens.
   the body sticks to the bottom as events arrive, scrolling up unsticks it, and a
   `↓ Jump to latest` pill re-sticks. Open `<details>` panels and scroll position survive a
   refresh, so expanding an output does not get undone two seconds later.
-- Panel restore via `registerWebviewPanelSerializer`, `Reveal transcript` per node,
-  scope-aware empty states.
+- Panel restore via `registerWebviewPanelSerializer`, scope-aware empty states.
 - **No retention sweep** — §7 resolved that to a settings change, already made.
 - **No installer change.** Step 10 is generic: `tool_has_install_target` looks for a
   Makefile `install:` rule and `run_tool_install` uses `mise exec` when a `.mise.toml` is
   present. agent-watch has both, so it is picked up with no edit to `install.sh`.
 
-Not done: a "copy agent prompt" action. `Reveal transcript` reaches the same content and
-more, so it did not earn its own button.
+Not done: "copy agent prompt" or "reveal transcript" actions. A `Reveal transcript` button
+was built and then removed — nobody opens a raw JSONL from here, and keeping it meant
+carrying a node-id-to-file map through the loader, store and protocol for one unused
+button.
 
 M1–M2 is the point at which it is worth using daily; M3 is the point at which it beats
 `wfwatch` outright.
@@ -555,7 +600,16 @@ M1–M2 is the point at which it is worth using daily; M3 is the point at which 
    988x5936px — 23 nodes instead of 100.
 7. **~~Modals render everything inline~~ — RESOLVED in M3.** Arguments and output are
    behind `<details>` toggles labelled with their size, collapsed by default.
-8. **~~The modal was a dead snapshot~~ — RESOLVED in M4.** It did not update as new
+8. **~~Prose was buried behind a toggle~~ — RESOLVED.** An agent's own text is the one
+   thing worth reading without a click, so `said` panels open by default while arguments
+   and tool output stay collapsed.
+9. **~~Empty thinking blocks read as a bug~~ — RESOLVED.** `0 chars withheld by the API`
+   told the user nothing and looked broken. They now render as `thought · not recorded`.
+   The underlying fix is opt-in: `vscode/claude-wrapper.sh` launches Claude Code with
+   `--thinking-display summarized` so the field is populated at the source (see the
+   repo README). Verified end to end through the wrapper: 270 characters of real summary
+   persisted to the transcript.
+10. **~~The modal was a dead snapshot~~ — RESOLVED in M4.** It did not update as new
    events landed, and reading the newest entry meant scrolling the whole history. The
    panel now re-pushes the open node's detail on every refresh and the view tails the
    bottom by default; scrolling up unsticks it and raises a `↓ Jump to latest` pill. The

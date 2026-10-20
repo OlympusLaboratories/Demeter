@@ -2,7 +2,7 @@ import type { AgentNode } from './model';
 import { type ProjectDir, scanProjects, withinDays } from './discovery';
 import { type LoadedSession, loadSession, peekProjectPath } from './loader';
 import { type WorktreeGroup, groupByWorktree, repoRootFor, worktreeRoots } from './repos';
-import { layoutForest, parentOfGroupId } from './graphLayout';
+import { layoutForest } from './graphLayout';
 import { TranscriptCache } from './tail';
 import type { NodeDetail, RepoSummary, ViewState, WorktreeSummary } from './protocol';
 
@@ -12,6 +12,9 @@ export interface StoreSettings {
   recentDays: number;
   maxSessionsPerRepo: number;
   pollSeconds: number;
+  statusBarPriority: number;
+  initialDepth: number;
+  zoomSensitivity: number;
 }
 
 interface RepoEntry {
@@ -24,12 +27,12 @@ export class Store {
   private repos: RepoEntry[] = [];
   private groups: WorktreeGroup[] = [];
   private nodesById = new Map<string, AgentNode>();
-  private transcriptByNodeId = new Map<string, string>();
   private selectedRepo?: string;
   private selectedWorktree?: string;
   private readonly cache = new TranscriptCache();
   private targets: string[] = [];
-  private expanded = new Set<string>();
+  private overrides = new Map<string, boolean>();
+  private renderedExpansion = new Map<string, boolean>();
 
   constructor(private settings: StoreSettings) {}
 
@@ -72,7 +75,6 @@ export class Store {
   async loadSelected(): Promise<void> {
     this.groups = [];
     this.nodesById.clear();
-    this.transcriptByNodeId.clear();
     const repo = this.repos.find((entry) => entry.project.slug === this.selectedRepo);
     if (!repo) return;
 
@@ -96,15 +98,7 @@ export class Store {
     this.groups = groupByWorktree(sessions, roots);
     this.targets = [repo.project.dir, ...sessions.flatMap((entry) => entry.watchPaths)];
     for (const group of this.groups) {
-      for (const session of group.sessions) {
-        index(session.tree, this.nodesById);
-        this.transcriptByNodeId.set(session.tree.id, session.transcriptPath);
-      }
-    }
-    for (const session of sessions) {
-      for (const [nodeId, transcript] of session.transcriptsByNodeId) {
-        this.transcriptByNodeId.set(nodeId, transcript);
-      }
+      for (const session of group.sessions) index(session.tree, this.nodesById);
     }
 
     if (!this.selectedWorktree || !this.groups.some((group) => group.key === this.selectedWorktree)) {
@@ -124,7 +118,7 @@ export class Store {
     if (this.selectedRepo === slug) return;
     this.selectedRepo = slug;
     this.selectedWorktree = undefined;
-    this.expanded.clear();
+    this.overrides.clear();
     this.cache.clear();
   }
 
@@ -132,15 +126,16 @@ export class Store {
     this.selectedWorktree = key;
   }
 
-  toggleGroup(groupId: string): boolean {
-    const parentId = parentOfGroupId(groupId) ?? groupId;
-    if (this.expanded.has(parentId)) this.expanded.delete(parentId);
-    else this.expanded.add(parentId);
-    return this.expanded.has(parentId);
+  toggleNode(id: string): boolean {
+    const node = this.nodesById.get(id);
+    if (!node || node.children.length === 0) return false;
+    const current = this.renderedExpansion.get(id) ?? false;
+    this.overrides.set(id, !current);
+    return !current;
   }
 
-  transcriptFor(id: string): string | undefined {
-    return this.transcriptByNodeId.get(id);
+  scopeKey(): string {
+    return `${this.selectedRepo ?? ''}::${this.selectedWorktree ?? ''}`;
   }
 
   detail(id: string): NodeDetail | undefined {
@@ -153,7 +148,6 @@ export class Store {
       label: node.label,
       sublabel: node.sublabel,
       events: node.events,
-      hasTranscript: this.transcriptByNodeId.has(node.id),
     };
   }
 
@@ -176,8 +170,10 @@ export class Store {
 
     const active = this.groups.find((group) => group.key === this.selectedWorktree);
     const graph = layoutForest((active?.sessions ?? []).map((session) => session.tree), {
-      expanded: this.expanded,
+      overrides: this.overrides,
+      initialDepth: this.settings.initialDepth,
     });
+    this.renderedExpansion = new Map(graph.nodes.map((node) => [node.id, node.expanded]));
 
     return {
       loading,
@@ -190,6 +186,8 @@ export class Store {
       watchedCount: this.targets.length,
       updatedAtMs: Date.now(),
       recentDays: this.settings.recentDays,
+      scopeKey: this.scopeKey(),
+      zoomSensitivity: this.settings.zoomSensitivity,
     };
   }
 }

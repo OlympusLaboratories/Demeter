@@ -83,6 +83,7 @@ export class PathWatcher {
 
   start(): void {
     if (this.timer || this.disposed) return;
+    if (this.handles.length === 0) this.attach();
     const interval = this.options.pollMs ?? DEFAULT_POLL_MS;
     this.timer = setInterval(() => {
       void this.poll().then((changed) => {
@@ -90,6 +91,16 @@ export class PathWatcher {
       });
     }, interval);
     if (typeof this.timer === 'object' && 'unref' in this.timer) this.timer.unref();
+  }
+
+  stop(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = undefined;
+    this.closeHandles();
+  }
+
+  get polling(): boolean {
+    return this.timer !== undefined;
   }
 
   async poll(): Promise<boolean> {

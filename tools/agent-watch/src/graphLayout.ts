@@ -16,7 +16,9 @@ export interface PositionedNode {
   childCount: number;
   x: number;
   y: number;
-  group?: { parentId: string; hidden: number; expanded: boolean };
+  hiddenChildren: number;
+  expanded: boolean;
+  totalChildren: number;
 }
 
 export interface PositionedEdge {
@@ -36,51 +38,45 @@ export interface GraphLayout {
 }
 
 export interface LayoutOptions {
-  expanded?: ReadonlySet<string>;
-  groupThreshold?: number;
+  overrides?: ReadonlyMap<string, boolean>;
+  autoCollapseThreshold?: number;
+  initialDepth?: number;
 }
 
-export const DEFAULT_GROUP_THRESHOLD = 12;
-const GROUP_PREFIX = 'group:';
+export const DEFAULT_AUTO_COLLAPSE = 12;
+export const DEFAULT_INITIAL_DEPTH = 1;
 
-export function groupIdFor(parentId: string): string {
-  return `${GROUP_PREFIX}${parentId}`;
+export function isExpanded(node: AgentNode, depth: number, options: LayoutOptions = {}): boolean {
+  if (node.children.length === 0) return true;
+  const override = options.overrides?.get(node.id);
+  if (override !== undefined) return override;
+  if (depth >= (options.initialDepth ?? DEFAULT_INITIAL_DEPTH)) return false;
+  return node.children.length <= (options.autoCollapseThreshold ?? DEFAULT_AUTO_COLLAPSE);
 }
 
-export function parentOfGroupId(groupId: string): string | undefined {
-  return groupId.startsWith(GROUP_PREFIX) ? groupId.slice(GROUP_PREFIX.length) : undefined;
+interface Collapsed {
+  node: AgentNode;
+  hidden: number;
+  expanded: boolean;
 }
 
-function collapse(root: AgentNode, options: LayoutOptions): AgentNode {
-  const threshold = options.groupThreshold ?? DEFAULT_GROUP_THRESHOLD;
-  const expanded = options.expanded ?? new Set<string>();
-
-  const visit = (node: AgentNode): AgentNode => {
-    const children = node.children.map(visit);
-    if (children.length <= threshold || expanded.has(node.id)) {
-      return { ...node, children };
-    }
-    const shown = children.slice(0, threshold);
-    const hidden = children.length - shown.length;
-    const running = children.filter((child) => child.status === 'running').length;
-    const errored = children.filter((child) => child.status === 'error').length;
-    shown.push({
-      id: groupIdFor(node.id),
-      kind: node.kind,
-      label: `+${hidden} more`,
-      sublabel: running > 0 ? `${running} running` : errored > 0 ? `${errored} failed` : undefined,
-      status: running > 0 ? 'running' : errored > 0 ? 'error' : 'idle',
-      events: [],
-      children: [],
+function collapse(root: AgentNode, options: LayoutOptions, into: Map<string, Collapsed>): AgentNode {
+  const visit = (node: AgentNode, depth: number): AgentNode => {
+    const expanded = isExpanded(node, depth, options);
+    const children = expanded ? node.children.map((child) => visit(child, depth + 1)) : [];
+    into.set(node.id, {
+      node,
+      hidden: expanded ? 0 : node.children.length,
+      expanded,
     });
-    return { ...node, children: shown };
+    return { ...node, children };
   };
-
-  return visit(root);
+  return visit(root, 0);
 }
 
 export function layoutTree(root: AgentNode, options: LayoutOptions = {}): GraphLayout {
-  const rooted = hierarchy<AgentNode>(collapse(root, options), (node) => node.children);
+  const flags = new Map<string, Collapsed>();
+  const rooted = hierarchy<AgentNode>(collapse(root, options, flags), (node) => node.children);
   const layered = tree<AgentNode>()
     .nodeSize([NODE_HEIGHT + ROW_GAP, NODE_WIDTH + COLUMN_GAP])
     .separation(() => 1);
@@ -96,9 +92,8 @@ export function layoutTree(root: AgentNode, options: LayoutOptions = {}): GraphL
   if (!Number.isFinite(minRow)) minRow = 0;
   if (!Number.isFinite(minColumn)) minColumn = 0;
 
-  const expandedSet = options.expanded ?? new Set<string>();
   const nodes: PositionedNode[] = descendants.map((node) => {
-    const parentId = parentOfGroupId(node.data.id);
+    const flag = flags.get(node.data.id);
     return {
       id: node.data.id,
       kind: node.data.kind,
@@ -107,11 +102,11 @@ export function layoutTree(root: AgentNode, options: LayoutOptions = {}): GraphL
       sublabel: node.data.sublabel,
       eventCount: node.data.events.length,
       childCount: node.data.children.length,
+      totalChildren: flag?.node.children.length ?? node.data.children.length,
+      hiddenChildren: flag?.hidden ?? 0,
+      expanded: flag?.expanded ?? true,
       x: (node.y ?? 0) - minColumn,
       y: (node.x ?? 0) - minRow,
-      ...(parentId
-        ? { group: { parentId, hidden: 0, expanded: expandedSet.has(parentId) } }
-        : {}),
     };
   });
 
@@ -157,7 +152,11 @@ export function layoutForest(roots: AgentNode[], options: LayoutOptions = {}): G
     children: roots,
   };
 
-  const full = layoutTree(virtualRoot, options);
+  const full = layoutTree(virtualRoot, {
+    ...options,
+    initialDepth: (options.initialDepth ?? DEFAULT_INITIAL_DEPTH) + 1,
+    overrides: new Map([[FOREST_ROOT_ID, true], ...(options.overrides ?? new Map())]),
+  });
   const nodes = full.nodes.filter((node) => node.id !== FOREST_ROOT_ID);
   const edges = full.edges.filter((edge) => edge.from !== FOREST_ROOT_ID);
 
