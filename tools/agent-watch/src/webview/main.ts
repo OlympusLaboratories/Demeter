@@ -10,6 +10,8 @@ import {
 } from '../nodeChrome';
 import type { GraphLayout } from '../graphLayout';
 import type { AgentEvent, NodeStatus } from '../model';
+import type { SpeakerRole } from '../transcript';
+import { moreLabel, previewOf } from '../preview';
 import type { HostMessage, NodeDetail, ViewMessage, ViewState } from '../protocol';
 import { clampZoom, zoomFactorFor } from '../zoom';
 
@@ -344,10 +346,15 @@ function renderDetail(detail: NodeDetail, refreshed: boolean): void {
   byId('modal-title').textContent = detail.sublabel ? `${detail.label} — ${detail.sublabel}` : detail.label;
 
   const open = new Set<number>();
+  const revealed = new Set<string>();
   if (isSameNode) {
     body.querySelectorAll('details[open]').forEach((node) => {
       const index = Number((node as HTMLElement).dataset['index']);
       if (!Number.isNaN(index)) open.add(index);
+    });
+    body.querySelectorAll('[data-revealed="true"]').forEach((node) => {
+      const key = (node as HTMLElement).dataset['panel'];
+      if (key) revealed.add(key);
     });
   }
 
@@ -355,7 +362,7 @@ function renderDetail(detail: NodeDetail, refreshed: boolean): void {
   if (detail.events.length === 0) {
     body.append(el('p', undefined, 'No recorded activity for this node.'));
   }
-  detail.events.forEach((event, index) => body.append(renderEvent(event, index, open)));
+  detail.events.forEach((event, index) => body.append(renderEvent(event, index, open, revealed)));
 
   byId('overlay').classList.remove('hidden');
   if (following) scrollToLatest();
@@ -372,8 +379,24 @@ function closeDetail(): void {
   vscode.postMessage({ type: 'closeDetail' });
 }
 
-function renderEvent(event: AgentEvent, index: number, open: ReadonlySet<number>): HTMLElement {
-  const wrapper = el('div', `event ${event.kind}${event.isError ? ' err' : ''}`);
+const SPEAKER_LABEL: Record<SpeakerRole, string> = {
+  user: 'you',
+  assistant: 'said',
+  meta: 'context',
+};
+
+function renderEvent(
+  event: AgentEvent,
+  index: number,
+  open: ReadonlySet<number>,
+  revealed: ReadonlySet<string>,
+): HTMLElement {
+  const speaker: SpeakerRole = event.role ?? 'assistant';
+  const classes = ['event', event.kind];
+  if (event.kind === 'text') classes.push(speaker);
+  if (event.isError) classes.push('err');
+
+  const wrapper = el('div', classes.join(' '));
   const head = el('div', 'head');
 
   if (event.kind === 'tool') {
@@ -383,7 +406,7 @@ function renderEvent(event: AgentEvent, index: number, open: ReadonlySet<number>
     head.append(el('span', 'tool', 'thought'));
     if (!event.text) head.append(el('span', 'summary muted', 'not recorded'));
   } else {
-    head.append(el('span', 'tool', 'said'));
+    head.append(el('span', 'tool', SPEAKER_LABEL[speaker]));
   }
   wrapper.append(head);
 
@@ -391,27 +414,53 @@ function renderEvent(event: AgentEvent, index: number, open: ReadonlySet<number>
   if (event.kind === 'tool') {
     if (event.detail) panels.push({ label: 'arguments', body: event.detail });
     if (event.result) {
-      panels.push({
-        label: event.isError ? 'error output' : 'output',
-        body: event.resultTruncated ? `${event.result}\n…truncated` : event.result,
-      });
+      panels.push({ label: event.isError ? 'error output' : 'output', body: event.result });
     }
   } else if (event.text) {
-    panels.push({
-      label: event.kind === 'thinking' ? 'summary' : 'text',
-      body: event.text,
-      openByDefault: event.kind === 'text',
-    });
+    const conversational = event.kind === 'thinking' || speaker !== 'meta';
+    panels.push({ label: 'text', body: event.text, openByDefault: conversational });
   }
 
   for (const panel of panels) {
+    const key = `${index}:${panel.label}`;
     const details = el('details');
     details.dataset['index'] = String(index);
-    details.open = open.has(index) || panel.openByDefault === true;
+    details.dataset['panel'] = key;
     const summary = el('summary', undefined, `${panel.label} · ${lineCount(panel.body)}`);
     const pre = el('pre');
-    pre.textContent = panel.body;
     details.append(summary, pre);
+
+    const preview = panel.openByDefault === true ? previewOf(panel.body) : undefined;
+    const clipped = preview?.clipped === true ? preview : undefined;
+    const more = clipped ? el('button', 'more') : undefined;
+    let expanded = revealed.has(key);
+
+    const paint = (): void => {
+      pre.textContent = clipped && !expanded ? clipped.head : panel.body;
+      if (!clipped || !more) return;
+      more.textContent = expanded ? 'Show less' : moreLabel(clipped);
+      details.dataset['revealed'] = expanded ? 'true' : 'false';
+    };
+
+    let filled = false;
+    const fill = (): void => {
+      if (filled) return;
+      filled = true;
+      paint();
+    };
+
+    if (more) {
+      more.addEventListener('click', () => {
+        expanded = !expanded;
+        paint();
+      });
+      details.append(more);
+    }
+
+    details.open = open.has(index) || panel.openByDefault === true;
+    if (details.open) fill();
+    details.addEventListener('toggle', fill);
+
     wrapper.append(details);
   }
   return wrapper;

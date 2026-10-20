@@ -1,7 +1,6 @@
 import type { ContentBlock } from './transcript';
 
 const SUMMARY_LIMIT = 140;
-export const RESULT_LIMIT = 2048;
 
 export function clip(value: string, limit = SUMMARY_LIMIT): string {
   const flat = value.replace(/\s+/g, ' ').trim();

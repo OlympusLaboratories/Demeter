@@ -14,8 +14,9 @@ worktree scoping rules, and what is deliberately out of scope.
 
 **M1–M3.** Global discovery, session and subagent enumeration, the graph, **live
 updating** (transcripts are tailed incrementally as agents work), **phase banding** of
-workflow runs, collapsing of wide layers, pan/zoom, and a node detail modal whose
-arguments and output stay collapsed until asked for. `Agent Watch: Refresh` forces a
+workflow runs, collapsing of wide layers, pan/zoom, and a node detail modal that reads as
+a conversation — your prompts, the agent's prose and its thinking open, tool arguments and
+output collapsed until asked for. `Agent Watch: Refresh` forces a
 rescan.
 
 **M4.** The detail modal follows live output and the tab survives a window reload.
@@ -34,6 +35,13 @@ repeatedly reveals the one tab rather than stacking panels or timers.
 Node detail **follows the tail**: new events append as they land and the view stays at the
 bottom. Scroll up and it unsticks, with a `↓ Jump to latest` pill to re-follow. Panels you
 expanded stay expanded across refreshes.
+
+**The modal reads top to bottom as a conversation.** Your prompt (**you**, with a rule down
+its left edge), the agent's reply (**said**) and its thinking (**thought**) all arrive
+expanded; tool arguments, tool output and harness-injected **context** arrive folded. None
+of it is ever truncated — a long open panel shows its first 20 lines with a **Show more**
+button naming exactly how much is held back, and the header above it always reports the
+real size.
 
 **The graph opens collapsed and you expand into it.** By default you see each session and
 one level below it — typically a handful of nodes — with a count badge on anything that has

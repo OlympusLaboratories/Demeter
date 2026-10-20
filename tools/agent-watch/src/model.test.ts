@@ -31,6 +31,63 @@ describe('buildEvents', () => {
     expect(events[0]?.isError).toBe(false);
   });
 
+  it('recovers a prompt stored as a plain string rather than a block list', () => {
+    const events = buildEvents([
+      { type: 'user', message: { role: 'user', content: 'fix the installer please' } },
+    ]);
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.kind).toBe('text');
+    expect(events[0]?.role).toBe('user');
+    expect(events[0]?.text).toBe('fix the installer please');
+  });
+
+  it('tells your prompts apart from the agent own prose', () => {
+    const events = buildEvents([
+      user([{ type: 'text', text: 'why did it fail?' }]),
+      assistant([{ type: 'text', text: 'because vsce refused the link' }]),
+    ]);
+
+    expect(events.map((event) => event.role)).toEqual(['user', 'assistant']);
+  });
+
+  it('marks injected context as context, not as something you said', () => {
+    const events = buildEvents([
+      { type: 'user', isMeta: true, message: { role: 'user', content: 'Base directory for this skill: /x' } },
+    ]);
+
+    expect(events[0]?.role).toBe('meta');
+  });
+
+  it('keeps an assistant text block whole, newlines and all', () => {
+    const said = `First paragraph that runs on for a while.
+
+    Second paragraph, indented, after a blank line.
+${'x'.repeat(5000)}`;
+    const events = buildEvents([assistant([{ type: 'text', text: said }])]);
+
+    expect(events[0]?.kind).toBe('text');
+    expect(events[0]?.text).toBe(said);
+  });
+
+  it('keeps a thinking block whole', () => {
+    const thought = `Weighing it up.\n\n${'y'.repeat(9000)}`;
+    const events = buildEvents([assistant([{ type: 'thinking', thinking: thought, signature: 'abc' }])]);
+
+    expect(events[0]?.text).toBe(thought);
+    expect(events[0]?.thinkingChars).toBe(thought.length);
+  });
+
+  it('keeps a tool result whole however large', () => {
+    const output = 'line\n'.repeat(40_000);
+    const events = buildEvents([
+      assistant([{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'cat big' } }]),
+      user([{ type: 'tool_result', tool_use_id: 'toolu_1', content: output }]),
+    ]);
+
+    expect(events[0]?.result).toBe(output);
+  });
+
   it('records an empty thinking block as withheld rather than dropping it', () => {
     const events = buildEvents([assistant([{ type: 'thinking', thinking: '', signature: 'abc' }])]);
     expect(events[0]?.kind).toBe('thinking');

@@ -361,8 +361,30 @@ wide, and how deep the nesting went.
 - **Fit never shrinks past readability.** It clamps at 0.55 and anchors top-left when the
   graph is larger than the viewport, rather than scaling an arbitrarily large tree down to
   an unreadable smudge.
-- **Tool results are truncated to ~2 KB in the modal** with an explicit "show full" — a
-  single `Bash` result can be hundreds of KB and will otherwise lock the webview.
+- **Nothing an agent said or a tool returned is truncated.** Text, thinking and tool
+  output all reach the modal whole, with their newlines intact. A single `Bash` result can
+  be hundreds of KB, so the cost is paid by *not rendering* rather than by cutting: each
+  panel fills its `<pre>` the first time it is opened, so a closed panel costs nothing but
+  its one-line header, and the host re-posts an open node's detail only when that node's
+  content has actually changed (`detailRevision` in `panel.ts`) instead of on every poll.
+  Only the one-line headers are clipped — node labels and the per-tool summary, where a
+  single line is the whole point.
+- **The conversation is open, the machinery is folded away.** Your prompts, the agent's
+  prose and its thinking are all expanded on arrival, so a node reads as a transcript
+  rather than a list of things to click. Tool arguments and output stay collapsed, as does
+  injected context. A default-open panel longer than 20 lines or 1600 characters
+  (`preview.ts`) shows that much with a **Show more** button carrying the exact count of
+  what is held back — a reversible fold, never a cut, and the header above it always states
+  the true size. Which panels the reader opened and which they expanded both survive the
+  live re-render, keyed by event index and panel label.
+- **Who said it is on the record.** A text event carries a `role`: your prompt renders as
+  **you** with an accent rule down its left edge, the agent's prose as **said**, and a line
+  the harness injected (`isMeta` — skill preambles, local-command caveats, image markers)
+  as **context**, expanded by neither default nor accident. Before this, every one of them
+  read "said". Two traps live here: a prompt's `content` is frequently a bare **string**
+  rather than a block list, and `blocksOf` returning `[]` for that form meant most prompts
+  never reached the view at all; and `isMeta` text is not something the user typed, so
+  labelling it "you" would put words in their mouth.
 - **A status bar entry** (`$(type-hierarchy) Agents`) opens the tab, or focuses it when it
   is already open. Priority is **110**, not an arbitrary number: status bar priority puts
   higher values further left on *both* sides, and claude-usage occupies 50–101 at its
@@ -396,7 +418,7 @@ src/
   tail.ts             incremental JSONL reader (byte offset, partial-line carry)
   watch.ts            fs.watch + stat-poll fallback, debounced
   model.ts            transcript lines → Session / Agent / Event tree
-  summarize.ts        per-tool one-line summaries, truncation
+  summarize.ts        per-tool one-line summaries (clipped; content never is)
   retention.ts        sweep planning + execution (see §7)
   panel.ts            webview host, postMessage protocol
   webview/

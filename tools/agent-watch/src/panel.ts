@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { HostMessage, ViewMessage } from './protocol';
+import type { HostMessage, NodeDetail, ViewMessage } from './protocol';
 import type { Store } from './store';
 import { PathWatcher, debounce } from './watch';
 
@@ -54,6 +54,7 @@ export class AgentWatchPanel {
   private refreshing = false;
   private queued = false;
   private openNodeId: string | undefined;
+  private openDetailRevision: string | undefined;
 
   private constructor(
     private readonly context: vscode.ExtensionContext,
@@ -132,23 +133,27 @@ export class AgentWatchPanel {
       case 'selectRepo':
         this.store.selectRepo(message.slug);
         this.openNodeId = undefined;
+        this.openDetailRevision = undefined;
         this.postState(true);
         await this.reload();
         return;
       case 'selectWorktree':
         this.store.selectWorktree(message.key);
         this.openNodeId = undefined;
+        this.openDetailRevision = undefined;
         this.postState(false);
         return;
       case 'selectNode': {
         const detail = this.store.detail(message.id);
         if (!detail) return;
         this.openNodeId = message.id;
+        this.openDetailRevision = detailRevision(detail);
         this.post({ type: 'detail', detail, refreshed: false });
         return;
       }
       case 'closeDetail':
         this.openNodeId = undefined;
+        this.openDetailRevision = undefined;
         return;
       case 'toggleNode':
         this.store.toggleNode(message.id);
@@ -165,11 +170,16 @@ export class AgentWatchPanel {
     this.post({ type: 'state', state: this.store.view(loading, message) });
     if (loading || !this.openNodeId) return;
     const detail = this.store.detail(this.openNodeId);
-    if (detail) this.post({ type: 'detail', detail, refreshed: true });
-    else {
+    if (!detail) {
       this.openNodeId = undefined;
+      this.openDetailRevision = undefined;
       this.post({ type: 'detailClosed' });
+      return;
     }
+    const revision = detailRevision(detail);
+    if (revision === this.openDetailRevision) return;
+    this.openDetailRevision = revision;
+    this.post({ type: 'detail', detail, refreshed: true });
   }
 
   private html(): string {
@@ -225,6 +235,14 @@ export class AgentWatchPanel {
     for (const disposable of this.disposables) disposable.dispose();
     this.disposables = [];
   }
+}
+
+function detailRevision(detail: NodeDetail): string {
+  let chars = 0;
+  for (const event of detail.events) {
+    chars += (event.text?.length ?? 0) + (event.result?.length ?? 0) + (event.detail?.length ?? 0);
+  }
+  return `${detail.id}|${detail.status}|${detail.events.length}|${chars}`;
 }
 
 function createNonce(): string {
@@ -292,6 +310,11 @@ path.edge { fill: none; stroke: var(--vscode-panel-border); stroke-width: 1.5; }
 .event .summary.muted { opacity: 0.6; font-style: italic; }
 .event pre { background: var(--vscode-textCodeBlock-background); padding: 6px 8px; border-radius: 4px; overflow-x: auto; margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .event.thinking .summary { font-style: italic; }
+.event.user { border-left: 2px solid var(--vscode-textLink-foreground); padding-left: 8px; }
+.event.user .tool { color: var(--vscode-textLink-foreground); text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.85em; }
+.event.meta .tool { color: var(--vscode-descriptionForeground); font-weight: 500; }
+.event button.more { margin-top: 4px; background: transparent; border: 1px solid var(--vscode-panel-border); color: var(--vscode-textLink-foreground); border-radius: 4px; padding: 1px 8px; cursor: pointer; font-size: 0.85em; font-family: inherit; }
+.event button.more:hover { background: var(--vscode-toolbar-hoverBackground); }
 .event.err .tool { color: var(--vscode-errorForeground); }
 `;
 }

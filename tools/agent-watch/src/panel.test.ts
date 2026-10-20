@@ -9,15 +9,26 @@ import { createdPanels, resetStub } from './testing/vscodeStub';
 import type { HostMessage } from './protocol';
 
 const temps: string[] = [];
+const SESSION_ID = 'bbbbbbbb-1111-2222-3333-444444444444';
+
+function transcriptPath(projects: string): string {
+  return path.join(projects, '-tmp-repo', `${SESSION_ID}.jsonl`);
+}
+
+async function appendSaid(projects: string, text: string): Promise<void> {
+  await fs.appendFile(
+    transcriptPath(projects),
+    `${JSON.stringify({ type: 'assistant', cwd: '/tmp/repo', message: { content: [{ type: 'text', text }] } })}\n`,
+  );
+}
 
 async function fixtureProjects(): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-watch-panel-'));
   temps.push(root);
   const dir = path.join(root, 'projects', '-tmp-repo');
-  const sessionId = 'bbbbbbbb-1111-2222-3333-444444444444';
-  await fs.mkdir(path.join(dir, sessionId, 'subagents'), { recursive: true });
+  await fs.mkdir(path.join(dir, SESSION_ID, 'subagents'), { recursive: true });
   await fs.writeFile(
-    path.join(dir, `${sessionId}.jsonl`),
+    path.join(dir, `${SESSION_ID}.jsonl`),
     `${JSON.stringify({ type: 'user', cwd: '/tmp/repo', message: { content: [{ type: 'text', text: 'hi' }] } })}\n`,
   );
   return path.join(root, 'projects');
@@ -131,7 +142,7 @@ describe('AgentWatchPanel', () => {
 });
 
 describe('live detail', () => {
-  it('re-pushes the open node detail on every refresh, flagged as a refresh', async () => {
+  it('pushes the open node detail again once its transcript grows, flagged as a refresh', async () => {
     const projects = await fixtureProjects();
     const panel = AgentWatchPanel.show(context(), store(projects));
     await panel.refresh();
@@ -148,13 +159,34 @@ describe('live detail', () => {
     expect(first).toHaveLength(1);
     expect(first[0]?.type === 'detail' && first[0].refreshed).toBe(false);
 
+    await appendSaid(projects, 'a second thing the agent said');
     await panel.refresh();
 
     const all = states(stub).filter((m) => m.type === 'detail');
     expect(all.length).toBeGreaterThan(1);
     const latest = all[all.length - 1];
-    expect(latest?.type === 'detail' && latest.refreshed).toBe(true);
-    expect(latest?.type === 'detail' && latest.detail.id).toBe(nodeId);
+    if (latest?.type !== 'detail') throw new Error('expected a detail message');
+    expect(latest.refreshed).toBe(true);
+    expect(latest.detail.id).toBe(nodeId);
+    expect(latest.detail.events.map((event) => event.text)).toContain('a second thing the agent said');
+  });
+
+  it('leaves an unchanged detail alone instead of re-posting it every refresh', async () => {
+    const projects = await fixtureProjects();
+    const panel = AgentWatchPanel.show(context(), store(projects));
+    await panel.refresh();
+
+    const stub = createdPanels[0]!;
+    const state = states(stub).find((m) => m.type === 'state' && m.state.graph.nodes.length > 0);
+    if (state?.type !== 'state') throw new Error('expected a populated state');
+
+    stub.webview.onDidReceiveMessage.fire({ type: 'selectNode', id: state.state.graph.nodes[0]!.id });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    await panel.refresh();
+    await panel.refresh();
+
+    expect(states(stub).filter((m) => m.type === 'detail')).toHaveLength(1);
   });
 
   it('stops pushing detail once the webview closes the modal', async () => {

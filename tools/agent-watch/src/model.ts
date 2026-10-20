@@ -1,14 +1,16 @@
 import type { ManifestAgent, WorkflowManifest } from './manifest';
 import { statusFromState } from './manifest';
-import { RESULT_LIMIT, clip, resultToText, summarizeToolUse } from './summarize';
+import { clip, resultToText, summarizeToolUse } from './summarize';
 import {
   type ContentBlock,
+  type SpeakerRole,
   type SubagentMeta,
   type TranscriptLine,
   blocksOf,
   isAgentSpawn,
   latestBranch,
   latestCwd,
+  speakerOf,
 } from './transcript';
 
 export type NodeStatus = 'live' | 'running' | 'done' | 'error' | 'idle';
@@ -16,11 +18,11 @@ export type NodeKind = 'session' | 'agent' | 'workflow' | 'phase';
 
 export interface AgentEvent {
   kind: 'text' | 'thinking' | 'tool';
+  role?: SpeakerRole;
   name?: string;
   summary?: string;
   detail?: string;
   result?: string;
-  resultTruncated?: boolean;
   isError?: boolean;
   text?: string;
   thinkingChars?: number;
@@ -78,12 +80,17 @@ export function buildEvents(lines: TranscriptLine[]): AgentEvent[] {
   for (const line of lines) {
     for (const block of blocksOf(line)) {
       if (block.type === 'text' && block.text) {
-        events.push({ kind: 'text', text: clip(block.text, 400), timestamp: line.timestamp });
+        events.push({
+          kind: 'text',
+          role: speakerOf(line),
+          text: block.text,
+          timestamp: line.timestamp,
+        });
       } else if (block.type === 'thinking') {
         const thinking = block.thinking ?? '';
         events.push({
           kind: 'thinking',
-          text: thinking.length > 0 ? clip(thinking, 4000) : undefined,
+          text: thinking.length > 0 ? thinking : undefined,
           thinkingChars: thinking.length,
           timestamp: line.timestamp,
         });
@@ -100,9 +107,7 @@ export function buildEvents(lines: TranscriptLine[]): AgentEvent[] {
       } else if (block.type === 'tool_result' && block.tool_use_id) {
         const target = byToolUseId.get(block.tool_use_id);
         if (!target) continue;
-        const full = resultToText(block.content);
-        target.result = full.slice(0, RESULT_LIMIT);
-        target.resultTruncated = full.length > RESULT_LIMIT;
+        target.result = resultToText(block.content);
         target.isError = block.is_error === true;
       }
     }

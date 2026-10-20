@@ -18,8 +18,11 @@ export interface TranscriptLine {
   cwd?: string;
   gitBranch?: string;
   version?: string;
+  isMeta?: boolean;
   message?: { role?: string; content?: ContentBlock[] | string };
 }
+
+export type SpeakerRole = 'user' | 'assistant' | 'meta';
 
 export interface SubagentMeta {
   agentType?: string;
@@ -44,7 +47,15 @@ export function parseJsonl(text: string): TranscriptLine[] {
 
 export function blocksOf(line: TranscriptLine): ContentBlock[] {
   const content = line.message?.content;
-  return Array.isArray(content) ? content : [];
+  if (Array.isArray(content)) return content;
+  if (typeof content === 'string' && content.length > 0) return [{ type: 'text', text: content }];
+  return [];
+}
+
+export function speakerOf(line: TranscriptLine): SpeakerRole {
+  if (line.isMeta === true) return 'meta';
+  const role = line.message?.role ?? line.type;
+  return role === 'user' ? 'user' : 'assistant';
 }
 
 function lastDefined(lines: TranscriptLine[], pick: (line: TranscriptLine) => string | undefined): string | undefined {
