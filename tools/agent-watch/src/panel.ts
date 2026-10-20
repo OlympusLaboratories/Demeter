@@ -1,0 +1,184 @@
+import * as vscode from 'vscode';
+import type { HostMessage, ViewMessage } from './protocol';
+import type { Store } from './store';
+
+const VIEW_TYPE = 'agentWatch.graph';
+
+export class AgentWatchPanel {
+  private static current: AgentWatchPanel | undefined;
+
+  static show(context: vscode.ExtensionContext, store: Store, preferredPath?: string): AgentWatchPanel {
+    if (AgentWatchPanel.current) {
+      AgentWatchPanel.current.panel.reveal(vscode.ViewColumn.Active);
+      void AgentWatchPanel.current.refresh(preferredPath);
+      return AgentWatchPanel.current;
+    }
+
+    const panel = vscode.window.createWebviewPanel(
+      VIEW_TYPE,
+      'Agent Watch',
+      vscode.ViewColumn.Active,
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'dist')],
+      },
+    );
+
+    AgentWatchPanel.current = new AgentWatchPanel(context, panel, store, preferredPath);
+    return AgentWatchPanel.current;
+  }
+
+  private disposables: vscode.Disposable[] = [];
+
+  private constructor(
+    private readonly context: vscode.ExtensionContext,
+    private readonly panel: vscode.WebviewPanel,
+    private readonly store: Store,
+    private preferredPath: string | undefined,
+  ) {
+    this.panel.webview.html = this.html();
+    this.panel.onDidDispose(() => this.dispose(), undefined, this.disposables);
+    this.panel.webview.onDidReceiveMessage(
+      (message: ViewMessage) => {
+        void this.handle(message);
+      },
+      undefined,
+      this.disposables,
+    );
+  }
+
+  async refresh(preferredPath?: string): Promise<void> {
+    if (preferredPath) this.preferredPath = preferredPath;
+    this.post({ type: 'state', state: this.store.view(true) });
+    try {
+      await this.store.discover(this.preferredPath);
+      await this.store.loadSelected();
+      this.post({ type: 'state', state: this.store.view(false) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.post({ type: 'state', state: this.store.view(false, message) });
+    }
+  }
+
+  private async handle(message: ViewMessage): Promise<void> {
+    switch (message.type) {
+      case 'ready':
+      case 'refresh':
+        await this.refresh();
+        return;
+      case 'selectRepo':
+        this.store.selectRepo(message.slug);
+        this.post({ type: 'state', state: this.store.view(true) });
+        await this.store.loadSelected();
+        this.post({ type: 'state', state: this.store.view(false) });
+        return;
+      case 'selectWorktree':
+        this.store.selectWorktree(message.key);
+        this.post({ type: 'state', state: this.store.view(false) });
+        return;
+      case 'selectNode': {
+        const detail = this.store.detail(message.id);
+        if (detail) this.post({ type: 'detail', detail });
+        return;
+      }
+    }
+  }
+
+  private post(message: HostMessage): void {
+    void this.panel.webview.postMessage(message);
+  }
+
+  private html(): string {
+    const webview = this.panel.webview;
+    const script = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js'));
+    const nonce = createNonce();
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Watch</title>
+<style>${styles()}</style>
+</head>
+<body>
+<header id="scope">
+  <div class="row" id="repos"></div>
+  <div class="row" id="worktrees"></div>
+</header>
+<main>
+  <div id="canvas"><svg id="graph" xmlns="http://www.w3.org/2000/svg"></svg></div>
+  <div id="empty" class="hidden"></div>
+</main>
+<div id="overlay" class="hidden">
+  <section id="modal">
+    <header><h2 id="modal-title"></h2><button id="modal-close" type="button">Close</button></header>
+    <div id="modal-body"></div>
+  </section>
+</div>
+<script nonce="${nonce}" src="${script.toString()}"></script>
+</body>
+</html>`;
+  }
+
+  private dispose(): void {
+    AgentWatchPanel.current = undefined;
+    this.panel.dispose();
+    for (const disposable of this.disposables) disposable.dispose();
+    this.disposables = [];
+  }
+}
+
+function createNonce(): string {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let value = '';
+  for (let index = 0; index < 32; index += 1) {
+    value += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
+  }
+  return value;
+}
+
+function styles(): string {
+  return `
+:root { color-scheme: light dark; }
+body { margin: 0; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); height: 100vh; display: flex; flex-direction: column; }
+header#scope { padding: 8px 12px 4px; border-bottom: 1px solid var(--vscode-panel-border); display: flex; flex-direction: column; gap: 4px; }
+.row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.chip { border: 1px solid var(--vscode-panel-border); background: transparent; color: var(--vscode-foreground); border-radius: 999px; padding: 2px 10px; cursor: pointer; font-size: 0.85em; }
+.chip.selected { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: transparent; }
+.chip .live { color: var(--vscode-charts-green); margin-left: 4px; }
+main { flex: 1; position: relative; overflow: hidden; }
+#canvas { position: absolute; inset: 0; overflow: auto; }
+svg { display: block; }
+.node rect { fill: var(--vscode-editorWidget-background); stroke: var(--vscode-panel-border); stroke-width: 1.5; rx: 6; cursor: pointer; }
+.node.live rect { stroke: var(--vscode-charts-green); stroke-width: 2.5; }
+.node.running rect { stroke: var(--vscode-charts-blue); stroke-width: 2.5; }
+.node.error rect { stroke: var(--vscode-errorForeground); stroke-width: 2.5; }
+.node text { pointer-events: none; }
+.node .label { fill: var(--vscode-foreground); font-size: 12px; }
+.node .sublabel { fill: var(--vscode-descriptionForeground); font-size: 10.5px; }
+.node .glyph { font-size: 12px; }
+.node.live .glyph { fill: var(--vscode-charts-green); }
+.node.running .glyph { fill: var(--vscode-charts-blue); }
+.node.done .glyph { fill: var(--vscode-descriptionForeground); }
+.node.error .glyph { fill: var(--vscode-errorForeground); }
+path.edge { fill: none; stroke: var(--vscode-panel-border); stroke-width: 1.5; }
+#empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--vscode-descriptionForeground); text-align: center; padding: 24px; }
+.hidden { display: none !important; }
+#overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 10; }
+#modal { background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-panel-border); border-radius: 8px; width: min(820px, 92vw); max-height: 82vh; display: flex; flex-direction: column; }
+#modal header { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--vscode-panel-border); }
+#modal h2 { margin: 0; font-size: 1em; }
+#modal button { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; }
+#modal-body { overflow: auto; padding: 10px 14px; }
+.event { border-bottom: 1px solid var(--vscode-panel-border); padding: 6px 0; }
+.event:last-child { border-bottom: none; }
+.event .head { display: flex; gap: 8px; align-items: baseline; }
+.event .tool { font-weight: 600; }
+.event .summary { color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+.event pre { background: var(--vscode-textCodeBlock-background); padding: 6px 8px; border-radius: 4px; overflow-x: auto; margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.event.thinking .summary { font-style: italic; }
+.event.err .tool { color: var(--vscode-errorForeground); }
+`;
+}

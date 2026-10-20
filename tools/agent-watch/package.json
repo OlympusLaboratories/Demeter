@@ -1,0 +1,74 @@
+{
+  "name": "agent-watch",
+  "displayName": "Agent Watch",
+  "description": "Live view of Claude Code sessions and the agents they spawn.",
+  "version": "0.1.0",
+  "publisher": "dylanlarrabee",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "agentWatch.open",
+        "title": "Agent Watch: Open"
+      },
+      {
+        "command": "agentWatch.refresh",
+        "title": "Agent Watch: Refresh"
+      }
+    ],
+    "configuration": {
+      "title": "Agent Watch",
+      "properties": {
+        "agentWatch.projectsDir": {
+          "type": "string",
+          "default": "",
+          "description": "Override the Claude Code projects directory. Empty resolves CLAUDE_CONFIG_DIR, then ~/.claude/projects."
+        },
+        "agentWatch.liveWindowSeconds": {
+          "type": "number",
+          "default": 60,
+          "minimum": 5,
+          "description": "A session whose transcript was written within this many seconds counts as live."
+        },
+        "agentWatch.recentDays": {
+          "type": "number",
+          "default": 7,
+          "minimum": 1,
+          "description": "Only sessions touched within this many days are listed."
+        },
+        "agentWatch.maxSessionsPerRepo": {
+          "type": "number",
+          "default": 12,
+          "minimum": 1,
+          "description": "Most recent sessions to load per repo."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "d3-hierarchy": "^3.1.2"
+  },
+  "devDependencies": {
+    "@types/d3-hierarchy": "^3.1.7",
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.93.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}

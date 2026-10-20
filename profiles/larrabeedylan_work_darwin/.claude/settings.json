@@ -1,5 +1,5 @@
 {
-  "cleanupPeriodDays": 3650,
+  "cleanupPeriodDays": 30,
   "permissions": {
     "allow": [
       "WebSearch",

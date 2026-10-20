@@ -1,0 +1,235 @@
+import { describe, expect, it } from 'vitest';
+import {
+  buildEvents,
+  buildSessionTree,
+  completedToolUseIds,
+  deriveLabel,
+  erroredToolUseIds,
+  spawnIdsIn,
+} from './model';
+import type { TranscriptLine } from './transcript';
+
+function assistant(blocks: unknown[]): TranscriptLine {
+  return { type: 'assistant', message: { role: 'assistant', content: blocks as never } };
+}
+
+function user(blocks: unknown[]): TranscriptLine {
+  return { type: 'user', message: { role: 'user', content: blocks as never } };
+}
+
+describe('buildEvents', () => {
+  it('pairs a tool result with the tool call that produced it', () => {
+    const events = buildEvents([
+      assistant([{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'git status' } }]),
+      user([{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'clean tree' }]),
+    ]);
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.name).toBe('Bash');
+    expect(events[0]?.summary).toBe('git status');
+    expect(events[0]?.result).toBe('clean tree');
+    expect(events[0]?.isError).toBe(false);
+  });
+
+  it('records an empty thinking block as withheld rather than dropping it', () => {
+    const events = buildEvents([assistant([{ type: 'thinking', thinking: '', signature: 'abc' }])]);
+    expect(events[0]?.kind).toBe('thinking');
+    expect(events[0]?.text).toBeUndefined();
+    expect(events[0]?.thinkingChars).toBe(0);
+  });
+
+  it('keeps thinking text when the API returned a summary', () => {
+    const events = buildEvents([assistant([{ type: 'thinking', thinking: 'weighing two options', signature: 'x' }])]);
+    expect(events[0]?.text).toBe('weighing two options');
+    expect(events[0]?.thinkingChars).toBe(20);
+  });
+
+  it('marks an errored tool result', () => {
+    const events = buildEvents([
+      assistant([{ type: 'tool_use', id: 'toolu_2', name: 'Read', input: { file_path: '/a/b.ts' } }]),
+      user([{ type: 'tool_result', tool_use_id: 'toolu_2', content: 'nope', is_error: true }]),
+    ]);
+    expect(events[0]?.isError).toBe(true);
+    expect(events[0]?.summary).toBe('b.ts');
+  });
+});
+
+describe('spawn indexing', () => {
+  it('collects Agent and Task tool_use ids', () => {
+    const ids = spawnIdsIn([
+      assistant([
+        { type: 'tool_use', id: 'toolu_a', name: 'Agent', input: { description: 'one' } },
+        { type: 'tool_use', id: 'toolu_b', name: 'Task', input: { description: 'two' } },
+        { type: 'tool_use', id: 'toolu_c', name: 'Bash', input: { command: 'ls' } },
+      ]),
+    ]);
+    expect([...ids].sort()).toEqual(['toolu_a', 'toolu_b']);
+  });
+
+  it('reports which tool calls have completed', () => {
+    const done = completedToolUseIds([user([{ type: 'tool_result', tool_use_id: 'toolu_a', content: 'ok' }])]);
+    expect(done.has('toolu_a')).toBe(true);
+    expect(done.has('toolu_b')).toBe(false);
+  });
+});
+
+describe('buildSessionTree', () => {
+  const base = {
+    sessionId: 'abcdef12-0000-0000-0000-000000000000',
+    mtimeMs: 1_000_000,
+    liveWindowSeconds: 60,
+    nowMs: 1_000_000,
+    workflows: [],
+  };
+
+  it('attaches a subagent to the node whose transcript spawned it', () => {
+    const tree = buildSessionTree({
+      ...base,
+      lines: [assistant([{ type: 'tool_use', id: 'toolu_x', name: 'Agent', input: { description: 'explore' } }])],
+      subagents: [
+        {
+          agentId: 'a111',
+          meta: { agentType: 'Explore', description: 'explore', toolUseId: 'toolu_x', spawnDepth: 1 },
+          lines: [],
+        },
+      ],
+    });
+
+    expect(tree.children).toHaveLength(1);
+    expect(tree.children[0]?.label).toBe('explore');
+    expect(tree.children[0]?.sublabel).toBe('Explore');
+  });
+
+  it('nests an agent spawned by another agent', () => {
+    const tree = buildSessionTree({
+      ...base,
+      lines: [assistant([{ type: 'tool_use', id: 'toolu_parent', name: 'Agent', input: { description: 'parent' } }])],
+      subagents: [
+        {
+          agentId: 'aparent',
+          meta: { description: 'parent', toolUseId: 'toolu_parent', spawnDepth: 1 },
+          lines: [assistant([{ type: 'tool_use', id: 'toolu_child', name: 'Agent', input: { description: 'child' } }])],
+        },
+        {
+          agentId: 'achild',
+          meta: { description: 'child', toolUseId: 'toolu_child', spawnDepth: 2 },
+          lines: [],
+        },
+      ],
+    });
+
+    expect(tree.children).toHaveLength(1);
+    expect(tree.children[0]?.children).toHaveLength(1);
+    expect(tree.children[0]?.children[0]?.label).toBe('child');
+  });
+
+  it('marks a subagent running until its tool call completes', () => {
+    const spawn = assistant([{ type: 'tool_use', id: 'toolu_r', name: 'Agent', input: { description: 'busy' } }]);
+    const running = buildSessionTree({
+      ...base,
+      lines: [spawn],
+      subagents: [{ agentId: 'a1', meta: { toolUseId: 'toolu_r', spawnDepth: 1 }, lines: [] }],
+    });
+    expect(running.children[0]?.status).toBe('running');
+
+    const finished = buildSessionTree({
+      ...base,
+      lines: [spawn, user([{ type: 'tool_result', tool_use_id: 'toolu_r', content: 'done' }])],
+      subagents: [{ agentId: 'a1', meta: { toolUseId: 'toolu_r', spawnDepth: 1 }, lines: [] }],
+    });
+    expect(finished.children[0]?.status).toBe('done');
+  });
+
+  it('groups workflow agents under a run node and counts progress from the journal', () => {
+    const tree = buildSessionTree({
+      ...base,
+      lines: [],
+      subagents: [],
+      workflows: [
+        {
+          runId: 'wf_abc',
+          journal: [
+            { type: 'started', agentId: 'a1' },
+            { type: 'started', agentId: 'a2' },
+            { type: 'result', agentId: 'a1' },
+          ],
+          agents: [
+            { agentId: 'a1', meta: { agentType: 'workflow-subagent' }, lines: [] },
+            { agentId: 'a2', meta: { agentType: 'workflow-subagent' }, lines: [] },
+          ],
+        },
+      ],
+    });
+
+    const workflow = tree.children[0];
+    expect(workflow?.kind).toBe('workflow');
+    expect(workflow?.sublabel).toBe('1/2 done');
+    expect(workflow?.status).toBe('running');
+    expect(workflow?.children.map((child) => child.status)).toEqual(['done', 'running']);
+  });
+
+  it('treats a recently written transcript as live', () => {
+    const live = buildSessionTree({ ...base, lines: [], subagents: [], nowMs: base.mtimeMs + 5_000 });
+    expect(live.status).toBe('live');
+    const stale = buildSessionTree({ ...base, lines: [], subagents: [], nowMs: base.mtimeMs + 600_000 });
+    expect(stale.status).toBe('done');
+  });
+});
+
+describe('deriveLabel', () => {
+  function userLine(text: string): TranscriptLine {
+    return { type: 'user', message: { role: 'user', content: [{ type: 'text', text }] as never } };
+  }
+
+  it('reads the indented task that follows the computed-task marker', () => {
+    const label = deriveLabel([
+      userLine('[Workflow harness — user request] The harness relays, verbatim and indented below…'),
+      userLine(
+        '[Workflow harness — computed task] The task text below was computed at runtime.\n\n  You are skeptic #3 on a verification panel.\n  More detail here.',
+      ),
+    ]);
+    expect(label).toBe('skeptic #3 on a verification panel.');
+  });
+
+  it('ignores harness preamble and command wrappers when no computed task exists', () => {
+    expect(deriveLabel([userLine('[Workflow harness — user request] blah'), userLine('<command-name>/fix</command-name>')])).toBeUndefined();
+    expect(deriveLabel([userLine('Review the auth module')])).toBe('Review the auth module');
+  });
+
+  it('returns undefined when there is nothing to read', () => {
+    expect(deriveLabel([])).toBeUndefined();
+  });
+});
+
+describe('erroredToolUseIds', () => {
+  it('collects only tool results flagged as errors', () => {
+    const errored = erroredToolUseIds([
+      user([{ type: 'tool_result', tool_use_id: 'ok', content: 'fine' }]),
+      user([{ type: 'tool_result', tool_use_id: 'bad', content: 'boom', is_error: true }]),
+    ]);
+    expect([...errored]).toEqual(['bad']);
+  });
+
+  it('does not mark an agent failed just because one of its own tools errored', () => {
+    const spawn = assistant([{ type: 'tool_use', id: 'toolu_s', name: 'Agent', input: { description: 'worker' } }]);
+    const tree = buildSessionTree({
+      sessionId: 'sess',
+      mtimeMs: 0,
+      nowMs: 10_000_000,
+      liveWindowSeconds: 60,
+      workflows: [],
+      lines: [spawn, user([{ type: 'tool_result', tool_use_id: 'toolu_s', content: 'summary' }])],
+      subagents: [
+        {
+          agentId: 'a1',
+          meta: { toolUseId: 'toolu_s', spawnDepth: 1 },
+          lines: [
+            assistant([{ type: 'tool_use', id: 'inner', name: 'Grep', input: { pattern: 'x' } }]),
+            user([{ type: 'tool_result', tool_use_id: 'inner', content: 'no match', is_error: true }]),
+          ],
+        },
+      ],
+    });
+    expect(tree.children[0]?.status).toBe('done');
+  });
+});
