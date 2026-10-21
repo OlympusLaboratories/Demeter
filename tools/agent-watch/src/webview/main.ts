@@ -348,14 +348,13 @@ function renderGraph(state: ViewState): void {
     sub.setAttribute('x', String(TEXT_X));
     sub.setAttribute('y', String(SUBLABEL_BASELINE));
     const counts = countsLabel(node.eventCount, node.childCount);
-    sub.textContent = truncate(
-      node.sublabel ? `${node.sublabel} · ${counts}` : counts,
-      sublabelCapacity(chrome),
-    );
+    const second = node.waiting ?? (node.sublabel ? `${node.sublabel} · ${counts}` : counts);
+    if (node.waiting) sub.classList.add('waiting');
+    sub.textContent = truncate(second, sublabelCapacity(chrome));
     group.append(sub);
 
     const title = svgEl('title');
-    title.textContent = node.sublabel ? `${node.label}\n${node.sublabel}` : node.label;
+    title.textContent = [node.label, node.sublabel, node.waiting].filter(Boolean).join('\n');
     group.append(title);
 
     if (chrome.open) {

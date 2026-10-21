@@ -25,6 +25,7 @@ export interface PositionedNode {
   expanded: boolean;
   totalChildren: number;
   activity?: NodeStatus;
+  waiting?: string;
 }
 
 export interface PositionedEdge {
@@ -113,6 +114,7 @@ export function layoutTree(root: AgentNode, options: LayoutOptions = {}): GraphL
       childCount: node.data.children.length,
       totalChildren: flag?.node.children.length ?? node.data.children.length,
       activity: node.data.activity,
+      waiting: node.data.waiting,
       hiddenChildren: flag?.hidden ?? 0,
       expanded: flag?.expanded ?? true,
       x: (node.y ?? 0) - minColumn,

@@ -289,7 +289,7 @@ export class AgentWatchPanel {
   <div class="row status" id="status">
     <span id="status-text"></span>
     <span class="spacer"></span>
-    <button class="chip" id="only-window" type="button" title="Show only sessions from the folder this window has open">this window</button>
+    <button class="chip" id="only-window" type="button" title="Show only sessions that ran in the repo this window has open">this repo</button>
     <button class="chip" id="expand-all" type="button" title="Expand or collapse every branch">expand all</button>
     <button class="chip" id="zoom-out" type="button">−</button>
     <span id="zoom-level">100%</span>
@@ -392,6 +392,7 @@ svg { display: block; }
 .node .open-chat:hover rect { fill: var(--vscode-button-background); }
 .node .label { fill: var(--vscode-foreground); font-size: 12px; }
 .node .sublabel { fill: var(--vscode-descriptionForeground); font-size: 10.5px; }
+.node .sublabel.waiting { fill: var(--vscode-charts-blue); }
 .node .glyph { font-size: 12px; }
 .node.live .glyph { fill: var(--vscode-charts-green); }
 .node.running .glyph { fill: var(--vscode-charts-blue); }

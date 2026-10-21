@@ -57,8 +57,11 @@ phase band) shows a child count instead.
 
 **Status comes from each node's own transcript**, not from its parent. `●` green means the
 transcript was written within the last `liveWindowSeconds` — it is working right now. `◐`
-blue means launched and not yet returned but currently quiet, such as an agent waiting on a
-long command. `✓` grey means finished. A background agent's `tool_result` arrives within
+blue means launched and not yet returned but currently quiet — and an agent blocked on a
+tool is detected from its own transcript, not guessed: a `tool_use` with no matching
+`tool_result` as the last event means it is still waiting. The node then says what it is
+waiting on and for how long (`waiting on Bash · 4m`), so a long command and a dead session
+are told apart by reading rather than by a timeout. `✓` grey means finished. A background agent's `tool_result` arrives within
 milliseconds of launch, so judging it by the parent marked it done while it still had
 minutes of work left.
 
@@ -97,8 +100,8 @@ to the row's **top**, since the first child is where you start reading, while a 
 keeps the **node you clicked** centred, so collapsing one agent inside a 90-sibling row
 does not throw you to that row's start.
 
-The status row carries three toggles. **this window** hides sessions that ran outside the
-folder this window has open — the ones whose `↗` would refuse to resume them here. **expand
+The status row carries three toggles. **this repo** hides sessions that ran outside the
+repo this window has open — the ones whose `↗` would refuse to resume them here. **expand
 all** opens every branch, and opens nothing further once everything is open, so a second
 click closes them again. **Fit** reframes the whole graph; it drops below the floor the
 expand-framing uses, so a wide deep tree lands fully on screen instead of being clipped,

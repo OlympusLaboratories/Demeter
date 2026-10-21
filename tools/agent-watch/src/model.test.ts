@@ -3,6 +3,7 @@ import {
   buildEvents,
   buildSessionTree,
   propagateActivity,
+  waitingOn,
   completedToolUseIds,
   deriveLabel,
   erroredToolUseIds,
@@ -383,5 +384,135 @@ describe('propagateActivity', () => {
     const root = node('root', 'done', [node('failed', 'error', [node('a', 'live')])]);
     propagateActivity(root);
     expect(root.status).toBe('live');
+  });
+});
+
+describe('an agent blocked on a tool', () => {
+  const stale = { liveWindowSeconds: 60, nowMs: 10_000_000, mtimeMs: 9_000_000 };
+
+  function tree(lines: TranscriptLine[]) {
+    return buildSessionTree({
+      sessionId: 'abcdef12-0000-0000-0000-000000000000',
+      lines,
+      mtimeMs: stale.mtimeMs,
+      subagents: [],
+      workflows: [],
+      liveWindowSeconds: stale.liveWindowSeconds,
+      nowMs: stale.nowMs,
+    });
+  }
+
+  const started = new Date(10_000_000 - 240_000).toISOString();
+
+  it('reads as running, not finished, while a tool call has not come back', () => {
+    const node = tree([
+      { ...assistant([{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'pytest -x' } }]), timestamp: started },
+    ]);
+
+    expect(node.status).toBe('running');
+    expect(node.waiting).toBe('waiting on Bash · 4m');
+  });
+
+  it('goes quiet once the result lands', () => {
+    const node = tree([
+      assistant([{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'pytest -x' } }]),
+      user([{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'ok' }]),
+    ]);
+
+    expect(node.status).toBe('done');
+    expect(node.waiting).toBeUndefined();
+  });
+
+  it('is not waiting when the call came back an error', () => {
+    const node = tree([
+      assistant([{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'pytest -x' } }]),
+      user([{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'boom', is_error: true }]),
+    ]);
+
+    expect(node.waiting).toBeUndefined();
+  });
+
+  it('is not waiting once you have interrupted and said something else', () => {
+    const node = tree([
+      assistant([{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'sleep 999' } }]),
+      user([{ type: 'text', text: 'stop, do something else' }]),
+    ]);
+
+    expect(node.status).toBe('done');
+    expect(node.waiting).toBeUndefined();
+  });
+
+  it('reports the last of several parallel calls still outstanding', () => {
+    const events = buildEvents([
+      assistant([
+        { type: 'tool_use', id: 'toolu_1', name: 'Read', input: { file_path: '/a' } },
+        { type: 'tool_use', id: 'toolu_2', name: 'Bash', input: { command: 'make test' } },
+      ]),
+      user([{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'contents' }]),
+    ]);
+
+    expect(waitingOn(events)?.name).toBe('Bash');
+  });
+
+  it('carries a blocked grandchild up through parents that are not themselves waiting', () => {
+    const node = buildSessionTree({
+      sessionId: 'abcdef12-0000-0000-0000-000000000000',
+      lines: [
+        assistant([{ type: 'tool_use', id: 'toolu_parent', name: 'Agent', input: { description: 'parent' } }]),
+        user([{ type: 'tool_result', tool_use_id: 'toolu_parent', content: 'launched' }]),
+      ],
+      mtimeMs: stale.mtimeMs,
+      subagents: [
+        {
+          agentId: 'aparent',
+          meta: { description: 'parent', toolUseId: 'toolu_parent', spawnDepth: 1 },
+          mtimeMs: stale.mtimeMs,
+          lines: [
+            assistant([{ type: 'tool_use', id: 'toolu_child', name: 'Agent', input: { description: 'child' } }]),
+            user([{ type: 'tool_result', tool_use_id: 'toolu_child', content: 'launched' }]),
+          ],
+        },
+        {
+          agentId: 'achild',
+          meta: { description: 'child', toolUseId: 'toolu_child', spawnDepth: 2 },
+          mtimeMs: stale.mtimeMs,
+          lines: [
+            {
+              ...assistant([{ type: 'tool_use', id: 'toolu_deep', name: 'Bash', input: { command: 'terraform apply' } }]),
+              timestamp: started,
+            },
+          ],
+        },
+      ],
+      workflows: [],
+      liveWindowSeconds: stale.liveWindowSeconds,
+      nowMs: stale.nowMs,
+    });
+
+    const parent = node.children[0];
+    const child = parent?.children[0];
+
+    expect(child?.label).toBe('child');
+    expect(child?.status).toBe('running');
+    expect(child?.waiting).toBe('waiting on Bash · 4m');
+
+    expect(parent?.waiting).toBeUndefined();
+    expect(parent?.status).toBe('running');
+    expect(node.waiting).toBeUndefined();
+    expect(node.status).toBe('running');
+  });
+
+  it('leaves a live node green rather than demoting it to waiting', () => {
+    const node = buildSessionTree({
+      sessionId: 'abcdef12-0000-0000-0000-000000000000',
+      lines: [assistant([{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'x' } }])],
+      mtimeMs: 10_000_000,
+      subagents: [],
+      workflows: [],
+      liveWindowSeconds: 60,
+      nowMs: 10_000_000,
+    });
+
+    expect(node.status).toBe('live');
   });
 });

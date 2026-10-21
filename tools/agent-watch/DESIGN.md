@@ -617,7 +617,23 @@ whatever the parent or the manifest says:
   timestamp pass every positive window, so one backward NTP step would pin thousands of
   transcripts green at once. Modest skew is tolerated, a 2035 stamp is not.
 - `running` — not writing, but launched and not yet returned. Quiet, not finished: an
-  agent waiting on a long `Bash` call, or one still queued.
+  agent waiting on a long `Bash` call, or one still queued. An agent blocked on a tool
+  writes nothing while it waits, so mtime alone calls it finished after 60s — which is
+  wrong in the one case the user most wants to see. Its **own transcript** says otherwise:
+  a `tool_use` with no matching `tool_result` as the last event means it is still waiting
+  on that call. That is better evidence than the parent's `tool_result`, which for a
+  background agent lands 16ms after launch and says nothing about the work.
+
+  The rule is precise on real data: of 120 transcripts scanned, **2** end on an unanswered
+  call — one of them a review agent 7 minutes into a `Bash`, which the old rule showed as
+  a grey `✓`. Nothing old is resurrected, because a finished agent's last event is its
+  result, not its call. An interrupt breaks the pattern too: the result arrives with
+  `is_error`, or a user message follows, and either ends the wait.
+
+  What it cannot distinguish is an agent killed *during* a tool call — that leaves the same
+  shape. Rather than guess, the node says what it is waiting on and for how long
+  (`waiting on Bash · 4m`, in blue), so a 4-minute wait and a 3-week one are told apart by
+  the reader rather than by a threshold invented here.
 - `done` / `error` — terminal.
 
 Deriving an agent's liveness from the parent instead was wrong, and measurably so. A

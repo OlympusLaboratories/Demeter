@@ -1,6 +1,6 @@
 import type { ManifestAgent, WorkflowManifest } from './manifest';
 import { statusFromState } from './manifest';
-import { clip, resultToText, summarizeToolUse } from './summarize';
+import { clip, formatAge, resultToText, summarizeToolUse } from './summarize';
 import {
   type ContentBlock,
   type SpeakerRole,
@@ -43,6 +43,7 @@ export interface AgentNode {
   spawnDepth?: number;
   cwd?: string;
   branch?: string;
+  waiting?: string;
 }
 
 export interface SubagentInput {
@@ -227,6 +228,7 @@ function subagentNode(
   errored = false,
 ): AgentNode {
   const events = buildEvents(input.lines);
+  const waiting = waitingLabel(events, liveness.nowMs);
   const label = input.meta.description ?? deriveLabel(input.lines) ?? input.agentId.slice(0, 8);
   return {
     id: `agent:${input.agentId}`,
@@ -237,14 +239,29 @@ function subagentNode(
       ? 'error'
       : isLive(input.mtimeMs, liveness)
         ? 'live'
-        : running
+        : running || waiting !== undefined
           ? 'running'
           : 'done',
+    waiting,
     events,
     children: [],
     toolUseId: input.meta.toolUseId,
     spawnDepth: input.meta.spawnDepth,
   };
+}
+
+export function waitingOn(events: AgentEvent[]): AgentEvent | undefined {
+  const last = events[events.length - 1];
+  if (!last || last.kind !== 'tool' || last.result !== undefined) return undefined;
+  return last;
+}
+
+function waitingLabel(events: AgentEvent[], nowMs: number): string | undefined {
+  const pending = waitingOn(events);
+  if (!pending) return undefined;
+  const startedMs = pending.timestamp ? Date.parse(pending.timestamp) : Number.NaN;
+  const age = Number.isFinite(startedMs) ? ` · ${formatAge(nowMs - startedMs)}` : '';
+  return `waiting on ${pending.name ?? 'tool'}${age}`;
 }
 
 export function spawnIdsIn(lines: TranscriptLine[]): Set<string> {
@@ -285,13 +302,15 @@ export function buildSessionTree(input: SessionInput): AgentNode {
   const events = buildEvents(input.lines);
   const liveness: Liveness = { liveWindowSeconds: input.liveWindowSeconds, nowMs: input.nowMs };
   const ageSeconds = (input.nowMs - input.mtimeMs) / 1000;
+  const waiting = waitingLabel(events, input.nowMs);
   const branch = latestBranch(input.lines);
   const root: AgentNode = {
     id: `session:${input.sessionId}`,
     kind: 'session',
     label: clip(sessionTitle(input.lines) ?? input.sessionId.slice(0, 8), 48),
     sublabel: branch,
-    status: ageSeconds <= input.liveWindowSeconds ? 'live' : 'done',
+    status: ageSeconds <= input.liveWindowSeconds ? 'live' : waiting !== undefined ? 'running' : 'done',
+    waiting,
     events,
     children: [],
     cwd: latestCwd(input.lines),
