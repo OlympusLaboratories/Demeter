@@ -67,6 +67,7 @@ export class Store {
     for (const project of chosen) {
       const resolved = await peekProjectPath(project);
       if (this.settings.hideDeletedWork && !(resolved && (await this.git.isInsideWorkTree(resolved)))) continue;
+      if (this.hidingOtherWindows() && !isInAnyFolder(this.settings.workspaceFolders, resolved)) continue;
       this.repos.push({ project, label: labelFor(resolved, project.slug), path: resolved });
     }
 
@@ -126,7 +127,7 @@ export class Store {
     const { live: kept, removed } = this.settings.hideDeletedWork
       ? partitionSessions(sessions, { knownRoots: roots, branches })
       : { live: sessions, removed: [] };
-    const live = this.onlyThisWindow
+    const live = this.hidingOtherWindows()
       ? kept.filter((entry) => isInAnyFolder(this.settings.workspaceFolders, entry.cwd))
       : kept;
     const groups = groupByWorktree(live, roots);
@@ -194,6 +195,10 @@ export class Store {
 
   selectWorktree(key: string): void {
     this.selectedWorktree = key;
+  }
+
+  private hidingOtherWindows(): boolean {
+    return this.onlyThisWindow && this.settings.workspaceFolders.length > 0;
   }
 
   setOnlyThisWindow(value: boolean): void {

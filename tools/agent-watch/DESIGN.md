@@ -486,6 +486,12 @@ wide, and how deep the nesting went.
 - **`expand all` is a toggle, not a one-way door.** Opening 96 nodes and leaving the user
   to close them one badge at a time would be worse than not having the button; it reads
   the current rendered state and closes everything when everything is already open.
+- **The this-window filter is applied at discovery, not only on load.** Learning a repo is
+  empty by loading it only works for the repo you are *on*; every other chip keeps its
+  place until you click it, which is the opposite of hiding it. The filter needs no load
+  anyway — `discover()` already resolves each project's path through `peekProjectPath`, so
+  whether a repo belongs to this window is known for all of them at once, before any
+  transcript is read.
 - **A scope with nothing in it is hidden, and you are moved off it.** An empty chip is a
   click into a blank canvas. Worktree groups are built from sessions so they are non-empty
   by construction, but a *repo* can empty out under `hideDeletedWork` or the this-window

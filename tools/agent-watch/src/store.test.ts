@@ -175,6 +175,45 @@ describe('Store', () => {
     expect(view.graph.nodes.length).toBeGreaterThan(0);
   });
 
+  it('drops the other repos as soon as the window filter goes on', async () => {
+    const { projects } = await fixture();
+    for (const [slug, cwd] of [['-tmp-one', '/tmp/one'], ['-tmp-two', '/tmp/two']]) {
+      const dir = path.join(projects, slug as string);
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(
+        path.join(dir, `${slug}-session.jsonl`),
+        `${JSON.stringify({ type: 'user', cwd, message: { content: [{ type: 'text', text: 'hi' }] } })}\n`,
+      );
+    }
+
+    const store = new Store({ ...settings(projects), workspaceFolders: ['/tmp/repo'] });
+    await store.discover('/tmp/repo');
+    await store.loadSelected();
+    const opening = store.view(false);
+    expect(opening.repos).toHaveLength(3);
+    expect(opening.selectedRepo).toBe('-tmp-repo');
+    expect(opening.graph.nodes.length).toBeGreaterThan(0);
+
+    store.setOnlyThisWindow(true);
+    await store.discover('/tmp/repo');
+    await store.loadSelected();
+
+    expect(store.view(false).repos.map((entry) => entry.slug)).toEqual(['-tmp-repo']);
+    expect(store.view(false).onlyThisWindow).toBe(true);
+  });
+
+  it('leaves everything alone when the window has no folder open', async () => {
+    const { projects } = await fixture();
+    const store = new Store({ ...settings(projects), workspaceFolders: [] });
+    await store.discover();
+    store.setOnlyThisWindow(true);
+    await store.discover();
+    await store.loadSelected();
+
+    expect(store.view(false).repos).toHaveLength(1);
+    expect(store.view(false).graph.nodes.length).toBeGreaterThan(0);
+  });
+
   it('expands and collapses every branch at once', async () => {
     const { projects, transcript, subagents } = await fixture();
     await fs.writeFile(path.join(subagents, 'agent-a1.meta.json'), JSON.stringify({ description: 'worker' }));
