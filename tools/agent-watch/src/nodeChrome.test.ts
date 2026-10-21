@@ -5,6 +5,7 @@ import {
   SUBLABEL_BASELINE,
   SUBLABEL_FONT,
   badgeBox,
+  countsLabel,
   labelCapacity,
   nodeBounds,
   openBox,
@@ -66,5 +67,25 @@ describe('the open-chat button', () => {
     expect(labelCapacity(both)).toBe(labelCapacity({ badge: true }));
     expect(sublabelCapacity(both)).toBeLessThan(sublabelCapacity({ badge: true }));
     expect(sublabelCapacity(both)).toBeGreaterThan(0);
+  });
+});
+
+describe('countsLabel', () => {
+  it('keeps reporting events even when the badge already reports the children', () => {
+    expect(countsLabel(112, 6)).toBe('112 events');
+    expect(countsLabel(43, 0)).toBe('43 events');
+  });
+
+  it('falls back to children only for a node that has no events of its own', () => {
+    expect(countsLabel(0, 6)).toBe('6 agents');
+    expect(countsLabel(0, 1)).toBe('1 agent');
+  });
+
+  it('says events, not agents, for a node with neither', () => {
+    expect(countsLabel(0, 0)).toBe('0 events');
+  });
+
+  it('counts one thing in the singular', () => {
+    expect(countsLabel(1, 0)).toBe('1 event');
   });
 });

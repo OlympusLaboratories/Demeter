@@ -5,6 +5,7 @@ import {
   SUBLABEL_BASELINE,
   TEXT_X,
   badgeBox,
+  countsLabel,
   edgeClass,
   labelCapacity,
   openBox,
@@ -16,7 +17,7 @@ import type { SpeakerRole } from '../transcript';
 import { moreLabel, previewOf } from '../preview';
 import type { HostMessage, NodeDetail, ViewMessage, ViewState } from '../protocol';
 import { clampZoom, zoomFactorFor } from '../zoom';
-import { expansionBoxes, frameBox, siblingBoxes } from '../focus';
+import { MIN_FIT_SCALE, expansionBoxes, frameBox, siblingBoxes } from '../focus';
 
 declare function acquireVsCodeApi(): { postMessage(message: ViewMessage): void };
 
@@ -115,6 +116,7 @@ let lastLayout: GraphLayout = { nodes: [], edges: [], width: 0, height: 0 };
 let userAdjusted = false;
 let lastShape = '';
 let zoomSensitivity = 1;
+let onlyThisWindow = false;
 let pendingFocus: { id: string; expanding: boolean } | undefined;
 
 function applyTransform(): void {
@@ -129,6 +131,7 @@ function fitToView(): void {
   const frame = frameBox(
     { x: 0, y: 0, width: lastLayout.width, height: lastLayout.height },
     canvasSize(),
+    { minScale: MIN_FIT_SCALE },
   );
   view.k = frame.k;
   view.tx = frame.tx;
@@ -224,6 +227,14 @@ function wireViewport(): void {
     { passive: false },
   );
 
+  byId('expand-all').addEventListener('click', () => {
+    pendingFocus = undefined;
+    vscode.postMessage({ type: 'toggleAll' });
+  });
+  byId('only-window').addEventListener('click', () => {
+    pendingFocus = undefined;
+    vscode.postMessage({ type: 'setOnlyThisWindow', value: !onlyThisWindow });
+  });
   byId('fit').addEventListener('click', () => {
     pendingFocus = undefined;
     fitToView();
@@ -239,6 +250,8 @@ function wireViewport(): void {
 }
 
 function renderStatus(state: ViewState): void {
+  onlyThisWindow = state.onlyThisWindow;
+  byId('only-window').classList.toggle('on', state.onlyThisWindow);
   const status = byId('status');
   status.replaceChildren();
 
@@ -334,7 +347,7 @@ function renderGraph(state: ViewState): void {
     sub.setAttribute('class', 'sublabel');
     sub.setAttribute('x', String(TEXT_X));
     sub.setAttribute('y', String(SUBLABEL_BASELINE));
-    const counts = node.childCount > 0 ? `${node.childCount} agents` : `${node.eventCount} events`;
+    const counts = countsLabel(node.eventCount, node.childCount);
     sub.textContent = truncate(
       node.sublabel ? `${node.sublabel} · ${counts}` : counts,
       sublabelCapacity(chrome),

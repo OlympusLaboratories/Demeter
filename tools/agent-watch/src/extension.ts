@@ -15,7 +15,12 @@ function readSettings(): StoreSettings {
     initialDepth: config.get<number>('initialDepth') ?? 1,
     zoomSensitivity: config.get<number>('zoomSensitivity') ?? 1,
     hideDeletedWork: config.get<boolean>('hideDeletedWork') ?? true,
+    workspaceFolders: workspaceFolders(),
   };
+}
+
+function workspaceFolders(): string[] {
+  return (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath);
 }
 
 function preferredWorkspacePath(): string | undefined {

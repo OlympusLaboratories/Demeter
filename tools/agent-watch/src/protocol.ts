@@ -38,6 +38,7 @@ export interface ViewState {
   updatedAtMs: number;
   recentDays: number;
   scopeKey: string;
+  onlyThisWindow: boolean;
   zoomSensitivity: number;
   removedCount: number;
 }
@@ -55,4 +56,6 @@ export type ViewMessage =
   | { type: 'selectNode'; id: string }
   | { type: 'toggleNode'; id: string }
   | { type: 'openSession'; id: string }
+  | { type: 'toggleAll' }
+  | { type: 'setOnlyThisWindow'; value: boolean }
   | { type: 'closeDetail' };

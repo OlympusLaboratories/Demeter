@@ -198,6 +198,15 @@ export class AgentWatchPanel {
       case 'openSession':
         await this.openSession(message.id);
         return;
+      case 'toggleAll':
+        this.store.toggleAll();
+        this.postState(false);
+        return;
+      case 'setOnlyThisWindow':
+        this.store.setOnlyThisWindow(message.value);
+        this.postState(true);
+        await this.reload();
+        return;
     }
   }
 
@@ -279,6 +288,8 @@ export class AgentWatchPanel {
   <div class="scope-row" id="branch-row"><span class="caption">branch</span><div class="chips" id="worktrees"></div></div>
   <div class="row status" id="status">
     <span class="spacer"></span>
+    <button class="chip" id="only-window" type="button" title="Show only sessions from the folder this window has open">this window</button>
+    <button class="chip" id="expand-all" type="button" title="Expand or collapse every branch">expand all</button>
     <button class="chip" id="zoom-out" type="button">−</button>
     <span id="zoom-level">100%</span>
     <button class="chip" id="zoom-in" type="button">+</button>
@@ -354,6 +365,7 @@ header#scope { padding: 8px 12px 4px; border-bottom: 1px solid var(--vscode-pane
 .chip.worktree { border-radius: 999px; }
 .row.status { color: var(--vscode-descriptionForeground); font-size: 0.8em; gap: 10px; }
 .row.status .dot { color: var(--vscode-charts-green); }
+.row.status .chip.on { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: transparent; }
 .row.status .hidden-count { color: var(--vscode-descriptionForeground); border-bottom: 1px dotted currentColor; cursor: help; }
 main { flex: 1; position: relative; overflow: hidden; }
 #canvas { position: absolute; inset: 0; overflow: hidden; cursor: grab; user-select: none; -webkit-user-select: none; }

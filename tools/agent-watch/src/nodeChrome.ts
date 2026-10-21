@@ -97,3 +97,10 @@ export function nodeBounds(): Box {
 export function edgeClass(toStatus: NodeStatus): string {
   return toStatus === 'live' || toStatus === 'running' ? `edge ${toStatus}` : 'edge';
 }
+
+export function countsLabel(eventCount: number, childCount: number): string {
+  if (eventCount > 0 || childCount === 0) {
+    return `${eventCount} event${eventCount === 1 ? '' : 's'}`;
+  }
+  return `${childCount} agent${childCount === 1 ? '' : 's'}`;
+}

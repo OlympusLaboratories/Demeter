@@ -467,6 +467,23 @@ wide, and how deep the nesting went.
   must stay selectable, since copying a tool's output is the point of opening it. Verified
   by reading `getComputedStyle` in headless Chrome rather than by eye: canvas and SVG text
   `none`, overlay and its `<pre>` `auto`.
+- **`Fit` uses a lower floor than the expand-framing.** 0.55 is a readability floor for a
+  row you just opened; applied to the whole graph it means `Fit` provably does not fit —
+  a wide deep tree is pinned at 0.55 and clipped off the right edge, and pressing `Fit`
+  again just re-clips it. `MIN_FIT_SCALE` is 0.15, so the graph lands on screen whenever
+  0.15 can hold it, and clamps there rather than shrinking a 96-agent run to an illegible
+  smear. The two floors are different numbers because they answer different questions.
+- **`expand all` is a toggle, not a one-way door.** Opening 96 nodes and leaving the user
+  to close them one badge at a time would be worse than not having the button; it reads
+  the current rendered state and closes everything when everything is already open.
+- **A scope with nothing in it is hidden, and you are moved off it.** An empty chip is a
+  click into a blank canvas. Worktree groups are built from sessions so they are non-empty
+  by construction, but a *repo* can empty out under `hideDeletedWork` or the this-window
+  filter — and that is only knowable after loading it. `loadSelected` therefore records
+  the slugs it finds empty, hides them, and advances the selection to the next repo not
+  known to be empty, bounded by the repo count so it cannot spin. The selected repo is
+  never hidden while you are on it, so the chip row never silently loses the thing it is
+  highlighting.
 - **Pan and zoom**, with a `Fit` control. The viewport refits automatically whenever the
   graph's *shape* changes — scope key plus node count plus dimensions — because a zoom
   level chosen for a 96-node run leaves a single-node session off-screen on an apparently

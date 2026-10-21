@@ -6,6 +6,7 @@ import { DEFAULT_AUTO_COLLAPSE, layoutForest } from './graphLayout';
 import { TranscriptCache } from './tail';
 import type { NodeDetail, RepoSummary, ViewState, WorktreeSummary } from './protocol';
 import { FirstChildrenWatch } from './firstChildren';
+import { isInAnyFolder } from './workspacePaths';
 
 export interface StoreSettings {
   projectsDir: string;
@@ -17,6 +18,7 @@ export interface StoreSettings {
   initialDepth: number;
   zoomSensitivity: number;
   hideDeletedWork: boolean;
+  workspaceFolders: string[];
 }
 
 interface RepoEntry {
@@ -40,6 +42,8 @@ export class Store {
   private readonly firstChildren = new FirstChildrenWatch();
   private workspaceSlug?: string;
   private workspaceFor?: string;
+  private emptyRepos = new Set<string>();
+  private onlyThisWindow = false;
 
   constructor(private settings: StoreSettings) {}
 
@@ -91,7 +95,7 @@ export class Store {
     return best?.project.slug;
   }
 
-  async loadSelected(): Promise<void> {
+  async loadSelected(attempt = 0): Promise<void> {
     const repo = this.repos.find((entry) => entry.project.slug === this.selectedRepo);
     if (!repo) {
       this.groups = [];
@@ -119,13 +123,32 @@ export class Store {
     const roots = repo.path ? await this.git.worktreeRoots(repo.path) : [];
     const branches =
       repo.path && this.settings.hideDeletedWork ? await this.git.branchNames(repo.path) : new Set<string>();
-    const { live, removed } = this.settings.hideDeletedWork
+    const { live: kept, removed } = this.settings.hideDeletedWork
       ? partitionSessions(sessions, { knownRoots: roots, branches })
       : { live: sessions, removed: [] };
+    const live = this.onlyThisWindow
+      ? kept.filter((entry) => isInAnyFolder(this.settings.workspaceFolders, entry.cwd))
+      : kept;
     const groups = groupByWorktree(live, roots);
     const nodesById = new Map<string, AgentNode>();
     for (const group of groups) {
       for (const session of group.sessions) index(session.tree, nodesById);
+    }
+
+    if (groups.length > 0) this.emptyRepos.delete(repo.project.slug);
+    else {
+      this.emptyRepos.add(repo.project.slug);
+      const next = this.repos.find(
+        (entry) => entry.project.slug !== repo.project.slug && !this.emptyRepos.has(entry.project.slug),
+      );
+      if (next && attempt < this.repos.length) {
+        this.selectedRepo = next.project.slug;
+        this.selectedWorktree = undefined;
+        this.overrides.clear();
+        this.firstChildren.clear();
+        await this.loadSelected(attempt + 1);
+        return;
+      }
     }
 
     this.removedCount = removed.length;
@@ -161,6 +184,7 @@ export class Store {
 
   selectRepo(slug: string): void {
     if (this.selectedRepo === slug) return;
+    this.emptyRepos.delete(slug);
     this.selectedRepo = slug;
     this.selectedWorktree = undefined;
     this.overrides.clear();
@@ -170,6 +194,19 @@ export class Store {
 
   selectWorktree(key: string): void {
     this.selectedWorktree = key;
+  }
+
+  setOnlyThisWindow(value: boolean): void {
+    if (this.onlyThisWindow === value) return;
+    this.onlyThisWindow = value;
+    this.emptyRepos.clear();
+    this.selectedWorktree = undefined;
+  }
+
+  toggleAll(): void {
+    const expandable = [...this.nodesById.values()].filter((node) => node.children.length > 0);
+    const allOpen = expandable.every((node) => this.renderedExpansion.get(node.id) === true);
+    for (const node of expandable) this.overrides.set(node.id, !allOpen);
   }
 
   toggleNode(id: string): boolean {
@@ -214,6 +251,7 @@ export class Store {
         sessionCount: entry.project.sessions.length,
         newestMtimeMs: entry.project.newestMtimeMs,
       }))
+      .filter((entry) => entry.slug === this.selectedRepo || !this.emptyRepos.has(entry.slug))
       .sort((left, right) => {
         if (left.isWorkspace !== right.isWorkspace) return left.isWorkspace ? -1 : 1;
         return right.newestMtimeMs - left.newestMtimeMs;
@@ -244,6 +282,7 @@ export class Store {
       watchedCount: this.targets.length,
       updatedAtMs: Date.now(),
       recentDays: this.settings.recentDays,
+      onlyThisWindow: this.onlyThisWindow,
       scopeKey: this.scopeKey(),
       zoomSensitivity: this.settings.zoomSensitivity,
       removedCount: this.removedCount,

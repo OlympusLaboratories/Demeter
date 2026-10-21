@@ -37,6 +37,7 @@ function settings(projects: string): StoreSettings {
     initialDepth: 1,
     zoomSensitivity: 1,
     hideDeletedWork: false,
+    workspaceFolders: ['/tmp/repo'],
   };
 }
 
@@ -148,6 +149,52 @@ describe('Store', () => {
     await store.loadSelected();
 
     expect(store.view(false).repos.some((entry) => entry.isWorkspace)).toBe(false);
+  });
+
+  it('hides a repo it has found to be empty, and moves you off it', async () => {
+    const { projects } = await fixture();
+    const other = path.join(projects, '-tmp-elsewhere');
+    await fs.mkdir(other, { recursive: true });
+    await fs.writeFile(
+      path.join(other, 'dddddddd-0000-0000-0000-000000000004.jsonl'),
+      `${JSON.stringify({ type: 'user', cwd: '/tmp/elsewhere', message: { content: [{ type: 'text', text: 'hi' }] } })}\n`,
+    );
+
+    const store = new Store({ ...settings(projects), workspaceFolders: ['/tmp/elsewhere'] });
+    await store.discover();
+    store.selectRepo('-tmp-repo');
+    await store.loadSelected();
+    expect(store.view(false).repos).toHaveLength(2);
+
+    store.setOnlyThisWindow(true);
+    await store.loadSelected();
+    const view = store.view(false);
+
+    expect(view.selectedRepo).toBe('-tmp-elsewhere');
+    expect(view.repos.map((entry) => entry.slug)).toEqual(['-tmp-elsewhere']);
+    expect(view.graph.nodes.length).toBeGreaterThan(0);
+  });
+
+  it('expands and collapses every branch at once', async () => {
+    const { projects, transcript, subagents } = await fixture();
+    await fs.writeFile(path.join(subagents, 'agent-a1.meta.json'), JSON.stringify({ description: 'worker' }));
+    await fs.writeFile(path.join(subagents, 'agent-a1.jsonl'), '');
+
+    const old = new Date(Date.now() - 3_600_000);
+    for (const file of [transcript, path.join(subagents, 'agent-a1.jsonl')]) {
+      await fs.utimes(file, old, old);
+    }
+
+    const store = new Store({ ...settings(projects), initialDepth: 0, liveWindowSeconds: 60 });
+    await store.discover();
+    await store.loadSelected();
+    expect(store.view(false).graph.nodes).toHaveLength(1);
+
+    store.toggleAll();
+    expect(store.view(false).graph.nodes).toHaveLength(2);
+
+    store.toggleAll();
+    expect(store.view(false).graph.nodes).toHaveLength(1);
   });
 
   it('picks up a subagent that appears after the first load', async () => {

@@ -32,6 +32,7 @@ export interface FrameOptions {
 
 export const FOCUS_PADDING = 28;
 export const MIN_FOCUS_SCALE = 0.55;
+export const MIN_FIT_SCALE = 0.15;
 export const MAX_FOCUS_SCALE = 1;
 export const MIN_HEIGHT_FRACTION = 1 / 3;
 export const MAX_MAGNIFIED_ROWS = 3;

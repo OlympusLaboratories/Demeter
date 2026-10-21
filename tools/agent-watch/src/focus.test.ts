@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   MAX_MAGNIFIED_ROWS,
+  MIN_FIT_SCALE,
   MIN_FOCUS_SCALE,
   MIN_HEIGHT_FRACTION,
   expansionBoxes,
@@ -225,5 +226,27 @@ describe('frameBox', () => {
     expect(Number.isFinite(frame.k)).toBe(true);
     expect(Number.isFinite(frame.tx)).toBe(true);
     expect(Number.isFinite(frame.ty)).toBe(true);
+  });
+});
+
+describe('Fit on a graph the focus floor cannot hold', () => {
+  const wideDeep = { x: 0, y: 0, width: 2318, height: 600 };
+
+  it('fits a wide deep tree that the focus floor would have clipped off the edge', () => {
+    const clipped = frameBox(wideDeep, canvas, { minScale: MIN_FOCUS_SCALE });
+    expect(wideDeep.width * clipped.k).toBeGreaterThan(canvas.width);
+
+    const fitted = frameBox(wideDeep, canvas, { minScale: MIN_FIT_SCALE });
+    expect(fitted.k).toBeLessThan(MIN_FOCUS_SCALE);
+    expect(wideDeep.width * fitted.k).toBeLessThanOrEqual(canvas.width - 56 + 0.001);
+    expect(wideDeep.height * fitted.k).toBeLessThanOrEqual(canvas.height - 56 + 0.001);
+  });
+
+  it('stops at a floor rather than shrinking a 96-agent run to nothing', () => {
+    const swarm = { x: 0, y: 0, width: 722, height: 5936 };
+    const frame = frameBox(swarm, canvas, { minScale: MIN_FIT_SCALE });
+
+    expect(frame.k).toBe(MIN_FIT_SCALE);
+    expect(swarm.height * frame.k).toBeGreaterThan(canvas.height);
   });
 });

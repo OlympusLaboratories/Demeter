@@ -51,6 +51,10 @@ of it is ever truncated — a long open panel shows its first 20 lines with a **
 button naming exactly how much is held back, and the header above it always reports the
 real size.
 
+A node's second line always reports its own **event count**, since the expand badge already
+reports how many children it has; only a node with no events of its own (a workflow or a
+phase band) shows a child count instead.
+
 **Status comes from each node's own transcript**, not from its parent. `●` green means the
 transcript was written within the last `liveWindowSeconds` — it is working right now. `◐`
 blue means launched and not yet returned but currently quiet, such as an agent waiting on a
@@ -93,8 +97,18 @@ to the row's **top**, since the first child is where you start reading, while a 
 keeps the **node you clicked** centred, so collapsing one agent inside a 90-sibling row
 does not throw you to that row's start.
 
-Drag to pan (without selecting the labels you drag over), scroll to zoom, `Fit` to
-reframe. Zoom tracks how far you actually scrolled
+The status row carries three toggles. **this window** hides sessions that ran outside the
+folder this window has open — the ones whose `↗` would refuse to resume them here. **expand
+all** opens every branch, and opens nothing further once everything is open, so a second
+click closes them again. **Fit** reframes the whole graph; it drops below the floor the
+expand-framing uses, so a wide deep tree lands fully on screen instead of being clipped,
+and stops at `0.15` rather than shrinking a 96-agent run to nothing.
+
+A repo or branch chip with nothing to show is hidden rather than left to click into an
+empty canvas, and if the one you are on becomes empty the selection moves to a repo that
+still has something in it.
+
+Drag to pan (without selecting the labels you drag over), scroll to zoom. Zoom tracks how far you actually scrolled
 rather than stepping a fixed amount per wheel event, so a trackpad gesture nudges it
 instead of flinging it; pinch responds faster than a scroll, and one huge delta can never
 jump more than 8%. Tune it with `agentWatch.zoomSensitivity`, or set it to `0` to turn
