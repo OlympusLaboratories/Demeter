@@ -287,6 +287,7 @@ export class AgentWatchPanel {
   <div class="scope-row" id="repo-row"><span class="caption">repo</span><div class="chips" id="repos"></div></div>
   <div class="scope-row" id="branch-row"><span class="caption">branch</span><div class="chips" id="worktrees"></div></div>
   <div class="row status" id="status">
+    <span id="status-text"></span>
     <span class="spacer"></span>
     <button class="chip" id="only-window" type="button" title="Show only sessions from the folder this window has open">this window</button>
     <button class="chip" id="expand-all" type="button" title="Expand or collapse every branch">expand all</button>
@@ -371,6 +372,7 @@ main { flex: 1; position: relative; overflow: hidden; }
 #canvas { position: absolute; inset: 0; overflow: hidden; cursor: grab; user-select: none; -webkit-user-select: none; }
 #canvas.grabbing { cursor: grabbing; }
 .row.status .spacer { flex: 1; }
+.row.status #status-text { display: flex; gap: 10px; align-items: center; }
 svg { display: block; }
 .node rect { fill: var(--vscode-editorWidget-background); stroke: var(--vscode-panel-border); stroke-width: 1.5; rx: 6; cursor: pointer; }
 .node.live rect { stroke: var(--vscode-charts-green); stroke-width: 2.5; animation: pulse 1.8s ease-in-out infinite; }

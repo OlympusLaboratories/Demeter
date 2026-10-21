@@ -99,6 +99,19 @@ describe('AgentWatchPanel', () => {
     expect(/#overlay \{[^}]*user-select/.test(html)).toBe(false);
   });
 
+  it('keeps the controls out of the region the status text overwrites', async () => {
+    const projects = await fixtureProjects();
+    AgentWatchPanel.show(context(), store(projects));
+    const html = createdPanels[0]?.webview.html ?? '';
+    const row = /<div class="row status" id="status">([\s\S]*?)<\/div>/.exec(html)?.[1] ?? '';
+
+    expect(row).toContain('id="status-text"');
+    for (const id of ['only-window', 'expand-all', 'zoom-out', 'zoom-in', 'zoom-level', 'fit']) {
+      expect(row).toContain(`id="${id}"`);
+    }
+    expect(/<span id="status-text">\s*<\/span>/.test(row)).toBe(true);
+  });
+
   it('gives the tab its own icon rather than the editor default', async () => {
     const projects = await fixtureProjects();
     AgentWatchPanel.show(context(), store(projects));

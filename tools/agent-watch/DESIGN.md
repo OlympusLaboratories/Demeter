@@ -467,6 +467,16 @@ wide, and how deep the nesting went.
   must stay selectable, since copying a tool's output is the point of opening it. Verified
   by reading `getComputedStyle` in headless Chrome rather than by eye: canvas and SVG text
   `none`, overlay and its `<pre>` `auto`.
+- **The status text gets its own element; the controls are not in it.** `renderStatus`
+  calls `replaceChildren()`, and it used to call it on the whole status *row* — which also
+  holds `−`, the zoom percentage, `+` and `Fit`. So the first render deleted every control
+  on the row, permanently and silently: the zoom buttons never worked and `Fit` was never
+  reachable, which is why it got asked for as a new feature. Adding a control that
+  `renderStatus` also *reads* turned that into a hard freeze — the second render threw
+  `missing element`, the message handler died, and the panel sat on "Scanning…" forever.
+  The text now lives in its own `#status-text` span and only that is replaced. The message
+  handler also catches, writes the message into the status line and rethrows, so the next
+  such bug is visible instead of looking like a hang.
 - **`Fit` uses a lower floor than the expand-framing.** 0.55 is a readability floor for a
   row you just opened; applied to the whole graph it means `Fit` provably does not fit —
   a wide deep tree is pinned at 0.55 and clipped off the right edge, and pressing `Fit`

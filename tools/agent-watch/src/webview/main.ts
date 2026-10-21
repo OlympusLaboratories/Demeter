@@ -252,7 +252,7 @@ function wireViewport(): void {
 function renderStatus(state: ViewState): void {
   onlyThisWindow = state.onlyThisWindow;
   byId('only-window').classList.toggle('on', state.onlyThisWindow);
-  const status = byId('status');
+  const status = byId('status-text');
   status.replaceChildren();
 
   const liveTotal = state.worktrees.reduce((total, tree) => total + tree.liveCount, 0);
@@ -606,16 +606,22 @@ function wire(): void {
 
   window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
     const message = event.data;
-    if (message.type === 'state') {
-      zoomSensitivity = message.state.zoomSensitivity;
-      renderScope(message.state);
-      renderStatus(message.state);
-      renderGraph(message.state);
-    } else if (message.type === 'detail') {
-      renderDetail(message.detail, message.refreshed);
-    } else if (message.type === 'detailClosed') {
-      byId('overlay').classList.add('hidden');
-      openDetailId = undefined;
+    try {
+      if (message.type === 'state') {
+        zoomSensitivity = message.state.zoomSensitivity;
+        renderScope(message.state);
+        renderStatus(message.state);
+        renderGraph(message.state);
+      } else if (message.type === 'detail') {
+        renderDetail(message.detail, message.refreshed);
+      } else if (message.type === 'detailClosed') {
+        byId('overlay').classList.add('hidden');
+        openDetailId = undefined;
+      }
+    } catch (error) {
+      const text = document.getElementById('status-text');
+      if (text) text.textContent = `render failed: ${error instanceof Error ? error.message : String(error)}`;
+      throw error;
     }
   });
 
