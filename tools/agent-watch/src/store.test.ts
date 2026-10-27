@@ -214,6 +214,41 @@ describe('Store', () => {
     expect(store.view(false).graph.nodes.length).toBeGreaterThan(0);
   });
 
+  it('lights the repo chip for an agent working under an idle session', async () => {
+    const { projects, transcript, subagents } = await fixture();
+    const old = new Date(Date.now() - 3_600_000);
+    await fs.utimes(transcript, old, old);
+    await fs.writeFile(path.join(subagents, 'agent-a1.meta.json'), JSON.stringify({ description: 'worker' }));
+    await fs.writeFile(path.join(subagents, 'agent-a1.jsonl'), '');
+
+    const store = new Store({ ...settings(projects), liveWindowSeconds: 60 });
+    await store.discover();
+    await store.loadSelected();
+    const view = store.view(false);
+
+    expect(view.repos[0]?.liveCount).toBe(1);
+    expect(view.worktrees[0]?.liveCount).toBe(1);
+  });
+
+  it('counts a session blocked on a tool as active in both chips', async () => {
+    const { projects, transcript } = await fixture();
+    await fs.appendFile(
+      transcript,
+      `${JSON.stringify({ type: 'assistant', cwd: '/tmp/repo', gitBranch: 'main', timestamp: new Date().toISOString(), message: { content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'sleep 600' } }] } })}\n`,
+    );
+    const old = new Date(Date.now() - 3_600_000);
+    await fs.utimes(transcript, old, old);
+
+    const store = new Store({ ...settings(projects), liveWindowSeconds: 60 });
+    await store.discover();
+    await store.loadSelected();
+    const view = store.view(false);
+
+    expect(view.graph.nodes[0]?.status).toBe('running');
+    expect(view.worktrees[0]?.liveCount).toBe(1);
+    expect(view.repos[0]?.liveCount).toBe(1);
+  });
+
   it('expands and collapses every branch at once', async () => {
     const { projects, transcript, subagents } = await fixture();
     await fs.writeFile(path.join(subagents, 'agent-a1.meta.json'), JSON.stringify({ description: 'worker' }));

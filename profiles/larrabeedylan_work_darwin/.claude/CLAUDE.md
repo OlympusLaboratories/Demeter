@@ -34,3 +34,30 @@ In practice:
 
 None of this reduces how much you explain. Explain in the response, the commit message,
 and the description, at whatever length is useful there.
+
+## Spawn subagents freely
+
+Standing instruction, and it overrides any session default to the contrary: **use the Agent
+tool whenever work genuinely parallelises, without asking first.** Independent reviews,
+searches across unrelated areas, and per-file or per-dimension passes should fan out rather
+than run one after another.
+
+The reason is that the fan-out is observable here. `tools/agent-watch/` renders every
+subagent as a live node under the session that spawned it, with the path from a working
+agent back to its session drawn in green, so a swarm is something to watch rather than
+something opaque. Exploring sequentially to avoid spawning buys nothing in exchange.
+
+This covers the Agent tool only. The **Workflow** tool is a different scale — it can launch
+dozens of agents in one run — so it keeps its own opt-in and should still be offered rather
+than assumed.
+
+Two things a spawned agent does not inherit, so put them in its prompt:
+
+- **This file.** A subagent gets the prompt it is given, not the user's `CLAUDE.md`, so the
+  no-comments rule above has to be restated to any agent that writes or edits code.
+- **"Read-only" has to name the repo.** An agent told only to review read-only has still
+  written test files into the working tree. Say explicitly that it must not create, edit or
+  delete anything under the repo, give it a scratch directory, and tell it to clean up.
+
+Ask first only when the work is destructive, touches external state, or when the number of
+agents is itself the question.

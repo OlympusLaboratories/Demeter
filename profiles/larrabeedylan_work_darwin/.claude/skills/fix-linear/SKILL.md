@@ -184,6 +184,8 @@ Load the `get_issue` tool via `ToolSearch` (query: `select:mcp__claude_ai_Linear
 
 Use `mcp__claude_ai_Linear__get_issue` with `id: TICKET_ID` and `includeRelations: true` (e.g., `PLAT-1180`). This returns the full issue including title, description, status, labels, assignee, relations, and — critically — the **`parent`** field.
 
+**`get_issue`'s default response omits `parentId` entirely.** `includeRelations: true` adds blocks/blocked-by/related but *not* the parent, so the field is simply absent and reads as "no parent" when there may well be one. Make a second call passing `fields: ["id", "title", "parentId", "projectId"]` — a nonempty `fields` selection is the only way to surface it. Do this before concluding a ticket is parentless, and note that a project-level MR stack (siblings sharing an `MR<n>` title prefix with no shared parent) needs `list_issues` with `project:` rather than `parentId:`.
+
 **Record the `parent` field now.** Explicitly note whether the issue has a parent and, if so, capture the parent's identifier. This determines whether Step 3f applies, and Step 3f is mandatory whenever a parent exists — do not lose this information between steps.
 
 ### 3b. If not found

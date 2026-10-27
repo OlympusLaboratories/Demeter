@@ -78,7 +78,7 @@ export function groupByWorktree(sessions: LoadedSession[], knownRoots: string[])
       groups.set(key, group);
     }
     group.sessions.push(session);
-    if (session.tree.status === 'live') group.liveCount += 1;
+    if (session.tree.status === 'live' || session.tree.status === 'running') group.liveCount += 1;
   }
 
   const ordered = [...groups.values()];

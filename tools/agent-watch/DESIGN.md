@@ -367,6 +367,25 @@ wide, and how deep the nesting went.
   (`#C5C5C5` / `#424242`) rather than `currentColor`. They live in `media/`, outside the
   `dist/` the `.gitignore` drops, and `vsce` picks them up with no `.vscodeignore` entry —
   verified in the packaged vsix rather than assumed.
+- **Both chips count the same thing: a session with work in it.** They used to disagree
+  twice over. A repo chip counted session transcripts newer than the live window, which
+  misses the ordinary swarm shape entirely — the *agent* writes while the session that
+  spawned it sits idle, so a repo with four agents running showed no dot at all. And a
+  branch chip counted only `live`, so a session blocked on a tool lit neither. Now a
+  worktree group counts `live` **or** `running`, and `scanProjects` folds the newest mtime
+  under each session's `subagents/` into an `activityMs` the repo chip uses instead of the
+  transcript's own. The selected repo skips the approximation and sums its real group
+  counts, since its tree is already loaded.
+
+  The walk is bounded to the newest `ACTIVITY_SAMPLE` (5) sessions per project — liveness
+  is a question about recent sessions, and the alternative is restatting every agent
+  transcript of every repo on a 2s poll. A full `scanProjects` over this machine measures
+  **5.9 ms**.
+
+  The approximation is honest about its limit: for a repo you are not on, `activityMs`
+  sees a *writing* agent but cannot see a *blocked* one, because knowing that requires
+  parsing the transcript. A blocked agent in an unselected repo therefore still shows no
+  dot until you open it.
 - **The repo this window has open is pinned first and marked with a dot.** Recency ordering
   otherwise buries the one repo you almost always want behind whatever ran last. The mark
   is a CSS pseudo-element rather than a left border, because the home repo is usually also

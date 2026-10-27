@@ -516,8 +516,128 @@ print(json.dumps({
 PYEOF
 )" < "$BODY_FILE"
     ;;
+  project-info)
+    # Args: project_path (URL-encoded, e.g. gridmatic%2Ffoundation%2Fftl-platform)
+    PROJECT="${2:?Usage: gitlab-api.sh project-info <project_path_urlencoded>}"
+    curl -sf -H "PRIVATE-TOKEN: $TOKEN" "$GITLAB_URL/projects/$PROJECT" | python3 -c "
+import sys, json
+p = json.load(sys.stdin)
+print(json.dumps({
+    'id': p['id'],
+    'path_with_namespace': p['path_with_namespace'],
+    'default_branch': p.get('default_branch', ''),
+    'web_url': p.get('web_url', ''),
+}))
+"
+    ;;
+  project-runners)
+    # Args: project_path (URL-encoded), optional scope (specific|shared|group|project_type|...)
+    PROJECT="${2:?Usage: gitlab-api.sh project-runners <project_path_urlencoded> [scope]}"
+    SCOPE="${3:-}"
+    curl -sf -H "PRIVATE-TOKEN: $TOKEN" \
+      "$GITLAB_URL/projects/$PROJECT/runners?per_page=100${SCOPE:+&scope=$SCOPE}" | python3 -c "
+import sys, json
+for r in json.load(sys.stdin):
+    print(json.dumps({
+        'id': r['id'],
+        'description': r.get('description', ''),
+        'runner_type': r.get('runner_type', ''),
+        'online': r.get('online'),
+        'status': r.get('status', ''),
+        'paused': r.get('paused'),
+        'tag_list': r.get('tag_list', []),
+    }))
+"
+    ;;
+  runner-info)
+    # Args: runner_id (from project-runners)
+    RUNNER_ID="${2:?Usage: gitlab-api.sh runner-info <runner_id>}"
+    curl -sf -H "PRIVATE-TOKEN: $TOKEN" "$GITLAB_URL/runners/$RUNNER_ID" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+print(json.dumps({
+    'id': r['id'],
+    'description': r.get('description', ''),
+    'runner_type': r.get('runner_type', ''),
+    'online': r.get('online'),
+    'status': r.get('status', ''),
+    'paused': r.get('paused'),
+    'run_untagged': r.get('run_untagged'),
+    'tag_list': r.get('tag_list', []),
+    'locked': r.get('locked'),
+    'projects': [p.get('path_with_namespace') for p in r.get('projects', [])],
+}))
+"
+    ;;
+  ci-variable-keys)
+    # Args: scope ("projects"|"groups"), id (URL-encoded path or numeric id).
+    # Prints KEY NAMES and flags only — never values, so secrets stay out of logs.
+    SCOPE="${2:?Usage: gitlab-api.sh ci-variable-keys <projects|groups> <id_urlencoded>}"
+    OWNER="${3:?}"
+    curl -sf -H "PRIVATE-TOKEN: $TOKEN" "$GITLAB_URL/$SCOPE/$OWNER/variables?per_page=100" | python3 -c "
+import sys, json
+for v in json.load(sys.stdin):
+    print(json.dumps({
+        'key': v.get('key'),
+        'protected': v.get('protected'),
+        'masked': v.get('masked'),
+        'environment_scope': v.get('environment_scope', '*'),
+    }))
+"
+    ;;
+  protected-refs)
+    # Args: project_path (URL-encoded). Lists protected branches and protected tags.
+    PROJECT="${2:?Usage: gitlab-api.sh protected-refs <project_path_urlencoded>}"
+    for KIND in protected_branches protected_tags; do
+      echo "# $KIND"
+      curl -sf -H "PRIVATE-TOKEN: $TOKEN" "$GITLAB_URL/projects/$PROJECT/$KIND?per_page=100" | python3 -c "
+import sys, json
+for r in json.load(sys.stdin):
+    print(json.dumps({
+        'name': r.get('name'),
+        'create_access_levels': [a.get('access_level_description') for a in r.get('create_access_levels', [])],
+        'push_access_levels': [a.get('access_level_description') for a in r.get('push_access_levels', [])],
+        'merge_access_levels': [a.get('access_level_description') for a in r.get('merge_access_levels', [])],
+    }))
+" || echo "  (not readable)"
+    done
+    ;;
+  group-members)
+    # Args: group_path (URL-encoded), optional "direct" to exclude inherited
+    GROUP="${2:?Usage: gitlab-api.sh group-members <group_path_urlencoded> [direct]}"
+    GPATH="members/all"
+    [ "${3:-}" = "direct" ] && GPATH="members"
+    curl -sf -H "PRIVATE-TOKEN: $TOKEN" "$GITLAB_URL/groups/$GROUP/$GPATH?per_page=100" | python3 -c "
+import sys, json
+LEVELS = {10: 'Guest', 20: 'Reporter', 30: 'Developer', 40: 'Maintainer', 50: 'Owner'}
+for m in json.load(sys.stdin):
+    lvl = m.get('access_level')
+    print(json.dumps({
+        'username': m.get('username'),
+        'access_level': LEVELS.get(lvl, lvl),
+        'state': m.get('state'),
+    }))
+"
+    ;;
+  project-members)
+    # Args: project_path (URL-encoded), optional "direct" to exclude inherited members
+    PROJECT="${2:?Usage: gitlab-api.sh project-members <project_path_urlencoded> [direct]}"
+    MPATH="members/all"
+    [ "${3:-}" = "direct" ] && MPATH="members"
+    curl -sf -H "PRIVATE-TOKEN: $TOKEN" "$GITLAB_URL/projects/$PROJECT/$MPATH?per_page=100" | python3 -c "
+import sys, json
+LEVELS = {10: 'Guest', 20: 'Reporter', 30: 'Developer', 40: 'Maintainer', 50: 'Owner'}
+for m in json.load(sys.stdin):
+    lvl = m.get('access_level')
+    print(json.dumps({
+        'username': m.get('username'),
+        'access_level': LEVELS.get(lvl, lvl),
+        'state': m.get('state'),
+    }))
+"
+    ;;
   *)
-    echo "Usage: gitlab-api.sh {current-user|merged-mrs|open-mrs|mr-info|mr-discussions|mr-changes|mr-commits|reply-to-thread|create-note|create-mr|update-mr-description|update-mr-title|mr-for-branch|create-diff-comment}" >&2
+    echo "Usage: gitlab-api.sh {current-user|merged-mrs|open-mrs|mr-info|mr-discussions|mr-changes|mr-commits|reply-to-thread|create-note|create-mr|update-mr-description|update-mr-title|mr-for-branch|create-diff-comment|project-info|project-runners|runner-info|ci-variable-keys|protected-refs|project-members}" >&2
     exit 1
     ;;
 esac

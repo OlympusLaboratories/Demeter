@@ -252,7 +252,10 @@ export class Store {
         slug: entry.project.slug,
         label: entry.label,
         isWorkspace: entry.project.slug === this.workspaceSlug,
-        liveCount: entry.project.sessions.filter((session) => session.mtimeMs >= liveCutoff).length,
+        liveCount:
+          entry.project.slug === this.selectedRepo
+            ? this.groups.reduce((total, group) => total + group.liveCount, 0)
+            : entry.project.sessions.filter((session) => session.activityMs >= liveCutoff).length,
         sessionCount: entry.project.sessions.length,
         newestMtimeMs: entry.project.newestMtimeMs,
       }))
