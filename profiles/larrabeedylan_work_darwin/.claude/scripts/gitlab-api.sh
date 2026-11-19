@@ -619,6 +619,88 @@ for m in json.load(sys.stdin):
     }))
 "
     ;;
+  merge-mr)
+    # Args: project_path (URL-encoded), mr_iid, [now]
+    # Default sets auto-merge (merge_when_pipeline_succeeds), which is what adds
+    # the MR to the merge train where merge_train_enforcement is on — a direct
+    # merge is rejected there. Pass "now" to attempt an immediate merge instead.
+    PROJECT="${2:?Usage: gitlab-api.sh merge-mr <project_path_urlencoded> <mr_iid> [now]}"
+    MR_IID="${3:?}"
+    MERGE_ARGS=(--data-urlencode "merge_when_pipeline_succeeds=true")
+    [ "${4:-}" = "now" ] && MERGE_ARGS=()
+    curl -s -X PUT -H "PRIVATE-TOKEN: $TOKEN" \
+      "${MERGE_ARGS[@]}" \
+      "$GITLAB_URL/projects/$PROJECT/merge_requests/$MR_IID/merge" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if 'message' in r:
+    print(json.dumps({'error': r['message']}))
+else:
+    print(json.dumps({
+        'iid': r.get('iid'),
+        'state': r.get('state'),
+        'merge_status': r.get('detailed_merge_status') or r.get('merge_status'),
+        'auto_merge_set': r.get('merge_when_pipeline_succeeds'),
+        'sha': r.get('sha'),
+        'web_url': r.get('web_url', ''),
+    }))
+"
+    ;;
+  cancel-auto-merge)
+    # Args: project_path (URL-encoded), mr_iid
+    # Disarms merge_when_pipeline_succeeds without touching the MR otherwise.
+    PROJECT="${2:?Usage: gitlab-api.sh cancel-auto-merge <project_path_urlencoded> <mr_iid>}"
+    MR_IID="${3:?}"
+    curl -s -X POST -H "PRIVATE-TOKEN: $TOKEN" \
+      "$GITLAB_URL/projects/$PROJECT/merge_requests/$MR_IID/cancel_merge_when_pipeline_succeeds" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if 'message' in r:
+    print(json.dumps({'error': r['message']}))
+else:
+    print(json.dumps({
+        'iid': r.get('iid'),
+        'state': r.get('state'),
+        'merge_when_pipeline_succeeds': r.get('merge_when_pipeline_succeeds'),
+    }))
+"
+    ;;
+  mr-approvals)
+    # Args: project_path (URL-encoded), mr_iid
+    PROJECT="${2:?Usage: gitlab-api.sh mr-approvals <project_path_urlencoded> <mr_iid>}"
+    MR_IID="${3:?}"
+    curl -sf -H "PRIVATE-TOKEN: $TOKEN" "$GITLAB_URL/projects/$PROJECT/merge_requests/$MR_IID/approvals" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+print(json.dumps({
+    'approvals_required': r.get('approvals_required'),
+    'approvals_left': r.get('approvals_left'),
+    'approved_by': [a.get('user', {}).get('username') for a in r.get('approved_by', [])],
+    'user_can_approve': (r.get('user') or {}).get('can_approve'),
+    'user_has_approved': (r.get('user') or {}).get('has_approved'),
+}))
+"
+    ;;
+  merge-status)
+    # Args: project_path (URL-encoded), mr_iid
+    # Shows what actually gates the merge: pipeline, approvals, auto-merge state.
+    PROJECT="${2:?Usage: gitlab-api.sh merge-status <project_path_urlencoded> <mr_iid>}"
+    MR_IID="${3:?}"
+    curl -sf -H "PRIVATE-TOKEN: $TOKEN" "$GITLAB_URL/projects/$PROJECT/merge_requests/$MR_IID" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+print(json.dumps({
+    'iid': r.get('iid'),
+    'state': r.get('state'),
+    'detailed_merge_status': r.get('detailed_merge_status'),
+    'merge_when_pipeline_succeeds': r.get('merge_when_pipeline_succeeds'),
+    'has_conflicts': r.get('has_conflicts'),
+    'blocking_discussions_resolved': r.get('blocking_discussions_resolved'),
+    'head_pipeline_status': (r.get('head_pipeline') or {}).get('status'),
+    'sha': r.get('sha'),
+}))
+"
+    ;;
   project-members)
     # Args: project_path (URL-encoded), optional "direct" to exclude inherited members
     PROJECT="${2:?Usage: gitlab-api.sh project-members <project_path_urlencoded> [direct]}"
@@ -637,7 +719,7 @@ for m in json.load(sys.stdin):
 "
     ;;
   *)
-    echo "Usage: gitlab-api.sh {current-user|merged-mrs|open-mrs|mr-info|mr-discussions|mr-changes|mr-commits|reply-to-thread|create-note|create-mr|update-mr-description|update-mr-title|mr-for-branch|create-diff-comment|project-info|project-runners|runner-info|ci-variable-keys|protected-refs|project-members}" >&2
+    echo "Usage: gitlab-api.sh {current-user|merged-mrs|open-mrs|mr-info|mr-discussions|mr-changes|mr-commits|reply-to-thread|create-note|create-mr|update-mr-description|update-mr-title|mr-for-branch|create-diff-comment|merge-mr|cancel-auto-merge|mr-approvals|merge-status|project-info|project-runners|runner-info|ci-variable-keys|protected-refs|project-members}" >&2
     exit 1
     ;;
 esac

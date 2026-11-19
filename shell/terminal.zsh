@@ -140,6 +140,13 @@ if [[ "${TERM_PROGRAM:-}" == "vscode" && -z "${VSCODE_SHELL_INTEGRATION:-}" ]] \
 fi
 unfunction _dt_vscode_integration_script
 
+_dt_notify_hook="$HOME/.claude/hooks/notify.py"
+
+if [[ -x "$_dt_notify_hook" ]]; then
+  away() { "$HOME/.claude/hooks/notify.py" --away "$@" }
+  back() { "$HOME/.claude/hooks/notify.py" --away off }
+fi
+
 _dt_load_syntax_highlighting() {
   add-zsh-hook -d precmd _dt_load_syntax_highlighting
   if [[ -z "${ZSH_HIGHLIGHT_VERSION:-}" ]]; then
@@ -153,4 +160,4 @@ _dt_load_syntax_highlighting() {
 }
 add-zsh-hook precmd _dt_load_syntax_highlighting
 
-unset _dt_completions _dt_recompinit _dt_found _dt_fzf_init _dt_vscode_rc
+unset _dt_completions _dt_recompinit _dt_found _dt_fzf_init _dt_vscode_rc _dt_notify_hook

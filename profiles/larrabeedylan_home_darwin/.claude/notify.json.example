@@ -1,0 +1,17 @@
+{
+  "transport": "telegram",
+  "telegram": {
+    "bot_token": "REPLACE_ME",
+    "chat_id": "REPLACE_ME"
+  },
+  "min_turn_seconds": 60,
+  "min_interval_seconds": 30,
+  "quiet_hours": null,
+  "events": {
+    "stop": true,
+    "permission": true,
+    "question": true,
+    "idle": true,
+    "failure": true
+  }
+}

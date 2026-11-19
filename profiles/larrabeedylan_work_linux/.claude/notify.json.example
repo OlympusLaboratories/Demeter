@@ -1,0 +1,18 @@
+{
+  "transport": "slack",
+  "slack": {
+    "webhook_url": "REPLACE_ME",
+    "bot_token": "",
+    "channel": ""
+  },
+  "min_turn_seconds": 60,
+  "min_interval_seconds": 30,
+  "quiet_hours": null,
+  "events": {
+    "stop": true,
+    "permission": true,
+    "question": true,
+    "idle": true,
+    "failure": true
+  }
+}

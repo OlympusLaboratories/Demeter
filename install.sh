@@ -513,6 +513,30 @@ main() {
     fi
   fi
 
+  local notify_hook="$claude_dst/hooks/notify.py"
+  local notify_example="$claude_src/notify.json.example"
+  local notify_config="$claude_dst/notify.json"
+  if [[ -x "$notify_hook" ]]; then
+    echo ""
+    bold "Setting up notifications ..."
+    if [[ -f "$notify_example" && ! -e "$notify_config" ]]; then
+      install -m 600 "$notify_example" "$notify_config"
+      success "Created: $notify_config"
+    fi
+    if ! env -i HOME="$HOME" PATH="/usr/bin:/bin" "$notify_hook" --away status >/dev/null 2>&1; then
+      warn "The notify hook cannot run the way Claude Code spawns it."
+      info "  Hooks get a bare PATH (/usr/bin:/bin). Install a system python3,"
+      info "  then re-run this installer."
+    elif [[ -f "$notify_config" ]] && grep -q 'REPLACE_ME' "$notify_config"; then
+      info "Notifications are installed but dormant until you fill in:"
+      info "  $notify_config"
+      grep -n 'REPLACE_ME' "$notify_config" | sed 's/^/    /'
+      info "  Then check it with: ~/.claude/hooks/notify.py --test"
+    else
+      success "Notifications configured. Verify with: ~/.claude/hooks/notify.py --test"
+    fi
+  fi
+
   local staged_mcp="$home/.config/nvim/mcp.json"
   if [[ -f "$staged_mcp" ]]; then
     bold "Installing staged MCP config ..."

@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".claude", "notify.json")
+POST_TIMEOUT = 5
+PUSH_LIMIT = 140
+
+GLYPHS = {
+    "stop": "✅",
+    "permission": "🔐",
+    "question": "❓",
+    "idle": "💤",
+    "failure": "🔥",
+}
+
+
+def fail(message):
+    print(message, file=sys.stderr)
+    raise SystemExit(1)
+
+
+def config():
+    try:
+        with open(CONFIG_PATH) as handle:
+            raw = json.load(handle)
+    except OSError:
+        fail("no config at %s" % CONFIG_PATH)
+    except ValueError as error:
+        fail("%s is not valid JSON: %s" % (CONFIG_PATH, error))
+    settings = raw.get("slack")
+    if not isinstance(settings, dict):
+        fail("%s has no slack section" % CONFIG_PATH)
+    token = (settings.get("bot_token") or "").strip()
+    channel = (settings.get("channel") or "").strip()
+    webhook = (settings.get("webhook_url") or "").strip()
+    if token and not channel:
+        fail("slack.bot_token is set but slack.channel is empty")
+    if not token and not webhook:
+        fail("set slack.webhook_url, or slack.bot_token plus slack.channel")
+    return token, channel, webhook
+
+
+def post(url, payload, headers):
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=dict(headers, **{"Content-Type": "application/json; charset=utf-8"}),
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=POST_TIMEOUT) as response:
+            return response.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as error:
+        fail("slack returned HTTP %s: %s" % (error.code, error.read()[:200].decode("utf-8", "replace")))
+    except (urllib.error.URLError, OSError) as error:
+        fail("could not reach slack: %s" % error)
+
+
+def headline(envelope):
+    glyph = GLYPHS.get(envelope.get("level"), "•")
+    parts = [envelope.get("repo") or "?"]
+    if envelope.get("branch"):
+        parts.append(envelope["branch"])
+    if envelope.get("session"):
+        parts.append(envelope["session"])
+    return "%s %s" % (glyph, " · ".join(parts))
+
+
+def push_text(envelope):
+    body = " ".join((envelope.get("body") or "").split())
+    if len(body) > PUSH_LIMIT:
+        body = body[:PUSH_LIMIT].rstrip() + "…"
+    title = envelope.get("title") or "Claude Code"
+    return "%s %s%s" % (
+        GLYPHS.get(envelope.get("level"), "•"),
+        title,
+        " — " + body if body else "",
+    )
+
+
+def blocks_for(envelope):
+    blocks = [{
+        "type": "context",
+        "elements": [{"type": "mrkdwn", "text": headline(envelope)}],
+    }]
+    body = (envelope.get("body") or "").strip()
+    if body:
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": body[:2900]},
+        })
+    return blocks
+
+
+def send(envelope):
+    token, channel, webhook = config()
+    text = push_text(envelope)
+    blocks = blocks_for(envelope)
+    if token:
+        payload = {"channel": channel, "text": text, "blocks": blocks, "unfurl_links": False}
+        thread = envelope.get("thread")
+        if thread:
+            payload["thread_ts"] = thread
+        body = post(
+            "https://slack.com/api/chat.postMessage",
+            payload,
+            {"Authorization": "Bearer " + token},
+        )
+        try:
+            reply = json.loads(body)
+        except ValueError:
+            fail("slack sent back something that is not JSON: %s" % body[:200])
+        if not reply.get("ok"):
+            fail("slack refused the message: %s" % reply.get("error", body[:200]))
+        return {"thread": thread or reply.get("ts")}
+    post(webhook, {"text": text, "blocks": blocks}, {})
+    return {}
+
+
+def check():
+    token, channel, webhook = config()
+    route = "bot token to %s (threaded)" % channel if token else "incoming webhook (flat)"
+    result = send({
+        "title": "notify is wired up",
+        "body": "Test message from `notify.py --test`. Delete me.",
+        "repo": "demeter",
+        "branch": None,
+        "session": "test",
+        "level": "stop",
+    })
+    print("sent a test message via %s" % route)
+    if result.get("thread"):
+        print("thread id %s" % result["thread"])
+
+
+def main():
+    action = sys.argv[1] if len(sys.argv) > 1 else ""
+    if action == "check":
+        check()
+        return 0
+    if action != "send":
+        print("usage: notify-send.sh send|check", file=sys.stderr)
+        return 2
+    try:
+        envelope = json.load(sys.stdin)
+    except ValueError as error:
+        fail("envelope on stdin is not valid JSON: %s" % error)
+    print(json.dumps(send(envelope)))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

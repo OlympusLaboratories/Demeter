@@ -407,7 +407,9 @@ everything already.
 
 `.claude/CLAUDE.md` is symlinked to `~/.claude/CLAUDE.md`, the user-level instruction file Claude Code loads in **every** repository. It currently carries one rule: do not add comments to code. Agent-written comments restate the line, go stale, and pad the diff for a human reviewer, so explanation belongs in the commit message and MR/PR description instead — with machine-read directives (linter suppressions, build pragmas, required doc-comments) exempt because they are program input rather than commentary. The code-modifying skills (`fix-linear`, `fix-feedback`, `review-code`, `review-kludge`, `security-audit`) each restate the rule locally, since a skill's subagents get the skill prompt rather than the user's `CLAUDE.md`.
 
-Any directory under `.claude/skills/` is linked individually into `~/.claude/skills/`. Skills use `~/.claude/scripts/gitlab-api.sh` for GitLab API access (token read from `~/.claude/.mcp.json`, never exposed in conversation context; the GitHub profile uses `github-api.sh` and a `GITHUB_PERSONAL_ACCESS_TOKEN` instead). `fix-feedback` also writes through it: before fixing anything it posts each unique `review-code` finding to the MR as its own comment, anchored to the offending line, so the swarm's output survives the conversation — deduped against what the review bots already said, and gated on one batch approval. Swarm skills (`changes-description`, `review-code`, `review-kludge`) run through the **Workflow** tool; `workflow-resume` rescues a run that died mid-swarm, reading the on-disk run manifests and agent caches through `~/.claude/scripts/workflow-runs.py`.
+Any directory under `.claude/skills/` is linked individually into `~/.claude/skills/`. Skills use `~/.claude/scripts/gitlab-api.sh` for GitLab API access (token read from `~/.claude/.mcp.json`, never exposed in conversation context; the GitHub profile uses `github-api.sh` and a `GITHUB_PERSONAL_ACCESS_TOKEN` instead). `fix-feedback` also writes through it: before fixing anything it posts each unique `review-code` finding to the MR as its own comment, anchored to the offending line, so the swarm's output survives the conversation — deduped against what the review bots already said, and gated on one batch approval. Swarm skills (`changes-description`, `docs-humanize`, `review-code`, `review-kludge`) run through the **Workflow** tool; `workflow-resume` rescues a run that died mid-swarm, reading the on-disk run manifests and agent caches through `~/.claude/scripts/workflow-runs.py`.
+
+`docs-humanize` is the one swarm that writes outside the repo: it rebuilds an AI-written Notion page, markdown file or Linear ticket into something a person can read, and the rewrite is only pasted back after an explicit yes — a Notion page the user does not own gets a suggested edit rather than an overwrite, a Linear ticket keeps its title, and the original is saved to the session scratchpad first.
 
 Some skills accumulate user data (weekly reports, Slack context, the `plan-initiative` team roster) that is gitignored and lives in the repo directory but is not tracked. The install script creates necessary data directories automatically.
 
@@ -417,9 +419,9 @@ The `fix-linear` and `fix-feedback` skills set up each fix in its own **git work
 
 Each profile's shell config also defines `go` (worktree-aware `git checkout` — `cd`s into the worktree when one holds that branch, checks out normally when it doesn't, and passes anything else like `go -b new` or `go .` straight to git), `wt` (jump to the worktree for a branch, creating it if needed), `wtl` (list worktrees with age, upstream state, and dirty flag), and `wtclean` (remove worktrees whose branch is gone from the remote or untouched for 90+ days — dry run unless `-y`).
 
-### Session Hook
+### Hooks
 
-`.claude/hooks/` is linked into `~/.claude/hooks/`, and each profile's `settings.json` registers the hooks that run from there. One hook lives there today:
+`.claude/hooks/` is linked into `~/.claude/hooks/`, and each profile's `settings.json` registers the hooks that run from there. Two hooks live there today:
 
 **`link-worktree-session.py`** (`PreToolUse` on `EnterWorktree`, `SessionStart`, `CwdChanged`, `Stop`) — makes every session in a repo visible from the main checkout's window, wherever it runs, so reloading the editor (which on a Remote-SSH box happens on every disconnect) never loses a worktree session.
 
@@ -432,6 +434,78 @@ Claude Code files a transcript under `~/.claude/projects/<slug of the session's 
 ```
 
 Claude Code spawns hooks with a **bare `PATH`**, not the one your shell builds, so a `#!/usr/bin/env python3` hook that works perfectly when you run it yourself can still fail on every real session — and it fails invisibly, with no session ever appearing where you expect it. The installer therefore probes the hook under `env -i PATH=/usr/bin:/bin` and tells you when a system `python3` is missing, rather than assuming that linking the file was enough. A python3 that exists only under mise or a venv will not do.
+
+### Notifications
+
+**`notify.py`** (`Stop`, `StopFailure`, `Notification`, `PreToolUse` on `AskUserQuestion|ExitPlanMode`) — pushes a message to Slack or Telegram when a session finishes, gets stuck, or needs you. With a dozen sessions open across three machines, there is otherwise no way to know one is waiting without going and looking at it.
+
+It notifies on five things:
+
+| | fires when |
+|---|---|
+| **finished** | a turn ends — gated on the turn having taken longer than `min_turn_seconds` (60s) so ordinary keyboard back-and-forth stays silent |
+| **needs permission** | Claude is sitting on a permission prompt |
+| **asking you a question** | `AskUserQuestion` or `ExitPlanMode` — the question text itself is in the message |
+| **waiting on you** | 60s idle after a turn ended |
+| **stopped** | the session died on a rate limit, an overload, or an auth failure |
+
+Subagents never notify, only the session that spawned them.
+
+#### Away mode
+
+```bash
+away          # notify me about everything, I'm not at my desk
+away 90m      # ... until it expires on its own
+away status
+back
+```
+
+Away mode drops the `min_turn_seconds` gate, so **every** turn ending pings you rather than only the long ones. That is the difference between the two modes — the per-session rate limit and all the other events apply either way. The switch is a file (`~/.claude/notify-state/away.json`), not an environment variable, because hooks do not inherit your shell's environment. `away` and `back` are defined in `shell/terminal.zsh` and only appear once the hook is installed.
+
+#### Setup
+
+The installer creates `~/.claude/notify.json` from your profile's `notify.json.example` at mode 600 and tells you which fields still need filling. Until they are filled the hook is **dormant** — it runs, logs why it did nothing, and sends nothing. Nothing in the repo ever holds a token.
+
+**Work profiles (Slack).** Create an incoming webhook at <https://api.slack.com/messaging/webhooks> and paste the URL into `slack.webhook_url`. That is the whole setup. Optionally, use a bot token instead — set `slack.bot_token` (needs `chat:write`) and `slack.channel`, leaving `webhook_url` empty — which buys one thing: each session gets its own **thread**, so a dozen concurrent sessions do not interleave in the channel. A webhook cannot thread, because an incoming webhook ignores `thread_ts`.
+
+**Home profile (Telegram).** Message [@BotFather](https://t.me/BotFather), `/newbot`, and put the token in `telegram.bot_token`. Send your new bot a message, then read your chat id out of `https://api.telegram.org/bot<token>/getUpdates` and put it in `telegram.chat_id`.
+
+Then check it:
+
+```bash
+~/.claude/hooks/notify.py --test
+```
+
+#### Tuning
+
+| key | default | |
+|---|---|---|
+| `min_turn_seconds` | 60 | shortest turn that earns a "finished" ping when not away |
+| `min_interval_seconds` | 30 | floor between two messages from the same session |
+| `quiet_hours` | `null` | `[22, 7]` to stay silent overnight |
+| `events` | all `true` | switch off any of `stop`, `permission`, `question`, `idle`, `failure` |
+
+#### When it is not working
+
+A hook that fails is invisible from inside Claude Code, so this one writes a line for every invocation — including the ones where it deliberately stayed quiet:
+
+```bash
+tail ~/.claude/notify-state/notify.log
+```
+
+```
+2026-11-12T11:29:42 Stop sent stop for Demeter
+2026-11-12T11:29:42 Stop skip: rate limited (0s ago)
+2026-11-12T11:29:27 Stop skip: turn 11s < 60s
+2026-11-12T11:29:27 Stop skip: slack section still has REPLACE_ME
+```
+
+The hook never fails a session: every error path logs and exits 0, and a dead Slack costs a turn about five seconds, never the full hook timeout.
+
+#### Replies
+
+This is one-way. You cannot answer from Slack or Telegram — a permission prompt and an `AskUserQuestion` are blocking UI that only the session's own terminal can clear. Claude Code's [Remote Control](https://code.claude.com/docs/en/remote-control.md) is the supported way to answer from a phone; all three profiles currently leave `remoteControlAtStartup` off.
+
 
 ### Claude Usage Extension
 
