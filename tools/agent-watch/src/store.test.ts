@@ -161,6 +161,7 @@ describe('Store', () => {
     );
 
     const store = new Store({ ...settings(projects), workspaceFolders: ['/tmp/elsewhere'] });
+    store.setOnlyThisWindow(false);
     await store.discover();
     store.selectRepo('-tmp-repo');
     await store.loadSelected();
@@ -187,6 +188,7 @@ describe('Store', () => {
     }
 
     const store = new Store({ ...settings(projects), workspaceFolders: ['/tmp/repo'] });
+    store.setOnlyThisWindow(false);
     await store.discover('/tmp/repo');
     await store.loadSelected();
     const opening = store.view(false);
@@ -200,6 +202,34 @@ describe('Store', () => {
 
     expect(store.view(false).repos.map((entry) => entry.slug)).toEqual(['-tmp-repo']);
     expect(store.view(false).onlyThisWindow).toBe(true);
+  });
+
+  it('opens scoped to the repo this window has open, and widens when that is switched off', async () => {
+    const { projects } = await fixture();
+    const other = path.join(projects, '-tmp-elsewhere');
+    await fs.mkdir(other, { recursive: true });
+    await fs.writeFile(
+      path.join(other, 'eeeeeeee-0000-0000-0000-000000000005.jsonl'),
+      `${JSON.stringify({ type: 'user', cwd: '/tmp/elsewhere', message: { content: [{ type: 'text', text: 'hi' }] } })}\n`,
+    );
+
+    const store = new Store({ ...settings(projects), workspaceFolders: ['/tmp/repo'] });
+    await store.discover('/tmp/repo');
+    await store.loadSelected();
+
+    const opening = store.view(false);
+    expect(opening.onlyThisWindow).toBe(true);
+    expect(opening.repos.map((entry) => entry.slug)).toEqual(['-tmp-repo']);
+    expect(opening.graph.nodes.length).toBeGreaterThan(0);
+
+    store.setOnlyThisWindow(false);
+    await store.discover('/tmp/repo');
+    await store.loadSelected();
+
+    const widened = store.view(false);
+    expect(widened.onlyThisWindow).toBe(false);
+    expect(widened.repos.map((entry) => entry.slug).sort()).toEqual(['-tmp-elsewhere', '-tmp-repo']);
+    expect(widened.selectedRepo).toBe('-tmp-repo');
   });
 
   it('leaves everything alone when the window has no folder open', async () => {

@@ -116,7 +116,7 @@ let lastLayout: GraphLayout = { nodes: [], edges: [], width: 0, height: 0 };
 let userAdjusted = false;
 let lastShape = '';
 let zoomSensitivity = 1;
-let onlyThisWindow = false;
+let onlyThisWindow = true;
 let pendingFocus: { id: string; expanding: boolean } | undefined;
 
 function applyTransform(): void {

@@ -43,7 +43,7 @@ export class Store {
   private workspaceSlug?: string;
   private workspaceFor?: string;
   private emptyRepos = new Set<string>();
-  private onlyThisWindow = false;
+  private onlyThisWindow = true;
 
   constructor(private settings: StoreSettings) {}
 

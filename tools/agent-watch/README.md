@@ -101,7 +101,10 @@ keeps the **node you clicked** centred, so collapsing one agent inside a 90-sibl
 does not throw you to that row's start.
 
 The status row carries three toggles. **this repo** hides sessions that ran outside the
-repo this window has open — the ones whose `↗` would refuse to resume them here. **expand
+repo this window has open — the ones whose `↗` would refuse to resume them here. It is
+**on when the tab opens**, since the work this window can actually resume is almost always
+what you came for; switch it off to see every repo. A window with no folder open has
+nothing to scope to, so the filter sits inert there and the full list shows regardless. **expand
 all** opens every branch, and opens nothing further once everything is open, so a second
 click closes them again. **Fit** reframes the whole graph; it drops below the floor the
 expand-framing uses, so a wide deep tree lands fully on screen instead of being clipped,

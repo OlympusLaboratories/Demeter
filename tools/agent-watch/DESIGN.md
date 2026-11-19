@@ -505,6 +505,13 @@ wide, and how deep the nesting went.
 - **`expand all` is a toggle, not a one-way door.** Opening 96 nodes and leaving the user
   to close them one badge at a time would be worse than not having the button; it reads
   the current rendered state and closes everything when everything is already open.
+- **The this-window filter starts on.** Opening onto all 25 project dirs makes the common
+  case — "what is running in the thing I have open" — a click away every single time, and
+  the sessions it hides are the ones this window could not resume anyway. It is a toggle
+  rather than a setting because the wide view is a glance, not a mode. `hidingOtherWindows`
+  still gates on `workspaceFolders`, so a window with no folder open is unaffected rather
+  than empty, and the two store tests that exercise the *on* transition now switch it off
+  explicitly instead of leaning on the default.
 - **The this-window filter is applied at discovery, not only on load.** Learning a repo is
   empty by loading it only works for the repo you are *on*; every other chip keeps its
   place until you click it, which is the opposite of hiding it. The filter needs no load
