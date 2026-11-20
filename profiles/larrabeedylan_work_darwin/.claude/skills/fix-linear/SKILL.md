@@ -10,8 +10,22 @@ Implement the changes required by a Linear ticket, working on a properly set up 
 | `in place`, `--here`, `no worktree` | Work in the current checkout instead of cutting a git worktree (**Step 2-INPLACE**). Matched case-insensitively. |
 | `--one-shot-description [true\|false]` | Default `false`. Passed straight through to `changes-description` as its `--one-shot` flag: one writer instead of the four-persona debate, 4–6 agents instead of 15–26, with the mechanical word budget and the fact-check kept. Bare `--one-shot-description` means `true`. |
 | `--changes-diagram [true\|false]` | Default **`true`**. After the commit message and description, run the `changes-diagram` skill to produce a call-flow diagram of the branch. Pass `false` to skip it. |
+| `/fix-autonomous` (anywhere in the arguments) | A delegation directive, never part of the ticket identifier. Hand the whole invocation to `fix-autonomous`. See **Delegation** below. |
 
 Parse the flags out of `$ARGUMENTS` **first**; whatever remains is the ticket identifier. Without that, `PLAT-123 --changes-diagram false` is taken whole as the ticket ID and fails validation in Step 1b.
+
+### Delegation: `/fix-autonomous` in the arguments
+
+A `/fix-autonomous` or `fix-autonomous` token anywhere in `$ARGUMENTS` is a **delegation directive, not part of the ticket identifier and not a question to put back to the user**. They are composing two skills, which is what naming one skill inside another's invocation means everywhere in this family: *implement this ticket, and drive it the whole way without checking in.* Strip the token, invoke `fix-autonomous` with the `Skill` tool, pass the remaining flags and the ticket id through verbatim, and let it call back into this skill from its own Step 1. Left unstripped the token lands in `TICKET_ID` and fails validation in Step 1b, which is the same failure the flag-parsing rule above exists to prevent.
+
+**Do not ask how far the run should go.** The token already answered that, and asking is worse than a wasted turn: it reads as not having understood the invocation, and it strands a user who deliberately set the run up to need nothing from them. The only thing worth saying out loud is one line naming the delegation as you make it.
+
+Flags cross the hand-off in both directions, so forward every one you do not own rather than treating it as unparsed junk:
+
+- **This skill's flags** — `--one-shot-description`, `--changes-diagram`, and the in-place escape hatch — are passed on, and `fix-autonomous` hands them back when it re-enters here.
+- **`fix-autonomous`'s own flags** — `--merge`, `--max-rounds` — mean nothing to this skill and must survive untouched. `--merge false` is how the user says *take it to green, reviewed and ready, then stop*; dropping it silently merges something they wanted held for a second pair of eyes.
+
+Reaching `fix-autonomous` this way loosens nothing — it owns the push, the merge request and the merge, and performs them under its own rules. What it does mean is that this skill's rule against pushing and opening a merge request binds **its own flow**, not a run that has been handed over. Never cite that rule back as a reason to refuse the delegation.
 
 If nothing remains once the flags are stripped, ask the user for the ticket ID and stop.
 
@@ -340,7 +354,7 @@ Immediately after implementation is complete — do not wait for the user to com
 
 ## Important Rules
 
-1. **NEVER modify external state beyond local git branch/worktree operations.** Creating a local branch or worktree is fine; do not update Linear tickets, push branches, or create MRs unless explicitly asked. Publishing the Step 6 diagram is the one sanctioned exception — it writes nothing to Linear and nothing to the forge. Never remove a worktree the user didn't ask you to — cleanup is the user's call.
+1. **NEVER modify external state beyond local git branch/worktree operations.** Creating a local branch or worktree is fine; do not update Linear tickets, push branches, or create MRs unless explicitly asked. Publishing the Step 6 diagram is the one sanctioned exception — it writes nothing to Linear and nothing to the forge. Never remove a worktree the user didn't ask you to — cleanup is the user's call. **This rule scopes to this skill's own flow.** Naming `/fix-autonomous` in the arguments *is* the explicit ask, and it hands the run to a skill that owns pushing, MR creation and merging under its own rules — see **Delegation** above, and never quote this rule back as a reason to refuse it.
 2. **Respect uncommitted work.** Never discard or stash uncommitted changes without the user's explicit approval.
 3. **Ask, don't assume.** If the ticket is vague, ask the user for clarification rather than guessing.
 4. **Follow existing patterns.** Match the coding style, naming conventions, and architecture of the existing codebase.

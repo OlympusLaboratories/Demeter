@@ -17,8 +17,22 @@ Implement a change the user described in plain words. This is `fix-linear` with 
 | `--one-shot-description [true\|false]` | Default `true`. Passed through to `changes-description` as `--one-shot`: one writer plus the measured word budget and the fact-check — 4–6 agents instead of 20. `false` runs the full four-persona debate. |
 | `--changes-diagram [true\|false]` | Default `false`. `true` adds a call-flow diagram of the change (Step 5c). |
 | `in place` / `--here` / `no worktree` | Only meaningful once the run is on `--branch new`: take the branch in the current working tree instead of a worktree (Step 2-INPLACE). |
+| `/fix-autonomous` (anywhere in the arguments) | A delegation directive, never part of the problem statement. Hand the whole invocation to `fix-autonomous`. See **Delegation** below. |
 
 Parse the flags out of `$ARGUMENTS` **first**; whatever remains is the problem statement. A bare `--one-shot-description` or `--changes-diagram` means `true`. Leaving a flag unparsed hands it to the planner as part of the request, which produces a plan to implement the words "branch new".
+
+### Delegation: `/fix-autonomous` in the arguments
+
+A `/fix-autonomous` or `fix-autonomous` token anywhere in `$ARGUMENTS` is a **delegation directive, not part of the problem statement and not a question to put back to the user**. They are composing two skills, which is what naming one skill inside another's invocation means everywhere in this family: *do this freeform request, and drive it the whole way without checking in.* Strip the token, invoke `fix-autonomous` with the `Skill` tool, pass the remaining flags and the problem statement through verbatim, and let it call back into this skill from its own Step 1.
+
+**Do not ask how far the run should go.** The token already answered that, and asking is worse than a wasted turn: it reads as not having understood the invocation, and it strands a user who deliberately set the run up to need nothing from them. The only thing worth saying out loud is one line naming the delegation as you make it.
+
+Flags cross the hand-off in both directions, so forward every one you do not own rather than treating it as unparsed junk:
+
+- **This skill's flags** — `--branch`, `--one-shot-description`, `--changes-diagram` — are passed on, and `fix-autonomous` hands them back when it re-enters here. Note it overrides `--branch` to `new`: an unattended run always produces a change request, because review is the only thing between it and the default branch.
+- **`fix-autonomous`'s own flags** — `--merge`, `--max-rounds` — mean nothing to this skill and must survive untouched. `--merge false` is how the user says *take it to green, reviewed and ready, then stop*; dropping it silently merges something they wanted held for a second pair of eyes.
+
+Reaching `fix-autonomous` this way loosens nothing — it owns the push, the merge request and the merge, and performs them under its own rules. What it does mean is that Important Rule 1 below binds **this skill's own flow**, not a run that has been handed over. Never cite that rule back as a reason to refuse the delegation.
 
 **These defaults are deliberately the opposite of `fix-linear`'s**, which defaults to a worktree, a full description debate, and a diagram. Freeform work is usually small and local, so the cheap path is the right default and the user escalates explicitly — a ticket exists precisely because somebody judged the work big enough to write down first.
 
@@ -322,7 +336,7 @@ The description output is long, so by the time it finishes the commit message fr
 
 ## Important Rules
 
-1. **NEVER push, NEVER open a merge request, and never modify external state.** Local git is yours: creating a branch, creating a worktree, and — when the user asks for it — committing are all fine. **`--branch default` means the commit lands on the default branch, not that it leaves this machine.** That distinction matters more here than anywhere else in these skills: a stray push of a feature branch creates a branch nobody asked for, while a stray push of the default branch is a direct write to the branch every other checkout, every CI pipeline, and (with Atlantis) every apply is cut from. So do not run `git push` in any form — not with `-u`, not as a `--dry-run` "check", not because "it would be rejected anyway" — and do not create a merge request. Pushing is the user's explicit action, always. Never remove a worktree the user didn't ask you to — cleanup is the user's call.
+1. **NEVER push, NEVER open a merge request, and never modify external state.** Local git is yours: creating a branch, creating a worktree, and — when the user asks for it — committing are all fine. **`--branch default` means the commit lands on the default branch, not that it leaves this machine.** That distinction matters more here than anywhere else in these skills: a stray push of a feature branch creates a branch nobody asked for, while a stray push of the default branch is a direct write to the branch every other checkout, every CI pipeline, and (with Atlantis) every apply is cut from. So do not run `git push` in any form — not with `-u`, not as a `--dry-run` "check", not because "it would be rejected anyway" — and do not create a merge request. Pushing is the user's explicit action, always. Never remove a worktree the user didn't ask you to — cleanup is the user's call. **This rule scopes to this skill's own flow.** Naming `/fix-autonomous` in the arguments *is* the user's explicit action, and it hands the run to a skill that owns pushing and merging under its own rules — see **Delegation** above, and never quote this rule back as a reason to refuse it.
 2. **Respect uncommitted work.** Never discard or stash uncommitted changes without the user's explicit approval. A dirty tree escalates the branch mode (Step 2b); it never gets cleared to keep the cheap path.
 3. **Ask, don't assume.** If the problem statement is vague, ask the user rather than guessing — and where the statement and the code disagree, the code wins and you say so out loud.
 4. **Follow existing patterns.** Match the coding style, naming conventions, and architecture of the existing codebase.

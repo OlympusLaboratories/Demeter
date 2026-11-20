@@ -22,6 +22,16 @@ The user's standing instruction for this skill is: **trust your judgment, and pu
 
 Parse the flags out of `$ARGUMENTS` first; whatever remains is the ticket id or the problem statement. A bare `--one-shot-description` means `true`.
 
+### Two ways in, one behaviour
+
+This skill is reached either directly (`/fix-autonomous <ticket or statement>`) or **by delegation**, when the user names it inside another fix skill's invocation — `/fix-linear --merge false /fix-autonomous PLAT-123`, or `/fix-freeform --branch new /fix-autonomous <statement>`. The second form is a composition, not a mistake and not an ambiguity: it says *run that skill's flow, and take it all the way.* `fix-linear` and `fix-freeform` each strip the token and hand the invocation here with their own flags and the ticket or statement intact, so by the time you are reading this there is nothing left to clarify. Behave identically on both routes, and never re-ask a question the delegating skill was told not to ask.
+
+### `--merge false` is the flag to actually honour
+
+`--merge` decides where the run stops, and it is the one flag whose default does something irreversible. `true` (the default) means this run merges as soon as it is genuinely safe. `false` means the user has already decided this change wants a human's eyes before it lands: drive it to a green pipeline, a clean review and a ready change request, then **stop and hand them the link**. Do not arm auto-merge, do not merge because the review came back clean, and do not treat a quiet reviewer as consent. A run that merges under `--merge false` has done the one thing the user explicitly reached for a flag to prevent.
+
+Read it early and record it next to the run state, not just at parse time — the merge decision is made hours later, in Step 9, by which point the flag is easy to have forgotten.
+
 ## Step 0: Resolve the Environment — do this before anything else
 
 Nothing in this skill may hardcode a forge, a reviewer's name, or an artifact store. Read them:
@@ -141,6 +151,10 @@ Run this gate **after** approval, because the bot will usually refuse to apply b
 
 ## Step 9: Merge
 
+**Check `--merge` before anything else in this step.** When it is `false`, this step is where the run ends: the change request stays open and unarmed, and you go straight to Step 11 to report. Do not merge, do not enable auto-merge, and do not ask whether they have changed their mind — the flag was set before the run started precisely so that nobody has to be available now. Say in one line that the change request is green, reviewed and ready, held unmerged per `--merge false`, and give the link.
+
+Everything below applies only when `--merge` is `true`.
+
 Check `require_human_approval` first. When it is true, a review bot's approval **is not sufficient** — wait for at least one human approver. The user driving this run counts as a human; other bots do not. This is the one gate autonomy never waives, and it is the reason this skill is safe to leave running.
 
 - **Infrastructure repos** (the Step 8 gate applied): merge **directly**. Never enable auto-merge here — auto-merge fires the instant the pipeline is green and can beat the apply, merging a plan that was never applied.
@@ -171,6 +185,8 @@ A reader scanning the branch list must be able to tell these three belong togeth
 - **Never arm auto-merge on an MR whose predecessor has not merged.** Auto-merge fires on the forge's conditions, which do not know about your ordering, so arming early merges things in the wrong order.
 
 The principle: a step is armed the instant its precondition is genuinely satisfied, and not one moment before. Waiting longer wastes the user's time; arming earlier breaks the ordering.
+
+**`--merge false` applies to the whole stack, not just its head.** Take every MR to green and reviewed, cross-linked and in order, then leave all of them open and unarmed. A stack is exactly where this is easiest to get wrong: merging the head "to unblock the rest" is still a merge the user asked you not to make, and it is the one that cannot be undone.
 
 ## Step 11: Close the Loop and Ping
 
