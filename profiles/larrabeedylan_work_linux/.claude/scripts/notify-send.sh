@@ -6,6 +6,7 @@ import urllib.error
 import urllib.request
 
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".claude", "notify.json")
+DM_CACHE = os.path.join(os.path.expanduser("~"), ".claude", "notify-state", "slack-dm.json")
 POST_TIMEOUT = 5
 PUSH_LIMIT = 140
 
@@ -23,6 +24,11 @@ def fail(message):
     raise SystemExit(1)
 
 
+def usable(value):
+    text = str(value or "").strip()
+    return "" if "REPLACE_ME" in text else text
+
+
 def config():
     try:
         with open(CONFIG_PATH) as handle:
@@ -34,9 +40,9 @@ def config():
     settings = raw.get("slack")
     if not isinstance(settings, dict):
         fail("%s has no slack section" % CONFIG_PATH)
-    token = (settings.get("bot_token") or "").strip()
-    channel = (settings.get("channel") or "").strip()
-    webhook = (settings.get("webhook_url") or "").strip()
+    token = usable(settings.get("bot_token"))
+    channel = usable(settings.get("channel"))
+    webhook = usable(settings.get("webhook_url"))
     if token and not channel:
         fail("slack.bot_token is set but slack.channel is empty")
     if not token and not webhook:
@@ -58,6 +64,44 @@ def post(url, payload, headers):
         fail("slack returned HTTP %s: %s" % (error.code, error.read()[:200].decode("utf-8", "replace")))
     except (urllib.error.URLError, OSError) as error:
         fail("could not reach slack: %s" % error)
+
+
+def dm_channel(token, user):
+    try:
+        with open(DM_CACHE) as handle:
+            cached = json.load(handle).get(user)
+    except (OSError, ValueError):
+        cached = None
+    if cached:
+        return cached
+    body = post(
+        "https://slack.com/api/conversations.open",
+        {"users": user},
+        {"Authorization": "Bearer " + token},
+    )
+    try:
+        reply = json.loads(body)
+    except ValueError:
+        fail("slack sent back something that is not JSON: %s" % body[:200])
+    if not reply.get("ok"):
+        fail("could not open a DM with %s: %s (the bot needs the im:write scope)"
+             % (user, reply.get("error", body[:200])))
+    opened = (reply.get("channel") or {}).get("id")
+    if not opened:
+        fail("slack opened a DM but did not say which: %s" % body[:200])
+    try:
+        os.makedirs(os.path.dirname(DM_CACHE), exist_ok=True)
+        with open(DM_CACHE, "w") as handle:
+            json.dump({user: opened}, handle)
+    except OSError:
+        pass
+    return opened
+
+
+def resolve(token, channel):
+    if channel[:1] in ("U", "W") and " " not in channel:
+        return dm_channel(token, channel)
+    return channel
 
 
 def headline(envelope):
@@ -101,7 +145,8 @@ def send(envelope):
     text = push_text(envelope)
     blocks = blocks_for(envelope)
     if token:
-        payload = {"channel": channel, "text": text, "blocks": blocks, "unfurl_links": False}
+        target = resolve(token, channel)
+        payload = {"channel": target, "text": text, "blocks": blocks, "unfurl_links": False}
         thread = envelope.get("thread")
         if thread:
             payload["thread_ts"] = thread
@@ -123,7 +168,13 @@ def send(envelope):
 
 def check():
     token, channel, webhook = config()
-    route = "bot token to %s (threaded)" % channel if token else "incoming webhook (flat)"
+    if token:
+        target = resolve(token, channel)
+        route = "bot token to %s (threaded)" % target
+        if target != channel:
+            route += ", the DM with %s" % channel
+    else:
+        route = "incoming webhook (flat)"
     result = send({
         "title": "notify is wired up",
         "body": "Test message from `notify.py --test`. Delete me.",

@@ -23,6 +23,11 @@ def fail(message):
     raise SystemExit(1)
 
 
+def usable(value):
+    text = str(value or "").strip()
+    return "" if "REPLACE_ME" in text else text
+
+
 def config():
     try:
         with open(CONFIG_PATH) as handle:
@@ -34,8 +39,8 @@ def config():
     settings = raw.get("telegram")
     if not isinstance(settings, dict):
         fail("%s has no telegram section" % CONFIG_PATH)
-    token = (settings.get("bot_token") or "").strip()
-    chat = str(settings.get("chat_id") or "").strip()
+    token = usable(settings.get("bot_token"))
+    chat = usable(settings.get("chat_id"))
     if not token:
         fail("telegram.bot_token is empty")
     if not chat:

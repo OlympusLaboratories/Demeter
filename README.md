@@ -466,7 +466,15 @@ Away mode drops the `min_turn_seconds` gate, so **every** turn ending pings you 
 
 The installer creates `~/.claude/notify.json` from your profile's `notify.json.example` at mode 600 and tells you which fields still need filling. Until they are filled the hook is **dormant** — it runs, logs why it did nothing, and sends nothing. Nothing in the repo ever holds a token.
 
-**Work profiles (Slack).** Create an incoming webhook at <https://api.slack.com/messaging/webhooks> and paste the URL into `slack.webhook_url`. That is the whole setup. Optionally, use a bot token instead — set `slack.bot_token` (needs `chat:write`) and `slack.channel`, leaving `webhook_url` empty — which buys one thing: each session gets its own **thread**, so a dozen concurrent sessions do not interleave in the channel. A webhook cannot thread, because an incoming webhook ignores `thread_ts`.
+**Work profiles (Slack).** Two routes, and which you want depends on where the messages should land.
+
+*An incoming webhook* is the quickest: create one at <https://api.slack.com/messaging/webhooks>, paste the URL into `slack.webhook_url`, done — no scopes to request. The channel picker does let you choose your own DM, so this can be private. The catch is that a webhook is permanently bound to the conversation you picked and ignores `thread_ts`, so every session's messages land flat in one stream.
+
+*A bot token* is the better end state with many sessions open, because each session gets its own **thread**. Set `slack.bot_token` and `slack.channel`, leave `webhook_url` empty, and give the app `chat:write` plus `im:write`.
+
+To have it DM **only you**, put your own member ID (`U…`, from your Slack profile's ⋮ menu → *Copy member ID*) in `slack.channel`. The sender resolves it to a DM conversation with `conversations.open` and caches the result in `~/.claude/notify-state/slack-dm.json`, so there is one extra API call the first time and none after.
+
+Do not skip that resolution by hand: passing a `U…` id straight to `chat.postMessage` is accepted but posts to that user's DM with **Slackbot**, not with your app — the message arrives somewhere you are not looking, and nothing errors. The `D…` conversation id is what `chat.postMessage` needs, and `conversations.open` is what turns one into the other. Putting a `D…` or `C…` id in `slack.channel` skips the lookup entirely.
 
 **Home profile (Telegram).** Message [@BotFather](https://t.me/BotFather), `/newbot`, and put the token in `telegram.bot_token`. Send your new bot a message, then read your chat id out of `https://api.telegram.org/bot<token>/getUpdates` and put it in `telegram.chat_id`.
 

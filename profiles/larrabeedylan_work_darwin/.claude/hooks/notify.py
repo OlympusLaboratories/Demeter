@@ -81,14 +81,9 @@ def write_json(path, value):
         return False
 
 
-def has_placeholder(value):
-    if isinstance(value, str):
-        return PLACEHOLDER in value
-    if isinstance(value, dict):
-        return any(has_placeholder(item) for item in value.values())
-    if isinstance(value, list):
-        return any(has_placeholder(item) for item in value)
-    return False
+def usable(value):
+    text = str(value or "").strip()
+    return text and PLACEHOLDER not in text
 
 
 def load_config():
@@ -101,10 +96,8 @@ def load_config():
     settings = raw.get(transport)
     if not isinstance(settings, dict):
         return None, "config has no %s section" % transport
-    if not any(str(v).strip() for v in settings.values()):
-        return None, "%s section is empty" % transport
-    if has_placeholder(settings):
-        return None, "%s section still has %s" % (transport, PLACEHOLDER)
+    if not any(usable(v) for v in settings.values()):
+        return None, "%s section is empty or still says %s" % (transport, PLACEHOLDER)
     merged = dict(DEFAULTS)
     merged.update(raw)
     events = dict(DEFAULTS["events"])
