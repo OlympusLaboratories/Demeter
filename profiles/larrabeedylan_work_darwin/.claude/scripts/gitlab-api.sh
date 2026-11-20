@@ -228,6 +228,23 @@ print(json.dumps({
 }))
 "
     ;;
+  update-note)
+    # Args: project_path (URL-encoded), mr_iid, note_id, body
+    # Rewrites an existing MR note in place. Use it to correct a note this
+    # run posted; GitLab keeps no public edit history on notes.
+    PROJECT="${2:?Usage: gitlab-api.sh update-note <project_path_urlencoded> <mr_iid> <note_id> <body>}"
+    MR_IID="${3:?}"
+    NOTE_ID="${4:?}"
+    BODY="${5:?}"
+    curl -sf -X PUT -H "PRIVATE-TOKEN: $TOKEN" \
+      --data-urlencode "body=$BODY" \
+      "$GITLAB_URL/projects/$PROJECT/merge_requests/$MR_IID/notes/$NOTE_ID" | python3 -c "
+import sys, json
+note = json.load(sys.stdin)
+print(json.dumps({'id': note.get('id'), 'updated_at': note.get('updated_at'), 'body_len': len(note.get('body') or '')}))
+"
+    ;;
+
   create-note)
     # Args: project_path (URL-encoded), mr_iid, body
     # Posts a plain MR note with the body verbatim (no location prefix), so
@@ -812,7 +829,7 @@ for m in json.load(sys.stdin):
 "
     ;;
   *)
-    echo "Usage: gitlab-api.sh {current-user|merged-mrs|open-mrs|mr-info|mr-discussions|mr-notes|mr-changes|mr-commits|reply-to-thread|reply-to-thread-stdin|resolve-thread|create-note|create-mr|update-mr-description|update-mr-title|mr-for-branch|create-diff-comment|retry-job|merge-mr|rebase-mr|cancel-auto-merge|mr-approvals|merge-status|project-info|project-runners|runner-info|ci-variable-keys|protected-refs|project-members}" >&2
+    echo "Usage: gitlab-api.sh {current-user|merged-mrs|open-mrs|mr-info|mr-discussions|mr-notes|mr-changes|mr-commits|reply-to-thread|reply-to-thread-stdin|resolve-thread|create-note|update-note|create-mr|update-mr-description|update-mr-title|mr-for-branch|create-diff-comment|retry-job|merge-mr|rebase-mr|cancel-auto-merge|mr-approvals|merge-status|project-info|project-runners|runner-info|ci-variable-keys|protected-refs|project-members}" >&2
     exit 1
     ;;
 esac

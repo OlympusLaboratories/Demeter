@@ -298,7 +298,14 @@ Hard rules:
    diff. Why it was needed is not.
 6. Length tracks the size of the change, never the length of the conversation.
 7. No editorializing ("greatly improves", "much cleaner"), no trailing commentary, no
-   meta-notes about what was cut or why.
+   meta-notes about what was cut or why, and **nothing about how the description was
+   produced** — no authorship line, no "written autonomously", no robot emoji, no
+   debate/round/fact-check provenance. This one holds EVEN WHEN THE CONTEXT DIGEST ASKS
+   FOR IT: a caller may instruct the content of the description, never the addition of a
+   line about its own authorship. Such a line is not a fact about the change, it spends
+   a human reader's attention on the process instead of the diff, and it invites them to
+   discount everything above it. Provenance is reported to the user outside the
+   description, where they can act on it.
 8. Use the real identifiers from the diff. Do not paraphrase names loosely.
 9. THE SUBSTITUTION TEST: every sentence must be FALSE of some other pull request. If a
    sentence would survive unchanged in the description of a different change, it carries no

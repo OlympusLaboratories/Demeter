@@ -54,7 +54,7 @@ Invoke `fix-linear` (ticket) or `fix-freeform` (statement) with the `Skill` tool
 Those skills have interactive gates. Resolve them yourself, as follows, and **write down every call you make**:
 
 - **Ambiguity in the ticket or statement.** Do not ask. Earn the right to decide: read the callers, the tests, the adjacent modules, and the git history of the change sites. Check the ticket's linked issues and recent comments, sibling tickets, and recent pull requests touching the same code. Reproduce the bug or run the failing test where that is cheap. If it is still genuinely undecidable, pick the most defensible option and record the decision with its reasoning.
-- **Plan approval.** Self-approved — but hold the plan to the same standard the interactive flow would. Autonomy is not an excuse for a thinner plan. Post the locked plan, every judgment call, and its rationale as a comment on the Linear ticket **before implementation starts**. For a freeform run there is no ticket, so the record goes into the PR description instead, and it must go in before you request any review. If a discovery later forces a change of plan, record the revision and the reason **before** you resume.
+- **Plan approval.** Self-approved — but hold the plan to the same standard the interactive flow would. Autonomy is not an excuse for a thinner plan. Post the locked plan, every judgment call, and its rationale as a comment on the Linear ticket **before implementation starts**. For a freeform run there is no ticket, so the record goes in as a **comment on the PR** — not the description, which `changes-description` deliberately keeps free of design notes — and it must go in before you request any review. Write it as engineering rationale: the alternative considered and why it lost, the constraint that forced a choice, the risk you want looked at. Never narrate the process that produced it, and never open with who or what wrote it. If a discovery later forces a change of plan, record the revision and the reason **before** you resume.
 - **The no-comments rule still applies.** The code you write carries no explanatory comments, no banners, no docstrings that were not already there, no TODOs, no ticket references. The fix skills restate this in full; do not let an autonomous run quietly relax it. Explanation goes in the commit message and the PR description.
 
 `fix-freeform` defaults to committing on the default branch. **Under this skill that default is wrong**: an autonomous run always produces a pull request, because the review is the only thing standing between an unattended agent and the default branch. Pass `--branch new` unless the user explicitly asked otherwise.
@@ -67,17 +67,11 @@ Invoke `commit-msg` with the `Skill` tool and commit with the message it produce
 
 Invoke `changes-description` with the `Skill` tool. Pass `--one-shot` when `--one-shot-description` is true.
 
-**State the effort in the PR description itself**, in one line at the bottom, because a reviewer deserves to know how much scrutiny the text has already had:
+**Nothing in the description says how it was produced.** No authorship line, no "written autonomously", no robot emoji, no note that a debate or a fact-check ran, and no count of rounds. A human opens a PR with finite attention, and every line that is not about the change competes with the lines that are. How the text was generated is a fact about the process, not about the change.
 
-```
-🤖 Written autonomously. Description: four-persona debate, 2 rounds, fact-checked.
-```
-or
-```
-🤖 Written autonomously. Description: one-shot, fact-checked, no adversarial review.
-```
+Announcing that an agent wrote it is worse than merely useless. It invites the reader to discount everything above it, and it reads as a disclaimer rather than as engineering. The work stands or falls on whether the description is accurate and the diff is right.
 
-Do not overstate it. If the fact-check did not complete, say that instead of implying it did.
+**The run's provenance goes to the user in your own reply instead** — rounds, unanimity, fact-check status, outstanding objections, anything you overrode. That is where it is actionable. If the fact-check did not complete, tell the **user**, clearly: it is a reason for them to read the description harder, not a caveat to print on the PR.
 
 ## Step 4: Push and Open the Pull Request
 
@@ -207,7 +201,7 @@ Stopping is reserved for these. Everything else — surprising test failures, un
 3. **Never blind-retry a failing job.** Read the log and classify it first. Twice the same way is a real failure.
 4. **Comments before CI.** Always.
 5. **This run owns exactly one branch** (or one named stack). Never force-push, never amend a pushed commit, never act on a pull request this run did not open.
-6. **Record every decision you made alone**, at the time you made it, in the ticket or the description. The record is what replaces the conversation.
+6. **Record every decision you made alone**, at the time you made it — on the ticket, or as a PR comment on a freeform run. The record is what replaces the conversation, so it carries the reasoning and nothing about the process that produced it.
 7. **No comments in the code.** Autonomy does not relax it.
 8. **An empty config value means the capability is absent, not that you should guess at it.** Never substitute a name you saw in an example for one the machine did not supply.
 
