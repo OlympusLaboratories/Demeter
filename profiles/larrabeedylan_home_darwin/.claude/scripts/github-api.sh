@@ -4,13 +4,16 @@ Token read from GITHUB_PERSONAL_ACCESS_TOKEN environment variable.
 
 Usage: github_api.py <command> [args...]
 Commands: current-user | open-prs | merged-prs | pr-info | pr-reviews | pr-changes | pr-commits |
-          pr-for-branch | reply-to-thread | create-diff-comment
+          pr-for-branch | reply-to-thread | resolve-thread | unresolve-thread |
+          create-diff-comment | create-pr | update-pr-description | pr-checks | pr-merge |
+          pr-auto-merge | pr-cancel-auto-merge | pr-status | pr-notes | rerun-check
 """
 
 import json
 import os
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 import urllib.parse
@@ -36,10 +39,25 @@ def api_get(token, path, params=None):
         return json.loads(resp.read())
 
 
-def api_post(token, path, payload):
+def api_get_all(token, path, params=None, key=None):
+    results = []
+    page = 1
+    while True:
+        query = dict(params or {})
+        query.update({'per_page': 100, 'page': page})
+        data = api_get(token, path, query)
+        batch = data.get(key, []) if key else data
+        results.extend(batch)
+        if len(batch) < 100:
+            return results
+        page += 1
+
+
+def api_post(token, path, payload, method='POST'):
     req = urllib.request.Request(
         'https://api.github.com' + path,
         data=json.dumps(payload).encode(),
+        method=method,
         headers={
             'Authorization': f'Bearer {token}',
             'Accept': 'application/vnd.github+json',
@@ -48,10 +66,23 @@ def api_post(token, path, payload):
         },
     )
     with urllib.request.urlopen(req) as resp:
-        return json.loads(resp.read())
+        raw = resp.read()
+    return json.loads(raw) if raw.strip() else {}
 
 
-def graphql_post(token, query, variables=None):
+def http_error_message(err):
+    raw = err.read().decode(errors='replace')
+    try:
+        body = json.loads(raw)
+    except ValueError:
+        return f'HTTP {err.code}: {raw[:300]}'
+    detail = body.get('message') or raw[:300]
+    if body.get('errors'):
+        detail = f'{detail} ({json.dumps(body["errors"])})'
+    return f'HTTP {err.code}: {detail}'
+
+
+def graphql_request(token, query, variables=None):
     payload = json.dumps({'query': query, 'variables': variables or {}}).encode()
     req = urllib.request.Request(
         'https://api.github.com/graphql',
@@ -62,7 +93,17 @@ def graphql_post(token, query, variables=None):
         },
     )
     with urllib.request.urlopen(req) as resp:
-        result = json.loads(resp.read())
+        return json.loads(resp.read())
+
+
+def graphql_error_message(result):
+    errors = result.get('errors') or []
+    messages = [e.get('message', '') for e in errors if e.get('message')]
+    return '; '.join(messages) or json.dumps(errors)
+
+
+def graphql_post(token, query, variables=None):
+    result = graphql_request(token, query, variables)
     if 'errors' in result:
         sys.exit(f'GraphQL error: {result["errors"]}')
     return result['data']
@@ -250,8 +291,7 @@ def cmd_pr_changes(token, args):
     if len(args) < 3:
         sys.exit('Usage: github_api.py pr-changes <owner> <repo> <pr_number>')
     owner, repo, number = args[0], args[1], args[2]
-    files = api_get(token, f'/repos/{owner}/{repo}/pulls/{number}/files', {'per_page': 100})
-    for f in files:
+    for f in api_get_all(token, f'/repos/{owner}/{repo}/pulls/{number}/files'):
         emit({
             'old_path': f.get('previous_filename', f.get('filename', '')),
             'new_path': f.get('filename', ''),
@@ -264,7 +304,7 @@ def cmd_pr_commits(token, args):
     if len(args) < 3:
         sys.exit('Usage: github_api.py pr-commits <owner> <repo> <pr_number>')
     owner, repo, number = args[0], args[1], args[2]
-    commits = api_get(token, f'/repos/{owner}/{repo}/pulls/{number}/commits', {'per_page': 100})
+    commits = api_get_all(token, f'/repos/{owner}/{repo}/pulls/{number}/commits')
     for c in commits:
         commit = c.get('commit', {})
         emit({
@@ -423,6 +463,287 @@ def cmd_create_diff_comment(token, args):
     })
 
 
+def _read_body(path):
+    if path == '-':
+        return sys.stdin.read()
+    try:
+        with open(path) as handle:
+            return handle.read()
+    except OSError as err:
+        sys.exit(f'Error: cannot read body file {path}: {err}')
+
+
+def _merge_method(args, index):
+    method = args[index] if len(args) > index and args[index] else 'squash'
+    if method not in ('squash', 'merge', 'rebase'):
+        sys.exit(f'Error: merge method must be squash, merge or rebase, got {method!r}')
+    return method
+
+
+def cmd_create_pr(token, args):
+    if len(args) < 5:
+        sys.exit('Usage: github_api.py create-pr <owner> <repo> <head_branch> <base_branch> <title> [body_file]\n'
+                 '       body_file is a path, "-" for stdin, or omitted for no body.\n'
+                 '       A title starting with "Draft: " opens the PR as a draft.')
+    owner, repo, head, base, title = args[0], args[1], args[2], args[3], args[4]
+    payload = {'head': head, 'base': base, 'title': title}
+    if title.startswith('Draft: '):
+        payload['title'] = title[len('Draft: '):]
+        payload['draft'] = True
+    if len(args) > 5 and args[5]:
+        payload['body'] = _read_body(args[5])
+    pr = api_post(token, f'/repos/{owner}/{repo}/pulls', payload)
+    emit({
+        'number': pr.get('number'),
+        'html_url': pr.get('html_url', ''),
+        'title': pr.get('title', ''),
+        'draft': pr.get('draft', False),
+        'head': pr.get('head', {}).get('ref', ''),
+        'base': pr.get('base', {}).get('ref', ''),
+    })
+
+
+def cmd_update_pr_description(token, args):
+    if len(args) < 4:
+        sys.exit('Usage: github_api.py update-pr-description <owner> <repo> <pr_number> <body_file>\n'
+                 '       body_file is a path, or "-" for stdin.')
+    owner, repo, number = args[0], args[1], args[2]
+    pr = api_post(token, f'/repos/{owner}/{repo}/pulls/{number}',
+                  {'body': _read_body(args[3])}, method='PATCH')
+    emit({
+        'number': pr.get('number'),
+        'html_url': pr.get('html_url', ''),
+        'title': pr.get('title', ''),
+        'body_len': len(pr.get('body') or ''),
+    })
+
+
+def cmd_pr_checks(token, args):
+    if len(args) < 3:
+        sys.exit('Usage: github_api.py pr-checks <owner> <repo> <pr_number>')
+    owner, repo, number = args[0], args[1], args[2]
+    pr = api_get(token, f'/repos/{owner}/{repo}/pulls/{number}')
+    head_sha = pr.get('head', {}).get('sha', '')
+    if not head_sha:
+        sys.exit('Error: the PR has no head sha to resolve checks against')
+
+    for run in api_get_all(token, f'/repos/{owner}/{repo}/commits/{head_sha}/check-runs',
+                           key='check_runs'):
+        emit({
+            'id': run.get('id'),
+            'name': run.get('name', ''),
+            'status': run.get('status', ''),
+            'conclusion': run.get('conclusion'),
+            'html_url': run.get('html_url', ''),
+            'source': 'check_run',
+            'rerunnable': True,
+        })
+
+    for status in api_get_all(token, f'/repos/{owner}/{repo}/commits/{head_sha}/status',
+                              key='statuses'):
+        state = status.get('state', '')
+        emit({
+            'id': status.get('id'),
+            'name': status.get('context', ''),
+            'status': 'in_progress' if state == 'pending' else 'completed',
+            'conclusion': None if state == 'pending' else state,
+            'html_url': status.get('target_url') or '',
+            'source': 'status',
+            'rerunnable': False,
+        })
+
+
+def cmd_pr_merge(token, args):
+    if len(args) < 3:
+        sys.exit('Usage: github_api.py pr-merge <owner> <repo> <pr_number> [squash|merge|rebase]')
+    owner, repo, number = args[0], args[1], args[2]
+    merge_method = _merge_method(args, 3)
+    try:
+        result = api_post(token, f'/repos/{owner}/{repo}/pulls/{number}/merge',
+                          {'merge_method': merge_method}, method='PUT')
+    except urllib.error.HTTPError as err:
+        emit({'error': http_error_message(err)})
+        sys.exit(1)
+    emit({
+        'merged': result.get('merged', False),
+        'sha': result.get('sha', ''),
+        'message': result.get('message', ''),
+    })
+
+
+_ENABLE_AUTO_MERGE_MUTATION = """
+mutation($pullRequestId: ID!, $mergeMethod: PullRequestMergeMethod!) {
+  enablePullRequestAutoMerge(input: {pullRequestId: $pullRequestId, mergeMethod: $mergeMethod}) {
+    pullRequest {
+      number
+      autoMergeRequest { enabledAt mergeMethod }
+    }
+  }
+}
+"""
+
+_DISABLE_AUTO_MERGE_MUTATION = """
+mutation($pullRequestId: ID!) {
+  disablePullRequestAutoMerge(input: {pullRequestId: $pullRequestId}) {
+    pullRequest {
+      number
+      autoMergeRequest { enabledAt }
+    }
+  }
+}
+"""
+
+
+def _pr_node_id(token, owner, repo, number):
+    pr = api_get(token, f'/repos/{owner}/{repo}/pulls/{number}')
+    node_id = pr.get('node_id', '')
+    if not node_id:
+        emit({'error': f'PR {owner}/{repo}#{number} has no GraphQL node id'})
+        sys.exit(1)
+    return node_id
+
+
+def _graphql_mutation(token, query, variables):
+    try:
+        result = graphql_request(token, query, variables)
+    except urllib.error.HTTPError as err:
+        emit({'error': http_error_message(err)})
+        sys.exit(1)
+    if result.get('errors'):
+        emit({'error': graphql_error_message(result)})
+        sys.exit(1)
+    return result['data']
+
+
+def cmd_pr_auto_merge(token, args):
+    if len(args) < 3:
+        sys.exit('Usage: github_api.py pr-auto-merge <owner> <repo> <pr_number> [squash|merge|rebase]\n'
+                 '       Requires auto-merge enabled on the repository and at least one\n'
+                 '       required check or review on the base branch.')
+    owner, repo, number = args[0], args[1], args[2]
+    merge_method = _merge_method(args, 3)
+    node_id = _pr_node_id(token, owner, repo, number)
+    data = _graphql_mutation(token, _ENABLE_AUTO_MERGE_MUTATION, {
+        'pullRequestId': node_id,
+        'mergeMethod': merge_method.upper(),
+    })
+    pr = (data.get('enablePullRequestAutoMerge') or {}).get('pullRequest') or {}
+    emit({'enabled': True, 'number': pr.get('number', int(number))})
+
+
+def cmd_pr_cancel_auto_merge(token, args):
+    if len(args) < 3:
+        sys.exit('Usage: github_api.py pr-cancel-auto-merge <owner> <repo> <pr_number>')
+    owner, repo, number = args[0], args[1], args[2]
+    node_id = _pr_node_id(token, owner, repo, number)
+    data = _graphql_mutation(token, _DISABLE_AUTO_MERGE_MUTATION, {'pullRequestId': node_id})
+    pr = (data.get('disablePullRequestAutoMerge') or {}).get('pullRequest') or {}
+    emit({'enabled': False, 'number': pr.get('number', int(number))})
+
+
+_RESOLVE_THREAD_MUTATION = """
+mutation($threadId: ID!) {
+  resolveReviewThread(input: {threadId: $threadId}) {
+    thread { id isResolved }
+  }
+}
+"""
+
+_UNRESOLVE_THREAD_MUTATION = """
+mutation($threadId: ID!) {
+  unresolveReviewThread(input: {threadId: $threadId}) {
+    thread { id isResolved }
+  }
+}
+"""
+
+
+def _set_thread_resolution(token, args, command, query, field, resolved):
+    if len(args) < 3 or not all(args[:3]):
+        sys.exit(f'Usage: github_api.py {command} <owner> <repo> <thread_id>\n'
+                 '       thread_id is the GraphQL node id of a PullRequestReviewThread, as\n'
+                 '       returned by pr-reviews. A REST comment id will not work.')
+    thread_id = args[2]
+    data = _graphql_mutation(token, query, {'threadId': thread_id})
+    thread = (data.get(field) or {}).get('thread') or {}
+    emit({'id': thread.get('id') or thread_id, 'resolved': thread.get('isResolved', resolved)})
+
+
+def cmd_resolve_thread(token, args):
+    _set_thread_resolution(token, args, 'resolve-thread',
+                           _RESOLVE_THREAD_MUTATION, 'resolveReviewThread', True)
+
+
+def cmd_unresolve_thread(token, args):
+    _set_thread_resolution(token, args, 'unresolve-thread',
+                           _UNRESOLVE_THREAD_MUTATION, 'unresolveReviewThread', False)
+
+
+_PR_REVIEW_DECISION_QUERY = """
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewDecision
+    }
+  }
+}
+"""
+
+
+def cmd_pr_status(token, args):
+    if len(args) < 3:
+        sys.exit('Usage: github_api.py pr-status <owner> <repo> <pr_number>')
+    owner, repo, number = args[0], args[1], args[2]
+    path = f'/repos/{owner}/{repo}/pulls/{number}'
+
+    pr = api_get(token, path)
+    if pr.get('mergeable') is None and pr.get('state') == 'open':
+        time.sleep(2)
+        pr = api_get(token, path)
+
+    data = graphql_post(token, _PR_REVIEW_DECISION_QUERY, {
+        'owner': owner,
+        'repo': repo,
+        'number': int(number),
+    })
+    emit({
+        'number': pr.get('number'),
+        'state': pr.get('state', ''),
+        'draft': pr.get('draft', False),
+        'mergeable': pr.get('mergeable'),
+        'mergeable_state': pr.get('mergeable_state', 'unknown'),
+        'rebaseable': pr.get('rebaseable'),
+        'head_sha': pr.get('head', {}).get('sha', ''),
+        'review_decision': data['repository']['pullRequest']['reviewDecision'],
+        'merged': pr.get('merged', False),
+    })
+
+
+def cmd_pr_notes(token, args):
+    if len(args) < 3:
+        sys.exit('Usage: github_api.py pr-notes <owner> <repo> <pr_number>')
+    owner, repo, number = args[0], args[1], args[2]
+    for note in api_get_all(token, f'/repos/{owner}/{repo}/issues/{number}/comments'):
+        emit({
+            'id': note.get('id'),
+            'author': (note.get('user') or {}).get('login', ''),
+            'body': note.get('body', ''),
+            'created_at': note.get('created_at', ''),
+        })
+
+
+def cmd_rerun_check(token, args):
+    if len(args) < 3:
+        sys.exit('Usage: github_api.py rerun-check <owner> <repo> <check_run_id>')
+    owner, repo, check_run_id = args[0], args[1], args[2]
+    try:
+        api_post(token, f'/repos/{owner}/{repo}/check-runs/{check_run_id}/rerequest', {})
+    except urllib.error.HTTPError as err:
+        emit({'error': http_error_message(err)})
+        sys.exit(1)
+    emit({'ok': True})
+
+
 COMMANDS = {
     'current-user':    cmd_current_user,
     'open-prs':        cmd_open_prs,
@@ -433,7 +754,18 @@ COMMANDS = {
     'pr-commits':      cmd_pr_commits,
     'pr-for-branch':   cmd_pr_for_branch,
     'reply-to-thread': cmd_reply_to_thread,
+    'resolve-thread':  cmd_resolve_thread,
+    'unresolve-thread': cmd_unresolve_thread,
     'create-diff-comment': cmd_create_diff_comment,
+    'create-pr':       cmd_create_pr,
+    'update-pr-description': cmd_update_pr_description,
+    'pr-checks':       cmd_pr_checks,
+    'pr-merge':        cmd_pr_merge,
+    'pr-auto-merge':   cmd_pr_auto_merge,
+    'pr-cancel-auto-merge': cmd_pr_cancel_auto_merge,
+    'pr-status':       cmd_pr_status,
+    'pr-notes':        cmd_pr_notes,
+    'rerun-check':     cmd_rerun_check,
 }
 
 if __name__ == '__main__':

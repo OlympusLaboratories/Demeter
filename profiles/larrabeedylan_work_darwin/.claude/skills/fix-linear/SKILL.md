@@ -2,9 +2,18 @@
 
 Implement the changes required by a Linear ticket, working on a properly set up feature branch.
 
-**Parameter:** `$ARGUMENTS` — the Linear ticket identifier (e.g., `ENG-123`).
+**Parameter:** `$ARGUMENTS` — a Linear ticket identifier, plus optional flags.
 
-If no argument is provided, ask the user for the ticket ID and stop.
+| Argument | Effect |
+|---|---|
+| A Linear ticket identifier (`ENG-123`, `PLAT-3276`) | **Required.** The ticket to implement. |
+| `in place`, `--here`, `no worktree` | Work in the current checkout instead of cutting a git worktree (**Step 2-INPLACE**). Matched case-insensitively. |
+| `--one-shot-description [true\|false]` | Default `false`. Passed straight through to `changes-description` as its `--one-shot` flag: one writer instead of the four-persona debate, 4–6 agents instead of 15–26, with the mechanical word budget and the fact-check kept. Bare `--one-shot-description` means `true`. |
+| `--changes-diagram [true\|false]` | Default **`true`**. After the commit message and description, run the `changes-diagram` skill to produce a call-flow diagram of the branch. Pass `false` to skip it. |
+
+Parse the flags out of `$ARGUMENTS` **first**; whatever remains is the ticket identifier. Without that, `PLAT-123 --changes-diagram false` is taken whole as the ticket ID and fails validation in Step 1b.
+
+If nothing remains once the flags are stripped, ask the user for the ticket ID and stop.
 
 ## Step 1: Identify the User and Ticket
 
@@ -61,7 +70,7 @@ If the merge has conflicts, stop and tell the user so they can resolve them befo
 
 ### 2c. Create and enter the worktree
 
-> **The base branch is not always the default branch, and only the ticket knows.** This step runs before Step 3 reads the ticket, so a ticket saying "branches off MR2" or "stacked on PLAT-1234" would get a worktree cut from the wrong base. When the ticket ID looks like part of a stack — an `MR<n>` title, a parent initiative that sequences MRs — **fetch the ticket (Step 3a) and its siblings (Step 3f) first**, then come back here knowing the base. Before assuming a named predecessor is unmerged, check whether it already landed: a squash-merge leaves `git merge-base --is-ancestor <branch> origin/<default>` false while the *commit subject* is present in `git log origin/<default>`, so grep the log for the ticket ID rather than trusting the ancestry test. If it landed, the default branch **is** the right base and no stacking is needed.
+> **The base branch is not always the default branch, and only the ticket knows.** This step runs before Step 3 reads the ticket, so a ticket saying "branches off MR2" or "stacked on PLAT-1234" would get a worktree cut from the wrong base. When the ticket ID looks like part of a stack — a title carrying the `MR<n>` prefix, a parent initiative that sequences MRs — **fetch the ticket (Step 3a) and its siblings (Step 3f) first**, then come back here knowing the base. Before assuming a named predecessor is unmerged, check whether it already landed: a squash-merge leaves `git merge-base --is-ancestor <branch> origin/<default>` false while the *commit subject* is present in `git log origin/<default>`, so grep the log for the ticket ID rather than trusting the ancestry test. If it landed, the default branch **is** the right base and no stacking is needed.
 
 Set `WORKTREE_PATH` to `.claude/worktrees/<BRANCH_NAME>` (relative to the repo root). Run these commands from the **main repo root**.
 
@@ -184,7 +193,7 @@ Load the `get_issue` tool via `ToolSearch` (query: `select:mcp__claude_ai_Linear
 
 Use `mcp__claude_ai_Linear__get_issue` with `id: TICKET_ID` and `includeRelations: true` (e.g., `PLAT-1180`). This returns the full issue including title, description, status, labels, assignee, relations, and — critically — the **`parent`** field.
 
-**`get_issue`'s default response omits `parentId` entirely.** `includeRelations: true` adds blocks/blocked-by/related but *not* the parent, so the field is simply absent and reads as "no parent" when there may well be one. Make a second call passing `fields: ["id", "title", "parentId", "projectId"]` — a nonempty `fields` selection is the only way to surface it. Do this before concluding a ticket is parentless, and note that a project-level MR stack (siblings sharing an `MR<n>` title prefix with no shared parent) needs `list_issues` with `project:` rather than `parentId:`.
+**`get_issue`'s default response omits `parentId` entirely.** `includeRelations: true` adds blocks/blocked-by/related but *not* the parent, so the field is simply absent and reads as "no parent" when there may well be one. Make a second call passing `fields: ["id", "title", "parentId", "projectId"]` — a nonempty `fields` selection is the only way to surface it. Do this before concluding a ticket is parentless, and note that a project-level MR stack (siblings sharing the `MR<n>` title prefix with no shared parent) needs `list_issues` with `project:` rather than `parentId:`.
 
 **Record the `parent` field now.** Explicitly note whether the issue has a parent and, if so, capture the parent's identifier. This determines whether Step 3f applies, and Step 3f is mandatory whenever a parent exists — do not lose this information between steps.
 
@@ -224,7 +233,7 @@ Include ALL comments — these often contain critical context, decisions, and cl
 
 After displaying the ticket, check if the ticket is about **addressing comments or feedback left on a merge request**. Look for signals like:
 - Title or description mentions "address comments", "address feedback", "follow up" on a merge request/MR
-- Description contains a GitLab MR URL (e.g., `https://gitlab.com/.../merge_requests/NNN`)
+- Description links to a merge request on GitLab — the URL path carries the MR number
 
 If the ticket matches this pattern:
 1. Extract the MR URL from the description.
@@ -317,12 +326,21 @@ After implementation is complete, give the user a summary of what was changed.
 Immediately after implementation is complete — do not wait for the user to commit or ask for these:
 
 1. Invoke the `commit-msg` skill using the `Skill` tool to generate a commit message.
-2. **Immediately** invoke the `changes-description` skill using the `Skill` tool to generate an MR description. Do NOT wait for the user to respond to the commit message first — invoke it in the same turn, back-to-back with the commit message, so the debate is already running while they read the commit message. The `commit-msg` skill ends with a suggestion to run `/commit`, but you must continue and invoke `changes-description` before yielding to the user. Pass `--quick` unless the branch is large or the user asked for a thorough description — `changes-description` runs a multi-agent debate, and the full-length version is disproportionate for a routine ticket. That skill launches its debate as a background workflow, prints the run ID, and then yields the turn — that is correct, not a stall. Yield with it: the description arrives when the swarm's completion notification does, and blocking on it (`TaskOutput`, `Monitor`, a poll loop) only takes the user's prompt line away for the length of the run.
+2. **Immediately** invoke the `changes-description` skill using the `Skill` tool to generate an MR description. Do NOT wait for the user to respond to the commit message first — invoke it in the same turn, back-to-back with the commit message, so the debate is already running while they read the commit message. The `commit-msg` skill ends with a suggestion to run `/commit`, but you must continue and invoke `changes-description` before yielding to the user.
+
+   **Which flag to pass, in precedence order.** `--one-shot-description true` wins: pass `--one-shot` and **nothing else**. The two flags must never both be passed — `--one-shot` already forces the debate's round count to zero, so `--quick` alongside it is at best redundant and at worst read as a request for the panel it just dismissed. Otherwise pass `--quick`, unless the branch is large or the user asked for a thorough description, in which case pass no flag at all and let the full panel sit. The reasoning behind the ladder: `changes-description` runs a multi-agent debate and the full-length version is disproportionate for a routine ticket, while `--one-shot` goes further and drops the debate entirely, keeping the mechanical word budget and the fact-check — the two things a lone writer has been measured getting wrong. What it gives up is the adversarial pressure, so reach for it when the diff is small and the description is not the thing a reviewer will lean on.
+
+   That skill launches its run as a background workflow, prints the run ID, and then yields the turn — that is correct, not a stall. This holds for `--one-shot` too: it is a 4–6 agent workflow, not a synchronous call, so it still returns a `wf_` run ID and still hands the turn back before the description exists. Yield with it: the description arrives when the swarm's completion notification does, and blocking on it (`TaskOutput`, `Monitor`, a poll loop) only takes the user's prompt line away for the length of the run.
 3. **Re-print the commit message after the MR description, verbatim.** The `changes-description` output is long, so by the time it finishes the commit message from step 1 has scrolled far up the terminal. In the turn that presents the description — the one the swarm's completion notification wakes you into — close by repeating it — unchanged from what `commit-msg` produced, no re-generation, no re-wording, no summary of it — in its own fenced block under a `Commit message` heading, so both blocks the user copies sit next to each other at the bottom. If the user corrected the commit message between step 1 and here, repeat the corrected version.
+4. **Then produce the call-flow diagram, unless `--changes-diagram false` was passed.** In that same turn, once the description and the re-printed commit message are out, invoke the `changes-diagram` skill using the `Skill` tool with no arguments — it defaults to the current branch against the default branch, which is exactly this branch. It publishes an HTML page and hands back a link, or returns a local file path when no artifact store is reachable; **either outcome is a success.** Print whichever you got as a single line under the commit message block, so it cannot push the two blocks the user copies apart.
+
+   **The default is on because the moment is now.** A call-flow diagram is worth most while the MR is being opened and the reviewer has not yet read a line of the diff — and nobody ever goes back to add one to an MR that is already up. Opting out costs one flag; opting in means it never happens.
+
+   **It must never fail this run.** If `changes-diagram` errors, is not installed, or returns nothing usable, say so in one line and carry on. Do not retry it, do not draw the diagram yourself, and do not let it hold back steps 1–3 — the commit message and the description are the deliverables here, and losing them to a missing diagram would be a bad trade.
 
 ## Important Rules
 
-1. **NEVER modify external state beyond local git branch/worktree operations.** Creating a local branch or worktree is fine; do not update Linear tickets, push branches, or create MRs unless explicitly asked. Never remove a worktree the user didn't ask you to — cleanup is the user's call.
+1. **NEVER modify external state beyond local git branch/worktree operations.** Creating a local branch or worktree is fine; do not update Linear tickets, push branches, or create MRs unless explicitly asked. Publishing the Step 6 diagram is the one sanctioned exception — it writes nothing to Linear and nothing to the forge. Never remove a worktree the user didn't ask you to — cleanup is the user's call.
 2. **Respect uncommitted work.** Never discard or stash uncommitted changes without the user's explicit approval.
 3. **Ask, don't assume.** If the ticket is vague, ask the user for clarification rather than guessing.
 4. **Follow existing patterns.** Match the coding style, naming conventions, and architecture of the existing codebase.

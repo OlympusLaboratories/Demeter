@@ -3,7 +3,14 @@
   "slack": {
     "webhook_url": "REPLACE_ME",
     "bot_token": "",
-    "channel": ""
+    "channel": "",
+    "mention": "",
+    "mention_levels": [
+      "stop",
+      "question",
+      "permission",
+      "failure"
+    ]
   },
   "min_turn_seconds": 60,
   "min_interval_seconds": 30,

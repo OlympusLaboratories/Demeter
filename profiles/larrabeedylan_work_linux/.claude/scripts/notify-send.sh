@@ -9,11 +9,13 @@ CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".claude", "notify.json")
 DM_CACHE = os.path.join(os.path.expanduser("~"), ".claude", "notify-state", "slack-dm.json")
 POST_TIMEOUT = 5
 PUSH_LIMIT = 140
+MENTION_LEVELS = ("stop", "question", "permission", "failure")
 
 GLYPHS = {
     "stop": "✅",
     "permission": "🔐",
     "question": "❓",
+    "progress": "🔄",
     "idle": "💤",
     "failure": "🔥",
 }
@@ -47,7 +49,13 @@ def config():
         fail("slack.bot_token is set but slack.channel is empty")
     if not token and not webhook:
         fail("set slack.webhook_url, or slack.bot_token plus slack.channel")
-    return token, channel, webhook
+    mention = usable(settings.get("mention"))
+    if not mention and channel[:1] in ("U", "W"):
+        mention = channel
+    levels = settings.get("mention_levels")
+    if not isinstance(levels, list):
+        levels = list(MENTION_LEVELS)
+    return token, channel, webhook, mention, [str(x) for x in levels]
 
 
 def post(url, payload, headers):
@@ -141,8 +149,10 @@ def blocks_for(envelope):
 
 
 def send(envelope):
-    token, channel, webhook = config()
+    token, channel, webhook, mention, levels = config()
     text = push_text(envelope)
+    if mention and envelope.get("level") in levels:
+        text = "<@%s> %s" % (mention, text)
     blocks = blocks_for(envelope)
     if token:
         target = resolve(token, channel)
@@ -167,10 +177,12 @@ def send(envelope):
 
 
 def check():
-    token, channel, webhook = config()
+    token, channel, webhook, mention, levels = config()
     if token:
         target = resolve(token, channel)
         route = "bot token to %s (threaded)" % target
+        if mention:
+            route += ", mentioning <@%s> on %s" % (mention, "/".join(levels))
         if target != channel:
             route += ", the DM with %s" % channel
     else:

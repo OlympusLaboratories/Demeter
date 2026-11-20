@@ -10,10 +10,20 @@ Produce a pull request description by making four reviewers with incompatible go
 | A git ref/range (`main`, `origin/main`, `HEAD~3`) | Diff against that base instead. |
 | `--rounds N` | Cap the debate at N rounds (default `2`, max `3`). |
 | `--quick` | One judging round plus a single repair pass if anyone blocks. Use for small changes — the repair is not re-judged, so the run reports non-unanimous. |
+| `--one-shot [true\|false]` | Default `false`. `true` drops the debate entirely: one writer, then the budget and the fact-check. Bare `--one-shot` means `true`. |
 
-Parse the flags out of `$ARGUMENTS` **first**; whatever remains (if anything) is the git ref. `--rounds` and `--quick` set the `rounds` value passed to the workflow — they are not part of the diff base, and feeding them to `git merge-base` produces a confusing failure.
+Parse the flags out of `$ARGUMENTS` **first**; whatever remains (if anything) is the git ref. `--rounds` and `--quick` set the `rounds` value passed to the workflow, and `--one-shot` sets `oneShot` — they are not part of the diff base, and feeding them to `git merge-base` produces a confusing failure.
 
-This skill uses the **Workflow** tool. Invoking it is an explicit opt-in to multi-agent orchestration — proceed without asking for further permission. A run is 15 agents when the panel accepts in one round, 20 at the default two rounds, and 26 at `--rounds 3` with no consensus and a factual correction. `--quick` is 15–16.
+This skill uses the **Workflow** tool. Invoking it is an explicit opt-in to multi-agent orchestration — proceed without asking for further permission. A run is 15 agents when the panel accepts in one round, 20 at the default two rounds, and 26 at `--rounds 3` with no consensus and a factual correction. `--quick` is 15–16. **`--one-shot` is 4–6**, which is the point of it.
+
+### What `--one-shot` keeps, and why it keeps exactly that
+
+`--one-shot` is not "the same skill with fewer agents". It removes the four-persona contest — the drafts, the cross-examination, and the judging rounds — and keeps the two phases that are **arithmetic rather than opinion**:
+
+- **The budget.** `measure()` counts words and bullets in code. This is deliberate: the one time a writer here was trusted to respect a stated limit it produced 913 words while satisfying every rule it had been given, because "3 summary sentences" says nothing about sentence length. A one-shot description of a large diff is still a 320-word description.
+- **The fact-check.** It reads the diff and the checkout and proves the claims are true. A single unopposed writer needs this *more* than a panel does, not less — nobody else read the text.
+
+What you genuinely lose is the adversarial pressure: the skimmer forcing cuts, the novice forcing plain language, the hawk hunting generated prose. The sole writer is handed the veto table and told to apply all four, which is weaker than four reviewers who each actually hold one. So use `--one-shot` for routine work where the diff is small and the stakes are low, and let the panel run when the description is the thing a reviewer will lean on.
 
 ## Who reads this
 
@@ -79,10 +89,12 @@ Call the **Workflow** tool with the script below, passing `args` as a **real JSO
 
 ```json
 { "diff": "<unified diff>", "files": "<name-status list>", "context": "<the Step 1b digest>",
-  "defaultBranch": "<DEFAULT_BRANCH>", "repoRoot": "<REPO_ROOT>", "rounds": 2 }
+  "defaultBranch": "<DEFAULT_BRANCH>", "repoRoot": "<REPO_ROOT>", "rounds": 2, "oneShot": false }
 ```
 
 `rounds` is `2` by default, `1` under `--quick`, or the number given to `--rounds` (the script clamps it to 1–3 regardless).
+
+`oneShot` is `false` unless `--one-shot` was passed. Pass it as a real **boolean**, not the string `"true"` — the script tests `A.oneShot === true`, so a string silently runs the full debate and the user gets a 20-agent run they asked not to have. When it is `true` the script forces `rounds` to `0` itself; do not also pass `--quick`.
 
 A JSON-encoded string makes every `args.x` lookup `undefined`; the script hard-throws on missing `diff` or `context` rather than letting four drafters write a description of nothing.
 
@@ -102,7 +114,7 @@ export const meta = {
   ],
 }
 
-// args = { diff, files, context, defaultBranch, repoRoot, rounds }
+// args = { diff, files, context, defaultBranch, repoRoot, rounds, oneShot }
 // A JSON-encoded string yields `undefined` for every lookup, which would send
 // the drafters off to invent a description from nothing. Normalise, then refuse.
 const A = typeof args === 'string' ? JSON.parse(args) : (args || {})
@@ -116,7 +128,8 @@ for (const k of ['diff', 'context']) {
     )
   }
 }
-const ROUNDS = Math.min(Math.max(Number(A.rounds) || 2, 1), 3)
+const ONE_SHOT = A.oneShot === true
+const ROUNDS = ONE_SHOT ? 0 : Math.min(Math.max(Number(A.rounds) || 2, 1), 3)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Budgets, measured in code rather than asked of an agent.
@@ -601,14 +614,20 @@ ${A.diff}`
 
 const vetoTable = PERSONAS.map((p) => `- ${p.key} (${p.axis}): ${p.veto}`).join('\n')
 
+const PANEL = ONE_SHOT ? PERSONAS.filter((p) => p.key === 'senior') : PERSONAS
+
 // ── Phase 1: one lopsided draft per persona ─────────────────────────────────
 // Barrier is correct here: every cross-examination reads all of the drafts.
 phase('Draft')
-const drafts = (await parallel(PERSONAS.map((p) => () =>
+const drafts = (await parallel(PANEL.map((p) => () =>
   agent(
-    `You are ${p.title}. You are one of ${PERSONAS.length} drafters in an adversarial contest to write the pull request description for the change below.
+    `You are ${p.title}. ${PANEL.length > 1
+      ? `You are one of ${PANEL.length} drafters in an adversarial contest to write the pull request description for the change below.
 
-Write it YOUR way. Argue your corner and do not pre-compromise — an editor downstream is responsible for balance, and a draft that already hedges gives them nothing to weigh. Your axis is ${p.axis}.
+Write it YOUR way. Argue your corner and do not pre-compromise — an editor downstream is responsible for balance, and a draft that already hedges gives them nothing to weigh. Your axis is ${p.axis}.`
+      : `You are the sole drafter for the pull request description below, and there is no contest to balance you. Your own axis is ${p.axis}, but you must satisfy every constraint in the veto table below, not just yours — write as though the other three reviewers will read this and each holds a veto:
+
+${vetoTable}`}
 
 ${p.charter}
 
@@ -629,7 +648,7 @@ const draftBlock = drafts.map((d) => `--- DRAFT BY ${d.persona.toUpperCase()} --
 
 // ── Phase 2: each persona attacks the others' drafts ────────────────────────
 phase('Cross-examine')
-const critiques = (await parallel(PERSONAS.map((p) => () =>
+const critiques = drafts.length < 2 ? [] : (await parallel(PERSONAS.map((p) => () =>
   agent(
     `You are ${p.title}, cross-examining in an adversarial writing contest.
 
@@ -661,7 +680,7 @@ Produce ONE description that satisfies every persona's binding constraints at on
 
 You are CHOOSING, not accumulating. A synthesis that keeps every defensible sentence from every draft is a failed synthesis — the union of four thorough drafts is a wall of text, and every sentence in it can be justified individually while the whole is unreadable. Start from the smallest description that would let a reviewer read this diff, and add only what they would be worse off not knowing. The budget below is the test.
 
-DO THIS FIRST, BEFORE WRITING ANY PROSE: settle the THROUGH-LINE. Read the four drafts' spines above, then write the one sentence that names what this PR is actually about — the thing that makes these files change together. It is usually the concept the change turns on, not the list of things done. Then select content by asking of every candidate fact: does a reviewer need this to follow the spine? Facts that serve no spine are the laundry list you are here to prevent, and they get cut even when true and even when a persona liked them.
+DO THIS FIRST, BEFORE WRITING ANY PROSE: settle the THROUGH-LINE. Read the draft spines above, then write the one sentence that names what this PR is actually about — the thing that makes these files change together. It is usually the concept the change turns on, not the list of things done. Then select content by asking of every candidate fact: does a reviewer need this to follow the spine? Facts that serve no spine are the laundry list you are here to prevent, and they get cut even when true and even when a persona liked them.
 
 Two honest outcomes are worth naming rather than papering over. If the change only makes sense as part of a larger effort, the spine may reach for it in one clause — "the third of four steps that move X off Y" — never a recap. And if this branch genuinely does several unrelated things, say so in \`throughLine\` ("no single spine: this branch does A, B and C") rather than inventing a theme that ties them; that is a real signal the PR should be split, and it belongs in front of the author.
 
@@ -672,7 +691,7 @@ ${HOUSE}
 ${draftBlock}
 
 CROSS-EXAMINATION:
-${critiqueBlock}
+${critiqueBlock || '(none — this is a single-draft run, so nothing has attacked the text yet. You are the only check on it before the budget and the fact-checker. Read it as hostilely as the four personas would have.)'}
 
 ${CONTEXT}
 
@@ -919,11 +938,12 @@ ${CONTEXT}`,
 // The same number the budget was judged against — counting the headings here and not
 // there produced a reported word count that disagreed with the cap it was measured on.
 const wordCount = budget.total
-log(`changes-description: ${size} change, ${round} round(s), unanimous=${unanimous}, ${judgesReported}/${PERSONAS.length} judges reported, ${wordCount} words in ${budget.bullets}/${BUDGET.bullets} bullet(s), ${budget.overflows.length ? `${budget.overflows.length} BUDGET BREACH(ES) REMAIN` : 'within budget'}${budget.atCap.length ? `, ${budget.atCap.length} dimension(s) at cap` : ''}, ${factCheckOk ? `${factErrors.length} factual correction(s), ${dropped.length} restored` : 'FACT-CHECK DID NOT COMPLETE'}`)
+log(`changes-description: ${size} change, ${ONE_SHOT ? 'one-shot (no debate)' : `${round} round(s), unanimous=${unanimous}, ${judgesReported}/${PERSONAS.length} judges reported`}, ${wordCount} words in ${budget.bullets}/${BUDGET.bullets} bullet(s), ${budget.overflows.length ? `${budget.overflows.length} BUDGET BREACH(ES) REMAIN` : 'within budget'}${budget.atCap.length ? `, ${budget.atCap.length} dimension(s) at cap` : ''}, ${factCheckOk ? `${factErrors.length} factual correction(s), ${dropped.length} restored` : 'FACT-CHECK DID NOT COMPLETE'}`)
 
 return {
   description: current.description,
   throughLine: current.throughLine || '',
+  oneShot: ONE_SHOT,
   unanimous,
   repaired,
   judgesReported,
@@ -954,7 +974,7 @@ The **Workflow** tool runs the debate in the background and its tool result incl
 ```
 🥊  changes-description debate launched — run ID: wf_ab12cd34
     Watch it live in another terminal:  wfwatch wf_ab12cd34
-    One-shot snapshot instead:          wfwatch wf_ab12cd34 --once
+    Single snapshot instead:            wfwatch wf_ab12cd34 --once
 ```
 
 Use the **actual** `runId` from the Workflow tool result verbatim — `wfwatch` resolves the journal by exact ID.
@@ -979,6 +999,14 @@ Rules for that record: it is a log, not a defense. Do not justify the text, do n
 
 **Print `throughLine` first**, on its own line above the record. It is the one-sentence spine the whole description was built on, and it is the fastest way for you to catch a run that went wrong: if the spine is not what this PR is about, nothing below it will be either, and re-running beats editing. If it says there is no single spine, that is the workflow telling you this branch may want splitting.
 
+**When `oneShot` is true, print a one-shot record instead of a debate record.** There was no debate, so every field that describes one is meaningless and printing it is a lie about how the text was produced. Print the through-line, then a single line of the form:
+
+```
+one-shot · medium change · 212 words, 4 of 6 bullets · within budget · 1 factual correction
+```
+
+Drawn only from `size`, `words`, `budget`, `overBudget`, `atCap`, `factErrors`, `factChecked` and `dropped`. Never print `rounds`, `unanimous`, `repaired`, `judgesReported`, `history` or `outstanding` on a one-shot run — `unanimous: false` and `0 of 4 judges reported` are artifacts of a panel that never sat, and reporting them as if a panel had disagreed is exactly the fabricated provenance this skill's fact-check exists to prevent. The `factChecked` rule below still applies in full: a one-shot run that could not fact-check is **more** dangerous than a debated one, because no other agent read the text.
+
 **Every other line must come from a field the workflow returned** — `rounds`, `unanimous`, `repaired`, `judgesReported`, `words`, `budget`, `overBudget`, `atCap`, `size`, `caps`, `sections`, `composePasses`, `factErrors`, `factChecked`, `dropped`, `unresolved`, `outstanding`, and `history[].blockers` (round, persona, quote, problem). Never state how an objection was *resolved*: the workflow does not return that, and inferring it from the final text fabricates a provenance log — the exact failure this skill's fact-check phase exists to prevent. Never reconstruct a debate line you were not handed; if the field is empty, print fewer lines.
 
 Then, specifically:
@@ -999,7 +1027,7 @@ If the workflow returns no usable `description`, say the debate failed and write
 2. **Never invent rationale.** If the conversation didn't say why, the description doesn't say why. The fact-checker exists because three rounds of polishing turn a hedge into a confident falsehood.
 3. **Format is not up for debate.** The house rules bind every persona. A "thorough" description with a design-decisions section is a failed run, not a thorough one.
 4. **Respect what was discussed.** Where the user explained their reasoning in the chat, that reasoning goes in the packet and wins over anything a persona invents.
-5. **Match the tool to the change.** A one-line fix does not need a fifteen-agent debate. For a trivial diff, say so and offer to write it directly instead — or run `--quick`.
+5. **Match the tool to the change.** A one-line fix does not need a fifteen-agent debate. For a trivial diff, run `--one-shot` (4–6 agents, budget and fact-check intact) or `--quick` (15–16). Reach for `--one-shot` rather than offering to write the description by hand outside the skill: freehand loses the mechanical word count and the fact-check, which are the two things this skill has evidence a lone writer gets wrong.
 6. **The description ships alone.** Everything outside the code block is for the user's eyes, never for pasting into the PR.
 7. **Report the debate honestly.** A non-unanimous result is a real signal about the change, not a formatting problem to smooth over.
 8. **The budget is arithmetic, not taste.** It is measured in code and handed to the agents precisely because "1–3 sentences" was satisfied by three 50-word sentences. If the text cannot fit, say so — do not quietly widen the limit.

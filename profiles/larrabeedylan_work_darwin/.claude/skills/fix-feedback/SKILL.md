@@ -9,10 +9,52 @@ This skill runs in one of two **modes**, chosen automatically from the argument:
 
 **Parameter:** `$ARGUMENTS` — optionally, the full URL of a GitLab merge request (e.g., `https://gitlab.com/group/project/-/merge_requests/123`). Omit it to use Mode B.
 
+**Flag:** `--autonomous` (default **off**) — anywhere in `$ARGUMENTS`, with or without a URL. It says, in the user's own words, that **they trust the agent's judgment and want to be pulled in only if absolutely necessary.** It composes with Mode A, with Mode B, and with the `in place` / `--here` / `no worktree` escape hatch. See **Autonomous Mode** below for exactly which gates it opens, which it leaves shut, and when it stops anyway.
+
 **Selecting the mode:**
-- `$ARGUMENTS` looks like a GitLab MR URL → **Mode A**: do Steps 1, 2, 2c, then continue from Step 3.
-- `$ARGUMENTS` is empty → **Mode B**: skip Steps 1, 2, and 2c; start at **Step 1B**, then continue from **Step 3b**.
-- `$ARGUMENTS` is empty **and** the conversation holds neither review output nor an unaddressed MR thread from an earlier Mode A run → tell the user there's nothing to work through (ask them to pass an MR URL or run a review first, e.g. `/review-code`) and stop. Check both before concluding this.
+- `$ARGUMENTS` looks like a GitLab MR URL → **Mode A**: do Steps 1, 2, 2c, then continue from Step 3. (`--autonomous` in the same argument string does not change the mode; strip the flag before parsing the URL.)
+- `$ARGUMENTS` is empty, or holds only flags → **Mode B**: skip Steps 1, 2, and 2c; start at **Step 1B**, then continue from **Step 3b**.
+- `$ARGUMENTS` holds no MR URL **and** the conversation holds neither review output nor an unaddressed MR thread from an earlier Mode A run → tell the user there's nothing to work through (ask them to pass an MR URL or run a review first, e.g. `/review-code`) and stop. Check both before concluding this. **`--autonomous` does not relax this** — there is nothing to be autonomous about.
+
+## Autonomous Mode (`--autonomous`)
+
+Under this flag the user has **pre-authorized this invocation's batch of writes** before it ran. That is a standing grant for this run, and it is a different thing from the agent deciding on its own that writing to GitLab is fine. Every write an autonomous run makes traces back to the flag; nothing here licenses a write of a kind the flag does not name.
+
+**What it relaxes.** Each one is restated inline at its own step, and that inline copy is what governs:
+
+| Gate | Autonomous behaviour |
+|---|---|
+| Step 2c, item 6 — install dependencies in a fresh worktree | Detect the package manager and install. Do not ask. |
+| Step 3b.1 — several open MRs match the branch | Pick the one whose source branch equals `HEAD`. Still ambiguous → escalate. |
+| Step 3b.3 — post the unique swarm findings | Post all of them. Do not ask. |
+| Step 4 — queue selection | Implicit `all`; work every item in order. |
+| Step 6c — Apply / Modify / Reject / Discuss | Step 6b's **Recommendation** is the decision. Agree → Apply, Partially agree → Modify, Disagree → Reject. Discuss is unavailable. |
+| Step 7b — post the drafted reply | Post it, via `reply-to-thread-stdin`. |
+| Step 7c — resolve the thread | Resolve on Apply and Modify. Never on Reject. |
+| Step 8 — continue to the next thread | Continue until the queue is empty. |
+
+**What it does NOT relax.** These stop an autonomous run exactly as they stop an interactive one:
+
+- **Nothing to work through** — no MR URL and no feedback in the conversation (mode selection above).
+- **The argument is not a valid GitLab MR URL** (Step 1).
+- **An in-place checkout fails because of uncommitted changes** (Step 2c, escape hatch). Never force-checkout, never stash, never discard. This is the only gate here that can destroy work the user has not committed, and it is the whole reason this flag is not simply "yes to everything".
+- **No unresolved threads at all** (Step 4).
+
+### Escalating
+
+**Discuss is not available to an autonomous run** — there is nobody on the other side of it. When the code genuinely will not settle a question, that is an escalation, not a conversation.
+
+To escalate: invoke the **`ping` skill** (the `Skill` tool, name `ping`) with one line naming the MR, the thread, and the decision you need. It reaches the user's phone, which is the point — an autonomous run was started precisely because the user is not watching the terminal, so a chat message reaches nobody. If the `ping` skill is unavailable, say so plainly and leave the same one-line request as a chat message instead. Ping **immediately**, not at the end of the run: an escalation held back until the queue drains is a question the user could have answered half an hour earlier.
+
+Escalate when, and only when:
+
+1. **A thread turns on a product or policy decision the code cannot settle** — which behaviour is correct, not which implementation expresses it.
+2. **The fix would require changing something outside this repository** — another service, a shared config, an infra repo, a dashboard.
+3. **The reviewer has reopened the same thread three times.** A ping-pong cap: three rounds means the disagreement is not going to converge by reply.
+4. **Applying the fix would conflict with another unmerged change** the branch has not absorbed.
+5. **A test the fix should satisfy fails for a reason you cannot explain.** A fix landing on an unexplained red test is worse than no fix.
+
+Anything not on that list is a decision to make, not a question to ask. After pinging, leave the escalated thread unreplied and unresolved — it is the user's now — and carry on with the queue items that are independent of it; stop the run when none are.
 
 ## Step 1: Parse the MR URL (Mode A)
 
@@ -22,7 +64,7 @@ For a URL like `https://gitlab.com/group/subgroup/project/-/merge_requests/42`:
 - `project_id` = `group/subgroup/project`
 - `merge_request_iid` = `42`
 
-If the URL doesn't look like a GitLab MR URL, warn the user and stop.
+If the URL doesn't look like a GitLab MR URL, warn the user and stop. **`--autonomous` does not relax this** — a malformed URL is not a judgment call, and guessing at the project or iid would aim every later write at the wrong MR.
 
 ## Step 2: Load the MR Context (Mode A)
 
@@ -58,10 +100,13 @@ By default, isolate the checkout in its own **git worktree** so it doesn't distu
    If the branch only exists on the remote, use `git worktree add .claude/worktrees/<SOURCE_BRANCH> origin/<SOURCE_BRANCH>` to create a local tracking branch. Then call the `EnterWorktree` tool with `path: .claude/worktrees/<SOURCE_BRANCH>` to move this session into it.
 5. **Update to latest:** `git pull --ff-only`. If this fails (local commits diverge), warn the user but continue — the branch is still usable.
 6. **Offer to install dependencies** — a fresh worktree has none. Detect the package manager (npm/yarn/pnpm/bun/uv/poetry/pip/go/bundler/cargo) from the lockfile present and offer to run its install command; wait for the user's approval before running it. Skip this if you reused an existing worktree in step 2.
+   - **Under `--autonomous`: just install it.** Detect the package manager the same way and run its install command without asking. The install is confined to the worktree, is undone by deleting it, and nothing downstream works without it — there is no judgment here worth a round trip.
 
 Worktrees are cleaned up manually — remove with `git worktree remove <path>` once the MR is merged. See `WORKTREES.md` in the Demeter repo for the full guide.
 
 **In-place checkout (escape hatch):** after `git fetch origin <SOURCE_BRANCH>`, run `git checkout <SOURCE_BRANCH>` in the current tree. If checkout fails due to uncommitted changes, warn the user and ask how to proceed (stash, commit, or abort) — do NOT force-checkout or discard changes. Then `git pull --ff-only`.
+
+**`--autonomous` does not relax the dirty-tree stop.** An autonomous run that hits uncommitted changes here does exactly what an interactive one does: it stops. It never force-checks-out, never stashes, never discards, and never "saves" the work to a branch of its own invention. This is the one failure in the whole skill that can destroy work the user never committed, and it is why the flag is not "yes to everything" — ping the user (Autonomous Mode → Escalating) and wait.
 
 This ensures the local codebase matches the MR so that file reads and edits target the correct code.
 
@@ -90,7 +135,7 @@ Collect these into the same numbered structure used in Step 4. Keep findings tha
 
 In Mode B there is no branch to check out — the changes are already local — so **Step 2c never applies**.
 
-**Step 7b applies per item, not per mode.** An item that came from a review agent and was not posted in Step 3b has no external thread: present its reply in chat and stop. One that Step 3b did post now carries a discussion ID and takes the full treatment. An item that came from an MR thread carried over from an earlier Mode A run still has a live discussion ID, so it takes the full Step 7b treatment — offer to post, and post only on an explicit yes. Deciding this once for the whole run is the bug: it either strands MR replies in the chat or offers to post a swarm finding that has nowhere to go.
+**Step 7b applies per item, not per mode.** An item that came from a review agent and was not posted in Step 3b has no external thread: present its reply in chat and stop. One that Step 3b did post now carries a discussion ID and takes the full treatment. An item that came from an MR thread carried over from an earlier Mode A run still has a live discussion ID, so it takes the full Step 7b treatment — offer to post, and post only on an explicit yes (under `--autonomous`, post it without the offer; see Step 7b). Deciding this once for the whole run is the bug: it either strands MR replies in the chat or offers to post a swarm finding that has nowhere to go.
 
 **Record the commit state before you edit anything.** Run `git log --oneline -3` and `git status --porcelain` and note which of the reviewed changes are committed. **Check whether the branch is pushed in the same breath** — `git rev-list --left-right --count origin/<branch>...HEAD` — and do it BEFORE you recommend anything, not after the user accepts. A finding about a name, a message, or a typo invites "amend the commit too", and that recommendation is only safe on unpublished work; offering it and then withdrawing it costs the user a decision they already made. When the branch is pushed, the fix is a follow-up commit, and a wrong commit subject that GitLab has not yet turned into an MR title is a field the user edits at MR-creation time rather than anything to force-push over. The user may have committed between turns — the reviewed work then lives in `HEAD` and a later `git status` shows those files clean, which reads exactly like an edit that silently failed to apply. Establish the baseline up front so you don't misdiagnose it, and diff against the branch's merge-base rather than the working tree when you need to see the whole change.
 
@@ -128,7 +173,7 @@ This step runs **once**, after the queue is assembled (Mode A: after Step 3; Mod
   ```bash
   ~/.claude/scripts/gitlab-api.sh mr-for-branch - -
   ```
-  Both `-` arguments mean "derive it": the project from the `origin` remote, the branch from `HEAD`. One open MR → that is the target. Several → list them and ask which. **None → say so in one line** (`no open MR for <branch>, so these findings stay in this conversation`) and go straight to Step 4. Do not offer to open the MR, and do not stall the fixes on it — re-running this skill once the MR exists will post them.
+  Both `-` arguments mean "derive it": the project from the `origin` remote, the branch from `HEAD`. One open MR → that is the target. Several → list them and ask which; **under `--autonomous`, do not ask** — pick the one whose `source_branch` equals the current `HEAD` branch, and if that still leaves more than one candidate, escalate (Autonomous Mode → Escalating) rather than guessing, because posting a batch of findings onto the wrong MR is not something a later run can tidy up. **None → say so in one line** (`no open MR for <branch>, so these findings stay in this conversation`) and go straight to Step 4. Do not offer to open the MR, and do not stall the fixes on it — re-running this skill once the MR exists will post them.
 
 **Anchors attach to the pushed head.** Check `git rev-list --left-right --count origin/<branch>...HEAD` before posting: if there are local-only commits, a finding about a line that exists only locally cannot anchor and will land as an unanchored note. Say that in the same breath as the count, so the user can push first if they want clean anchors.
 
@@ -163,6 +208,8 @@ Post these 3 as MR comments? (yes / no / a subset like "1,3")
 ```
 
 One approval covers the whole batch. On **no**, post nothing, say in one line that the findings stay in this conversation, and continue to Step 4 — never re-ask per finding.
+
+**Under `--autonomous`, post them all and do not ask.** Still print the list above, unchanged — an autonomous run's transcript is the only audit trail it leaves, and a batch posted silently is one the user cannot check afterwards. Then go straight to 3b.4. Asking here is precisely the gate the flag exists to open: the user pre-authorized the batch when they invoked the skill.
 
 ### 3b.4 Post each approved finding
 
@@ -218,7 +265,9 @@ Enter a number to address that comment, or "all" to work through them sequential
 
 **Do NOT use `AskUserQuestion` here.** Simply print the numbered list above and stop. Wait for the user to reply in chat with a number (e.g., `2`) or `all`. This is faster and less intrusive than a modal prompt.
 
-If there are **no unresolved threads** (Mode A), or neither a review output nor a carried-over MR thread anywhere in the conversation (Mode B), tell the user there's nothing to work through and stop. In Mode B, say which sources you checked — "no review output and no unaddressed MR threads in this conversation" — so an empty queue reads as a search that came up empty rather than a source you forgot to look at.
+**Under `--autonomous`, treat the selection as an implicit `all`.** Print the same numbered list — it is what makes the rest of the run readable afterwards — then start at item 1 and work through every item in order without waiting for anything. Do not re-order by how easy the items look; the order you built in Step 1B/Step 3 already groups the ones a reviewer would fix together.
+
+If there are **no unresolved threads** (Mode A), or neither a review output nor a carried-over MR thread anywhere in the conversation (Mode B), tell the user there's nothing to work through and stop. In Mode B, say which sources you checked — "no review output and no unaddressed MR threads in this conversation" — so an empty queue reads as a search that came up empty rather than a source you forgot to look at. **`--autonomous` does not relax this**: an empty queue ends the run, and there is nothing to ping about.
 
 ## Step 5: Load Full Context for the Selected Thread
 
@@ -273,6 +322,18 @@ Lay out your analysis clearly:
 > - **Discuss** — talk through it more before deciding
 
 If the user chooses "Discuss", continue the dialogue — ask clarifying questions, explore alternatives, or dig deeper into the code. Repeat this step until the user reaches a decision.
+
+**Under `--autonomous`, do not print these options and do not wait.** Step 6b has already done the work: it produced an **Assessment** and a **Recommendation**. Under this flag the Recommendation *is* the decision, and the mapping is fixed:
+
+| Step 6b Assessment | Autonomous decision |
+|---|---|
+| **Agree** | **Apply** |
+| **Partially agree** | **Modify** |
+| **Disagree** | **Reject** |
+
+Still print the whole Step 6b block before acting. The reasoning is what the user reads later to judge whether the run was any good, and a decision that appears without it is indistinguishable from guessing.
+
+**"Discuss" is not available to an autonomous run.** There is nobody to discuss with. If you cannot reach one of the three verdicts from the code itself, that is an **escalation**, not a discussion — ping the user (Autonomous Mode → Escalating) with the specific question, and leave the thread unreplied and unresolved. Do not quietly downgrade an unsettled question into a **Reject** to keep the queue moving: a Reject is an assertion that the reviewer is wrong, and asserting it because you could not tell is worse than asking.
 
 ## Step 7: Execute the Decision
 
@@ -352,15 +413,52 @@ After posting, confirm to the user that the reply was posted successfully and sh
 
 If the user says **no**, skip posting and continue to Step 8.
 
+#### Under `--autonomous`: post it, and use the stdin variant
+
+Do not ask. Post the drafted reply, and post it through `reply-to-thread-stdin`, which reads the body from standard input:
+
+```bash
+~/.claude/scripts/gitlab-api.sh reply-to-thread-stdin "<project_id_urlencoded>" <mr_iid> "<discussion_id>" << 'ENDOFBODY'
+<reply text here>
+ENDOFBODY
+```
+
+**The no-apostrophe rule above does not apply on this path.** A quoted heredoc (`<< 'ENDOFBODY'`) passes the body through byte for byte — apostrophes, backticks, `$`, all of it — so write the reply as it should read and change nothing for the shell's benefit. That rule exists only because the interactive `reply-to-thread` takes the body as a shell argument; carrying it into an autonomous run would be a live defect rather than a quirk, because nobody is reading the draft before it goes out and a silent rewording would never be caught.
+
+An item with **no discussion ID** still has nowhere to post, autonomous or not: print the reply in the transcript and move on.
+
+Leave the interactive path and its single-quote rule exactly as written above. They are still correct for a reply the user has just read and approved.
+
+### Step 7c: Resolve the Thread (`--autonomous` only)
+
+**Interactive runs never resolve a thread** — Important Rule 3 is absolute there, and this step does not exist for them. Under `--autonomous` only, resolve a thread once the outcome has fully landed:
+
+- **Apply** — the edit is made, the repo's own checker (Step 7, item 3) passed on it, and any drafted reply is posted → **resolve**.
+- **Modify** — the edit is made, the checker passed, and the reply explaining the partial application is posted → **resolve**.
+- **Reject** — **never resolve.** No code changed; the only artefact is an argument that the reviewer is wrong, and the reviewer is the one entitled to decide whether it holds. Resolving it would collapse the thread over the reasoning the human most needs to read, and close an argument the agent is one side of.
+- **Escalated** — do not resolve and do not reply. The thread belongs to the user now.
+
+```bash
+~/.claude/scripts/gitlab-api.sh resolve-thread "<project_id_urlencoded>" <mr_iid> "<discussion_id>"
+```
+
+A fourth argument `unresolve` reopens one. The command prints `{"resolved": true}` on success and `{"error": ...}` otherwise — **read what comes back** and report any thread that did not resolve, rather than assuming it did.
+
+Resolve only *after* the checker has run. A resolved thread is a claim that the point is dealt with, and making that claim about a fix you have not verified is the same mistake as reporting "tests pass" without looking.
+
+**This skill still does not commit and does not push** (Important Rule 2), under this flag or any other. So an autonomous run resolves threads whose fixes are sitting in the working tree and are not yet on the MR. Say that plainly in the closing summary: until the caller commits and pushes, the reviewer sees resolved threads whose code has not arrived.
+
 ## Step 8: Offer to Continue
 
 After resolving one thread, offer to address the next unresolved thread. Loop back to Step 5 with the next thread if the user agrees.
 
+**Under `--autonomous`, do not offer — continue.** Move straight to the next item in the Step 4 queue and keep going until it is empty. Then stop and write one closing summary: every thread, the decision taken on it, whether a reply was posted, whether it was resolved, anything escalated, and the reminder that the fixes are uncommitted and unpushed. That summary is the whole report the user gets, so it is worth more than the running commentary was.
+
 ## Important Rules
 
-1. **NEVER auto-apply suggestions.** Always analyze and present your assessment first. The whole point of this skill is to think critically, not to blindly accept reviewer feedback.
-2. **Never write to GitLab unasked.** There are exactly two writes and both are gated on an explicit yes in chat: Step 3b posts unique swarm findings as new comments (one approval for the batch), and Step 7b posts a drafted reply into a thread (one approval per reply). Nothing else — never edit the MR description, never push, never post a reply the user has not seen.
-3. **NEVER resolve threads.** Thread resolution is the user's action in the GitLab UI after they've posted their reply or pushed changes.
+1. **NEVER auto-apply suggestions — `--autonomous` is the single sanctioned exception.** By default, always analyze and present your assessment first and let the user decide; the whole point of this skill is to think critically, not to blindly accept reviewer feedback. The flag does not suspend the thinking, it only removes the user from the loop: Step 6b's assessment and Recommendation are still produced in full and still printed, and under the flag that Recommendation becomes the decision instead of a proposal awaiting approval. An autonomous run that applies a reviewer's suggestion without first arguing it through has broken this rule exactly as badly as an interactive one would.
+2. **Never write to GitLab unasked — `--autonomous` is the single sanctioned exception.** Interactively there are exactly two writes and both are gated on an explicit yes in chat: Step 3b posts unique swarm findings as new comments (one approval for the batch), and Step 7b posts a drafted reply into a thread (one approval per reply). Under the flag the user **pre-authorized the batch** when they invoked the skill — a grant they gave, which is a different thing from the agent concluding on its own that a write is fine. The flag opens Step 3b, Step 7b, and the resolutions in Step 7c, and **nothing else**: never edit the MR description, never post a reply you have not written into the transcript, and — autonomous or not — **never commit and never push**. This skill fixes and replies; committing and pushing belong to whoever called it. That boundary erodes silently, so treat any urge to "just commit it so the thread can be resolved" as the bug it is.
+3. **NEVER resolve threads — except under `--autonomous`, and never on a Reject.** Interactively, thread resolution is the user's action in the GitLab UI after they've posted their reply or pushed changes, and this skill never performs it. Under `--autonomous`, Step 7c resolves a thread once the fix is in place and the reply is posted — the **Apply** and **Modify** outcomes only. A **Reject** stays open, always: nothing changed in the code, and the human reviewer has to see the disagreement and decide whether it stands. An escalated thread stays open too.
 4. **Be honest in your assessment.** If the reviewer is right, say so. If they're wrong, explain why clearly. Don't just side with the MR author.
 5. **Consider codebase context.** When evaluating suggestions, look at how similar patterns are handled elsewhere in the codebase using `Grep` and `Read`. Consistency matters.
 6. **Keep replies concise.** Drafted replies should be 2-5 sentences. Long replies in code review threads are rarely read.
@@ -378,5 +476,6 @@ After the session, reflect on how the execution went. Consider:
 - Did the critical analysis add value, or was it obvious the reviewer was correct?
 - Did Step 3b's duplicate detection hold up — anything posted that `@griddy-bot` had already said, or dropped that it had not?
 - Did the posted comments anchor to the right lines, or did they fall back to unanchored notes? If a fallback was avoidable, record why.
+- If the run was autonomous: did anything stop it that is not on the escalation list, or pass unchallenged that should have stopped it? Did the Step 6b → Step 6c mapping produce a decision the user later overturned, and if so, what in the assessment should have flagged it?
 
 If any issues were encountered, **edit this skill file** (`~/.claude/skills/fix-feedback/SKILL.md`) to add instructions, warnings, or tips that would prevent the same issue next time. Keep edits surgical. Briefly tell the user what was updated and why.

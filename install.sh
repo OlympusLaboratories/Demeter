@@ -537,6 +537,31 @@ main() {
     fi
   fi
 
+  local env_script="$claude_dst/scripts/skill-env.sh"
+  local env_example="$claude_src/environment.json.example"
+  local env_config="$claude_dst/environment.json"
+  if [[ -x "$env_script" ]]; then
+    echo ""
+    bold "Setting up the skill environment ..."
+    if [[ -f "$env_example" && ! -e "$env_config" ]]; then
+      install -m 644 "$env_example" "$env_config"
+      success "Created: $env_config"
+    fi
+    local env_out
+    if env_out="$("$env_script" check 2>&1)"; then
+      if grep -q 'MISSING' <<<"$env_out"; then
+        warn "The forge API script the skills expect is not installed:"
+        grep 'MISSING' <<<"$env_out" | sed 's/^/    /'
+      else
+        success "Skill environment resolved. Review it with: ~/.claude/scripts/skill-env.sh check"
+      fi
+    else
+      warn "skill-env.sh could not read $env_config:"
+      sed 's/^/    /' <<<"$env_out"
+      info "  The skills still run on built-in defaults; fix or delete the file."
+    fi
+  fi
+
   local staged_mcp="$home/.config/nvim/mcp.json"
   if [[ -f "$staged_mcp" ]]; then
     bold "Installing staged MCP config ..."

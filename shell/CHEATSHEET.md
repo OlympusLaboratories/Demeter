@@ -99,6 +99,12 @@ typo is visible before you press Enter. Quotes, paths and options get their own 
 - **tmux**: mouse on, 100 000 lines of scrollback, windows numbered from 1 and renumbered on
   close, truecolor. Plus `allow-passthrough` so Claude Code's notifications and progress bar
   survive tmux, and `extended-keys` so `Shift+Enter` inserts a newline instead of submitting.
+- **`away` / `back`** — tell the Claude Code notification hook you have stepped away, so it
+  reports every finished turn instead of only the long ones. `away` until further notice,
+  `away 90m` with an expiry, `away status` to check, `back` to switch it off. Defined only
+  when `~/.claude/hooks/notify.py` is installed, so a machine without it is unaffected. A
+  session can also notify you deliberately with the `/ping` skill, which ignores every gate
+  because you asked for it.
 
 ## Customizing
 

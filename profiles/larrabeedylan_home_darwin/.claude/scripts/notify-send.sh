@@ -13,6 +13,7 @@ GLYPHS = {
     "stop": "✅",
     "permission": "🔐",
     "question": "❓",
+    "progress": "🔄",
     "idle": "💤",
     "failure": "🔥",
 }

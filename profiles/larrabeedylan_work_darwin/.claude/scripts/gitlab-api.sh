@@ -116,6 +116,24 @@ for d in discussions:
     print(json.dumps(thread))
 "
     ;;
+  mr-notes)
+    # Args: project_path (URL-encoded), mr_iid
+    # Raw note stream: system notes and notes posted outside any thread included.
+    PROJECT="${2:?Usage: gitlab-api.sh mr-notes <project_path_urlencoded> <mr_iid>}"
+    MR_IID="${3:?}"
+    curl -sf -H "PRIVATE-TOKEN: $TOKEN" \
+      "$GITLAB_URL/projects/$PROJECT/merge_requests/$MR_IID/notes?per_page=100" | python3 -c "
+import sys, json
+for n in json.load(sys.stdin):
+    print(json.dumps({
+        'id': n.get('id'),
+        'author': n.get('author', {}).get('username', ''),
+        'system': n.get('system', False),
+        'body': n.get('body', ''),
+        'created_at': n.get('created_at', ''),
+    }))
+"
+    ;;
   mr-changes)
     # Args: project_path (URL-encoded), mr_iid
     PROJECT="${2:?Usage: gitlab-api.sh mr-changes <project_path_urlencoded> <mr_iid>}"
@@ -150,6 +168,47 @@ print(json.dumps({
     'body': note.get('body', ''),
     'created_at': note.get('created_at', ''),
 }))
+"
+    ;;
+  reply-to-thread-stdin)
+    # Args: project_path (URL-encoded), mr_iid, discussion_id; body read from stdin
+    PROJECT="${2:?Usage: gitlab-api.sh reply-to-thread-stdin <project_path_urlencoded> <mr_iid> <discussion_id>}"
+    MR_IID="${3:?}"
+    DISCUSSION_ID="${4:?}"
+    curl -sf -X POST -H "PRIVATE-TOKEN: $TOKEN" \
+      --data-urlencode "body@/dev/stdin" \
+      "$GITLAB_URL/projects/$PROJECT/merge_requests/$MR_IID/discussions/$DISCUSSION_ID/notes" | python3 -c "
+import sys, json
+note = json.load(sys.stdin)
+print(json.dumps({
+    'id': note['id'],
+    'author': note.get('author', {}).get('username', ''),
+    'body': note.get('body', ''),
+    'created_at': note.get('created_at', ''),
+}))
+"
+    ;;
+  resolve-thread)
+    # Args: project_path (URL-encoded), mr_iid, discussion_id, [unresolve]
+    # GitLab returns the discussion, not a resolved flag — it is carried per note.
+    PROJECT="${2:?Usage: gitlab-api.sh resolve-thread <project_path_urlencoded> <mr_iid> <discussion_id> [unresolve]}"
+    MR_IID="${3:?}"
+    DISCUSSION_ID="${4:?}"
+    RESOLVED=true
+    [ "${5:-}" = "unresolve" ] && RESOLVED=false
+    curl -s -X PUT -H "PRIVATE-TOKEN: $TOKEN" \
+      --data-urlencode "resolved=$RESOLVED" \
+      "$GITLAB_URL/projects/$PROJECT/merge_requests/$MR_IID/discussions/$DISCUSSION_ID" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if 'message' in r:
+    print(json.dumps({'error': r['message']}))
+else:
+    notes = [n for n in r.get('notes', []) if n.get('resolvable')]
+    print(json.dumps({
+        'id': r.get('id'),
+        'resolved': bool(notes) and all(n.get('resolved') for n in notes),
+    }))
 "
     ;;
   update-mr-title)
@@ -277,6 +336,26 @@ for b in bridges:
     JOB_ID="${3:?}"
     curl -sf -H "PRIVATE-TOKEN: $TOKEN" \
       "$GITLAB_URL/projects/$PROJECT/jobs/$JOB_ID/trace"
+    ;;
+  retry-job)
+    # Args: project_path (URL-encoded), job_id
+    # Prints the NEW job the retry creates, which has a different id to the old one.
+    PROJECT="${2:?Usage: gitlab-api.sh retry-job <project_path_urlencoded> <job_id>}"
+    JOB_ID="${3:?}"
+    curl -s -X POST -H "PRIVATE-TOKEN: $TOKEN" \
+      "$GITLAB_URL/projects/$PROJECT/jobs/$JOB_ID/retry" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if 'message' in r:
+    print(json.dumps({'error': r['message']}))
+else:
+    print(json.dumps({
+        'id': r.get('id'),
+        'name': r.get('name', ''),
+        'status': r.get('status', ''),
+        'web_url': r.get('web_url', ''),
+    }))
+"
     ;;
   create-mr)
     # Args: project_path (URL-encoded), source_branch, target_branch, title, [description_file]
@@ -665,6 +744,20 @@ else:
     }))
 "
     ;;
+  rebase-mr)
+    # Args: project_path (URL-encoded), mr_iid — rebase is async, poll merge-status.
+    PROJECT="${2:?Usage: gitlab-api.sh rebase-mr <project_path_urlencoded> <mr_iid>}"
+    MR_IID="${3:?}"
+    curl -s -X PUT -H "PRIVATE-TOKEN: $TOKEN" \
+      "$GITLAB_URL/projects/$PROJECT/merge_requests/$MR_IID/rebase" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if 'message' in r:
+    print(json.dumps({'error': r['message']}))
+else:
+    print(json.dumps({'rebase_in_progress': r.get('rebase_in_progress')}))
+"
+    ;;
   mr-approvals)
     # Args: project_path (URL-encoded), mr_iid
     PROJECT="${2:?Usage: gitlab-api.sh mr-approvals <project_path_urlencoded> <mr_iid>}"
@@ -719,7 +812,7 @@ for m in json.load(sys.stdin):
 "
     ;;
   *)
-    echo "Usage: gitlab-api.sh {current-user|merged-mrs|open-mrs|mr-info|mr-discussions|mr-changes|mr-commits|reply-to-thread|create-note|create-mr|update-mr-description|update-mr-title|mr-for-branch|create-diff-comment|merge-mr|cancel-auto-merge|mr-approvals|merge-status|project-info|project-runners|runner-info|ci-variable-keys|protected-refs|project-members}" >&2
+    echo "Usage: gitlab-api.sh {current-user|merged-mrs|open-mrs|mr-info|mr-discussions|mr-notes|mr-changes|mr-commits|reply-to-thread|reply-to-thread-stdin|resolve-thread|create-note|create-mr|update-mr-description|update-mr-title|mr-for-branch|create-diff-comment|retry-job|merge-mr|rebase-mr|cancel-auto-merge|mr-approvals|merge-status|project-info|project-runners|runner-info|ci-variable-keys|protected-refs|project-members}" >&2
     exit 1
     ;;
 esac

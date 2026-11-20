@@ -1,0 +1,22 @@
+{
+  "_comment": "Overrides for the fix/review skills. Every key is optional — skill-env.sh carries working defaults for this profile, so deleting a key restores the default rather than breaking a skill. Run: ~/.claude/scripts/skill-env.sh check",
+
+  "forge": "github",
+  "api_script": "~/.claude/scripts/github-api.sh",
+
+  "_review_bots": "Usernames of the AI reviewers on this machine. Leave empty and the skills treat every non-operational bot thread as real review feedback, which is the safe default.",
+  "review_bots": [],
+  "_review_job": "CI job/check name that re-runs the AI review. Empty means the skills never try to re-trigger it.",
+  "review_job": "",
+
+  "_operational_bots": "Bots whose comments are plumbing, not review (plan output, merge-conflict reports, pipeline status). Their threads are skipped.",
+  "operational_bots": [],
+  "_iac_bot": "Infrastructure bot that must apply before merge. Empty disables the whole apply-before-merge gate.",
+  "iac_bot": "",
+  "iac_plan_marker": "",
+  "iac_apply_marker": "",
+
+  "_artifact_store": "auto | mnemosyne | claude | local. auto probes mnemosyne, then the Claude Artifact tool, then writes the file locally.",
+  "artifact_store": "auto",
+  "require_human_approval": false
+}

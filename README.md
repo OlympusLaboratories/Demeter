@@ -405,7 +405,7 @@ everything already.
 
 ## Claude Skills
 
-`.claude/CLAUDE.md` is symlinked to `~/.claude/CLAUDE.md`, the user-level instruction file Claude Code loads in **every** repository. It currently carries one rule: do not add comments to code. Agent-written comments restate the line, go stale, and pad the diff for a human reviewer, so explanation belongs in the commit message and MR/PR description instead — with machine-read directives (linter suppressions, build pragmas, required doc-comments) exempt because they are program input rather than commentary. The code-modifying skills (`fix-linear`, `fix-feedback`, `review-code`, `review-kludge`, `security-audit`) each restate the rule locally, since a skill's subagents get the skill prompt rather than the user's `CLAUDE.md`.
+`.claude/CLAUDE.md` is symlinked to `~/.claude/CLAUDE.md`, the user-level instruction file Claude Code loads in **every** repository. It currently carries one rule: do not add comments to code. Agent-written comments restate the line, go stale, and pad the diff for a human reviewer, so explanation belongs in the commit message and MR/PR description instead — with machine-read directives (linter suppressions, build pragmas, required doc-comments) exempt because they are program input rather than commentary. The code-modifying skills (`fix-linear`, `fix-freeform`, `fix-autonomous`, `fix-feedback`, `review-code`, `review-kludge`, `security-audit`) each restate the rule locally, since a skill's subagents get the skill prompt rather than the user's `CLAUDE.md`.
 
 Any directory under `.claude/skills/` is linked individually into `~/.claude/skills/`. Skills use `~/.claude/scripts/gitlab-api.sh` for GitLab API access (token read from `~/.claude/.mcp.json`, never exposed in conversation context; the GitHub profile uses `github-api.sh` and a `GITHUB_PERSONAL_ACCESS_TOKEN` instead). `fix-feedback` also writes through it: before fixing anything it posts each unique `review-code` finding to the MR as its own comment, anchored to the offending line, so the swarm's output survives the conversation — deduped against what the review bots already said, and gated on one batch approval. Swarm skills (`changes-description`, `docs-humanize`, `review-code`, `review-kludge`) run through the **Workflow** tool; `workflow-resume` rescues a run that died mid-swarm, reading the on-disk run manifests and agent caches through `~/.claude/scripts/workflow-runs.py`.
 
@@ -413,9 +413,49 @@ Any directory under `.claude/skills/` is linked individually into `~/.claude/ski
 
 Some skills accumulate user data (weekly reports, Slack context, the `plan-initiative` team roster) that is gitignored and lives in the repo directory but is not tracked. The install script creates necessary data directories automatically.
 
+### Per-machine skill environment
+
+The work machines review merge requests on GitLab with one AI reviewer and publish diagrams to Claude Artifacts. The home machine reviews pull requests on GitHub with a different reviewer and publishes to a self-hosted store. Those differences used to be the kind of thing that gets written into a skill and then quietly breaks everywhere else — a skill looking for the wrong bot username finds no threads and cheerfully reports a clean review.
+
+So they are configuration. `~/.claude/scripts/skill-env.sh` holds the per-profile defaults **in its own code** and merges `~/.claude/environment.json` over the top, which means a missing, empty or malformed config file degrades to working defaults rather than breaking a run:
+
+```bash
+~/.claude/scripts/skill-env.sh check        # everything a skill will see
+~/.claude/scripts/skill-env.sh get forge    # one value
+```
+
+The installer seeds `environment.json` from the profile's committed `environment.json.example` and never overwrites it. The keys cover the forge and its API helper, what to call a change (`MR` vs `PR`), the AI reviewer usernames and the CI job that re-runs them, the operational bots whose comments are plumbing rather than review, the infrastructure bot and the markers of a finished apply, where diagrams get published, and whether a human approval is required to merge.
+
+**An empty value means the machine does not have that thing, never "guess".** No `review_bots` means treat every non-operational bot thread as real feedback. No `iac_bot` disables the apply-before-merge gate outright. No `review_job` means a review cannot be re-triggered, and the skill says so instead of retrying something that is not there.
+
+### Change diagrams
+
+`/changes-diagram` turns a branch's diff into a single interactive HTML page: every changed function is a box showing its added and removed lines, grouped into module boxes, with new and dropped calls drawn between them, callers from elsewhere in the repo, functions the change left unused, a separate tests chart, and a click-through review walk with per-function diffs.
+
+The call graph is built from Python's `ast`, which is precise and understands only Python. Most repos here are not Python, and the version this was ported from simply produced **zero boxes** on a Go or Terraform branch — which reads as "this branch changed nothing", not "this language is unsupported". So there is a mechanical guarantee: **a non-empty diff always produces a non-empty chart.** When the AST pass finds nothing, it falls back to a file-level map with import edges resolved per language — Go through the `go.mod` prefix, TypeScript through relative-path probing, Terraform through `module`/`source` and cross-file resource references — and anything else gets grouped boxes with line counts. The page says which mode it is in, and its whole vocabulary follows: "Called by" becomes "Imported by", "new call" becomes "new import".
+
+Where it publishes comes from `skill-env.sh`'s `artifact_store` — the Claude Artifact tool on the work profiles, a self-hosted store at home, falling back to a local file. A local file is a success, not a failure.
+
+The published page embeds the diff of every changed function, so anyone it is shared with can read that code. Worth a thought before sharing one.
+
+### Autonomous runs
+
+`/fix-autonomous` takes a Linear ticket or a freeform problem statement all the way to a merged change without stopping: implement, commit, describe, push, open the change request, work the review until it is clean, apply any infrastructure plan, and merge. It composes the ordinary skills (`fix-linear` or `fix-freeform`, `commit-msg`, `changes-description`, `fix-feedback --autonomous`, `changes-diagram`, `ping`) rather than reimplementing them.
+
+Four things make it safe to walk away from:
+
+- **It waits with the `Monitor` tool, never a sleep loop.** A watcher wakes the session when something happens, so the prompt stays free and several runs can be in flight at once. A monitor that only reports success would stay silent through a crashloop, so every terminal state emits a line.
+- **Review comments outrank CI, always.** Fixing comments means pushing, and a push restarts the pipeline — waiting on a red or running pipeline first throws away a whole CI run.
+- **The human approval gate is never waived.** Where `require_human_approval` is set, a bot's approval does not merge the change. Everything else in the skill is a judgment call; this one is not.
+- **Every decision made alone is written down** — on the ticket, or in the description — at the time it is made. The record is what replaces the conversation that did not happen.
+
+On infrastructure repositories it merges directly rather than enabling auto-merge, because auto-merge fires the moment the pipeline is green and can beat the `apply`, merging a plan that was never applied. Where the work splits across several changes they share a branch prefix and lead with an ordinal (`dylan/PLAT-3535/01-…`), and each one's auto-merge is armed only once its predecessor has actually merged.
+
+It pings you when it finishes, and when it is genuinely stuck — a product decision, a failed apply, a conflict needing judgment, or the same thread reopening three times.
+
 ### Worktrees
 
-The `fix-linear` and `fix-feedback` skills set up each fix in its own **git worktree** by default, so you can work several non-blocking fixes in parallel (one terminal/session per worktree) without branch checkouts colliding. See **[WORKTREES.md](WORKTREES.md)** for the full guide — the mental model, switching between worktrees, dependency setup, and cleanup. Pass `in place` to a skill (e.g. `/fix-linear ENG-123 in place`) to fall back to a plain in-place checkout.
+The `fix-linear` and `fix-feedback` skills set up each fix in its own **git worktree** by default, so you can work several non-blocking fixes in parallel (one terminal/session per worktree) without branch checkouts colliding. `fix-freeform` does the same, but only when it escalates to `--branch new` — its default works in place. `fix-autonomous` creates none of its own and inherits whichever worktree its fix skill set up. See **[WORKTREES.md](WORKTREES.md)** for the full guide — the mental model, switching between worktrees, dependency setup, and cleanup. Pass `in place` to a skill (e.g. `/fix-linear ENG-123 in place`) to fall back to a plain in-place checkout.
 
 Each profile's shell config also defines `go` (worktree-aware `git checkout` — `cd`s into the worktree when one holds that branch, checks out normally when it doesn't, and passes anything else like `go -b new` or `go .` straight to git), `wt` (jump to the worktree for a branch, creating it if needed), `wtl` (list worktrees with age, upstream state, and dirty flag), and `wtclean` (remove worktrees whose branch is gone from the remote or untouched for 90+ days — dry run unless `-y`).
 
@@ -472,6 +512,10 @@ The installer creates `~/.claude/notify.json` from your profile's `notify.json.e
 
 *A bot token* is the better end state with many sessions open, because each session gets its own **thread**. Set `slack.bot_token` and `slack.channel`, leave `webhook_url` empty, and give the app `chat:write` plus `im:write`.
 
+That threading has one consequence worth knowing before it bites you: **only the first message of a session is a top-level DM; everything after is a threaded reply.** Slack treats thread replies as second-class — they do not surface as a new message and are easy to miss on a phone unless you are following the thread, and Slack only auto-follows threads *you* started or replied in, never a bot's. So the session that notified you it had a question at 08:31 can quietly tell you it finished at 09:20 and you will never see it.
+
+The fix is `slack.mention`: put your member ID there and the sender prefixes `<@U…>` to the message, which notifies regardless of thread subscription. It defaults to `slack.channel` when that is already a `U…` id, so the common setup needs no extra configuration. `slack.mention_levels` controls which levels get it — `stop`, `question`, `permission` and `failure` by default, deliberately **not** `progress` or `idle`, so a mention keeps meaning "this wants you". The alternative, `reply_broadcast`, also works but copies the reply to the top level and undoes the grouping the thread was for.
+
 To have it DM **only you**, put your own member ID (`U…`, from your Slack profile's ⋮ menu → *Copy member ID*) in `slack.channel`. The sender resolves it to a DM conversation with `conversations.open` and caches the result in `~/.claude/notify-state/slack-dm.json`, so there is one extra API call the first time and none after.
 
 Do not skip that resolution by hand: passing a `U…` id straight to `chat.postMessage` is accepted but posts to that user's DM with **Slackbot**, not with your app — the message arrives somewhere you are not looking, and nothing errors. The `D…` conversation id is what `chat.postMessage` needs, and `conversations.open` is what turns one into the other. Putting a `D…` or `C…` id in `slack.channel` skips the lookup entirely.
@@ -492,6 +536,10 @@ Then check it:
 | `min_interval_seconds` | 30 | floor between two messages from the same session |
 | `quiet_hours` | `null` | `[22, 7]` to stay silent overnight |
 | `events` | all `true` | switch off any of `stop`, `permission`, `question`, `idle`, `failure` |
+| `slack.mention` | `slack.channel` when it is a `U…` id | member ID to `<@…>` so a threaded reply still notifies |
+| `slack.mention_levels` | `stop`, `question`, `permission`, `failure` | which levels earn the mention |
+
+Telegram needs none of this. Its `reply_to_message_id` renders inline in the chat rather than collapsing into a thread, so every message stays top-level and notifies on its own.
 
 #### When it is not working
 

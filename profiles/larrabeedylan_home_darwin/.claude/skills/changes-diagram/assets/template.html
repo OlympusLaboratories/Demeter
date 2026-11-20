@@ -1,0 +1,567 @@
+<title>Changes Diagram</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: header summary, then a pannable call-flow canvas beside a detail panel (stacked on phones). */
+:root {
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --ink: #17202b;
+  --muted: #5b6876;
+  --rule: #d3dae2;
+  --ctx: #8b97a4;
+  --add: #18794a;
+  --add-bg: #e2f3e9;
+  --del: #c13a32;
+  --del-bg: #fbe7e5;
+  --warn: #9a5b00;
+  --warn-bg: #fcefd6;
+  --accent: #2357c6;
+  --module-fill: rgba(35, 87, 198, 0.035);
+  --font-ui: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-code: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1419; --surface: #161d25; --ink: #e5eaf0; --muted: #94a2b1; --rule: #2b3542;
+    --ctx: #6d7a88; --add: #4cc38a; --add-bg: #12301f; --del: #f0766c; --del-bg: #3b1c1a;
+    --warn: #f0b45a; --warn-bg: #3a2a10; --accent: #7ea6ff; --module-fill: rgba(126, 166, 255, 0.05);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1419; --surface: #161d25; --ink: #e5eaf0; --muted: #94a2b1; --rule: #2b3542;
+  --ctx: #6d7a88; --add: #4cc38a; --add-bg: #12301f; --del: #f0766c; --del-bg: #3b1c1a;
+  --warn: #f0b45a; --warn-bg: #3a2a10; --accent: #7ea6ff; --module-fill: rgba(126, 166, 255, 0.05);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 14px; line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 32px;
+}
+.wrap { max-width: 1480px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+header { display: flex; flex-direction: column; gap: 8px; }
+.eyebrow { font-family: var(--font-code); font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.eyebrow b { color: var(--ink); font-weight: 500; }
+h1 { font-size: 21px; font-weight: 600; margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+.stats { display: flex; flex-wrap: wrap; gap: 8px 18px; font-family: var(--font-code); font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.plus { color: var(--add); } .minus { color: var(--del); }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 7px; overflow: hidden; background: var(--surface); }
+.seg button { font: 500 13px var(--font-ui); color: var(--muted); background: none; border: 0; padding: 6px 12px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--rule); }
+.seg button[aria-pressed="true"] { color: var(--ink); background: var(--bg); box-shadow: inset 0 -2px 0 var(--accent); }
+.seg button:focus-visible, .btn:focus-visible, .link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--muted); margin-left: auto; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 18px; height: 11px; border-radius: 3px; border: 1.5px solid; display: inline-block; }
+.ln { width: 20px; height: 0; border-top: 2px solid; display: inline-block; }
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 14px; align-items: start; }
+@media (max-width: 980px) { .main { grid-template-columns: minmax(0, 1fr); } .legend { margin-left: 0; } }
+.canvas { position: relative; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; height: min(78vh, 860px); min-height: 420px; overflow: hidden; touch-action: none; }
+.canvas svg { width: 100%; height: 100%; display: block; cursor: grab; user-select: none; }
+.canvas svg.dragging { cursor: grabbing; }
+.zoom { position: absolute; right: 10px; top: 10px; display: flex; flex-direction: column; gap: 4px; }
+.btn { font: 500 13px var(--font-ui); color: var(--ink); background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; min-width: 30px; height: 30px; padding: 0 8px; cursor: pointer; }
+.btn:hover { border-color: var(--muted); }
+.status-msg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
+aside { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 14px; min-width: 0; max-height: min(78vh, 860px); overflow: auto; }
+@media (max-width: 980px) { aside { max-height: none; } }
+aside h2 { font-size: 15px; margin: 0; font-family: var(--font-code); font-weight: 600; word-break: break-word; }
+aside h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); margin: 0 0 6px; font-weight: 600; }
+.kv { font-family: var(--font-code); font-size: 12px; color: var(--muted); word-break: break-all; }
+.pill { display: inline-block; font: 600 10.5px var(--font-ui); letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 7px; border-radius: 99px; border: 1px solid; }
+.pill.added { color: var(--add); background: var(--add-bg); }
+.pill.removed { color: var(--del); background: var(--del-bg); }
+.pill.modified { color: var(--accent); background: var(--bg); }
+.pill.context { color: var(--muted); background: var(--bg); }
+.pill.warn { color: var(--warn); background: var(--warn-bg); }
+.pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sig { font-family: var(--font-code); font-size: 12px; background: var(--bg); border-radius: 6px; padding: 8px 10px; overflow-x: auto; white-space: pre; }
+.doc { color: var(--muted); font-size: 13px; }
+.diff { font-family: var(--font-code); font-size: 11.5px; line-height: 1.5; background: var(--bg); border-radius: 6px; padding: 6px 0; overflow-x: auto; }
+.diff div { white-space: pre; padding: 0 10px; min-width: max-content; }
+.diff .a { background: var(--add-bg); color: var(--add); }
+.diff .r { background: var(--del-bg); color: var(--del); }
+.diff .h { color: var(--accent); }
+ul.plain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.link { font: 12.5px var(--font-code); color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; word-break: break-all; }
+.link:hover { text-decoration: underline; }
+.edge-tag { font-size: 11px; margin-left: 6px; }
+table.files { width: 100%; border-collapse: collapse; font-family: var(--font-code); font-size: 12px; font-variant-numeric: tabular-nums; }
+table.files td { padding: 4px 0; border-top: 1px solid var(--rule); vertical-align: top; }
+table.files td.n { text-align: right; padding-left: 10px; white-space: nowrap; }
+table.files td.p { word-break: break-all; }
+.walk li { display: flex; flex-wrap: wrap; gap: 0 8px; align-items: baseline; }
+.walk .idx { font-family: var(--font-code); font-size: 11px; color: var(--muted); min-width: 18px; text-align: right; font-variant-numeric: tabular-nums; }
+.walk .cnt { font-family: var(--font-code); font-size: 11px; margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.walk .dir { flex-basis: 100%; padding-left: 26px; font-family: var(--font-code); font-size: 11px; color: var(--muted); word-break: break-all; }
+.nav { display: flex; gap: 8px; }
+svg text { font-family: var(--font-code); }
+.node { cursor: pointer; }
+.node:focus { outline: none; }
+.node:focus-visible rect.box { stroke: var(--accent); stroke-width: 2.5; }
+.dim { opacity: 0.18; }
+@media (prefers-reduced-motion: no-preference) { .node, .edge { transition: opacity 120ms ease; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow" id="eyebrow"></div>
+    <h1 id="title"></h1>
+    <div class="stats" id="stats"></div>
+  </header>
+
+  <div class="toolbar">
+    <div class="seg" role="group" aria-label="Graph">
+      <button id="tab-production" aria-pressed="true">Production flow</button>
+      <button id="tab-tests" aria-pressed="false">Tests</button>
+    </div>
+    <div class="seg" id="seg-edges" role="group" aria-label="Show calls">
+      <button id="mode-both" aria-pressed="true">Before + after</button>
+      <button id="mode-after" aria-pressed="false">After</button>
+      <button id="mode-before" aria-pressed="false">Before</button>
+    </div>
+    <label class="check"><input type="checkbox" id="show-context" checked> Unchanged neighbours</label>
+    <div class="legend">
+      <span><i class="sw" style="border-color:var(--ink);background:var(--surface)"></i>modified</span>
+      <span><i class="sw" style="border-color:var(--add);background:var(--add-bg)"></i>added</span>
+      <span><i class="sw" style="border-color:var(--del);background:var(--del-bg);border-style:dashed"></i>removed</span>
+      <span><i class="sw" style="border-color:var(--ctx);background:var(--bg)"></i>unchanged</span>
+      <span id="legend-add"><i class="ln" style="border-color:var(--add)"></i>new call</span>
+      <span id="legend-del"><i class="ln" style="border-color:var(--del);border-top-style:dashed"></i>dropped call</span>
+      <span><i class="sw" style="border-color:var(--muted);border-style:dashed;background:none"></i>module</span>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="canvas" id="canvas">
+      <svg id="svg" role="img" aria-label="Call flow of the code changed in this branch"></svg>
+      <div class="status-msg" id="status">Laying out the call flow…</div>
+      <div class="zoom">
+        <button class="btn" id="zoom-in" aria-label="Zoom in">+</button>
+        <button class="btn" id="zoom-out" aria-label="Zoom out">−</button>
+        <button class="btn" id="zoom-fit" aria-label="Fit to view">Fit</button>
+      </div>
+    </div>
+    <aside id="panel" aria-live="polite"></aside>
+  </div>
+</div>
+
+<script id="mr-data" type="application/json">/*MR_DATA*/</script>
+<script src="https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js"></script>
+<script>
+(() => {
+  const DATA = JSON.parse(document.getElementById("mr-data").textContent);
+  const SVGNS = "http://www.w3.org/2000/svg";
+  const elk = new ELK();
+  const byId = Object.fromEntries(DATA.nodes.map((n) => [n.id, n]));
+  const modById = Object.fromEntries(DATA.modules.map((m) => [m.id, m]));
+  const VOCAB = {
+    callgraph: {
+      tab: "Production flow",
+      edgeGroup: "Show calls",
+      aria: "Call flow of the code changed in this branch",
+      laying: "Laying out the call flow…",
+      touched: "production functions touched",
+      walkHint: "Changed functions in call order, callers first. Select one to read its diff.",
+      inbound: "Called by",
+      outbound: "Calls",
+      edgeAdded: "new call",
+      edgeRemoved: "dropped call",
+      orphan: "no production callers left",
+      walkDir: false,
+    },
+    files: {
+      tab: "Production files",
+      edgeGroup: "Show imports",
+      aria: "Map of the files changed in this branch and the imports between them",
+      laying: "Laying out the file map…",
+      touched: "production files touched",
+      walkHint: "Changed files in import order, importers first. Select one to read its diff.",
+      inbound: "Imported by",
+      outbound: "Imports",
+      edgeAdded: "new import",
+      edgeRemoved: "dropped import",
+      orphan: "nothing imports it any more",
+      walkDir: true,
+    },
+  };
+  const W = VOCAB[DATA.mode] || VOCAB.callgraph;
+  const state = { tab: "production", mode: "both", context: true, selected: null };
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const short = (mod) => mod.startsWith(DATA.package + ".") ? mod.slice(DATA.package.length + 1) : mod;
+  const commonDir = (() => {
+    const dirs = DATA.files.map((f) => f.path.split("/").slice(0, -1));
+    if (dirs.length < 2) return "";
+    const head = dirs[0];
+    let n = 0;
+    while (n < head.length && dirs.every((d) => d[n] === head[n])) n++;
+    return n ? head.slice(0, n).join("/") + "/" : "";
+  })();
+  const trim = (p) => (commonDir && p.startsWith(commonDir) && p.length > commonDir.length ? p.slice(commonDir.length) : p);
+  const modPath = (m) => modById[m] ? trim(modById[m].path) : m;
+  const rowDir = (n) => { if (!W.walkDir) return ""; const p = trim(n.id); const i = p.lastIndexOf("/"); return i < 0 ? "" : p.slice(0, i); };
+  const fmt = (a, r) => `<span class="plus">+${a}</span> <span class="minus">−${r}</span>`;
+
+  // Header
+  const sum = (fs) => fs.reduce((t, f) => [t[0] + (f.added || 0), t[1] + (f.removed || 0)], [0, 0]);
+  const prodFiles = DATA.files.filter((f) => !f.binary && !f.test);
+  const testFiles = DATA.files.filter((f) => !f.binary && f.test);
+  const binFiles = DATA.files.filter((f) => f.binary);
+  const [pa, pr] = sum(prodFiles), [ta, tr] = sum(testFiles);
+  $("eyebrow").innerHTML = `<span>branch <b>${esc(DATA.branch)}</b></span><span>base <b>${esc(DATA.base)}</b></span><span>package <b>${esc(DATA.package)}</b></span>`;
+  $("title").textContent = DATA.title || DATA.branch;
+  const changedFns = DATA.nodes.filter((n) => n.status !== "context");
+  $("stats").innerHTML = [
+    `${DATA.files.length} files`,
+    `production ${fmt(pa, pr)}`,
+    `tests ${fmt(ta, tr)}`,
+    binFiles.length ? `${binFiles.length} binary test data` : "",
+    `${changedFns.filter((n) => !n.test).length} ${W.touched}`,
+  ].filter(Boolean).map((s) => `<span>${s}</span>`).join("");
+  $("tab-production").textContent = W.tab;
+  $("seg-edges").setAttribute("aria-label", W.edgeGroup);
+  $("svg").setAttribute("aria-label", W.aria);
+  $("status").textContent = W.laying;
+  $("legend-add").lastChild.textContent = W.edgeAdded;
+  $("legend-del").lastChild.textContent = W.edgeRemoved;
+
+  // Graph selection
+  function visibleGraph() {
+    const testTab = state.tab === "tests";
+    const edgeOk = (e) => state.mode === "both" || (state.mode === "after" ? e.status !== "removed" : e.status !== "added");
+    const nodeOk = (n) => state.mode === "both" || (state.mode === "after" ? n.status !== "removed" : n.status !== "added");
+    let nodes, edges;
+    if (!testTab) {
+      nodes = DATA.nodes.filter((n) => !n.test && nodeOk(n) && (state.context || n.status !== "context"));
+      const ids = new Set(nodes.map((n) => n.id));
+      edges = DATA.edges.filter((e) => ids.has(e.source) && ids.has(e.target) && edgeOk(e));
+    } else {
+      const tests = DATA.nodes.filter((n) => n.test && nodeOk(n) && (state.context || n.status !== "context"));
+      const tIds = new Set(tests.map((n) => n.id));
+      edges = DATA.edges.filter((e) => tIds.has(e.source) && edgeOk(e) && byId[e.target] && nodeOk(byId[e.target]));
+      const targets = new Set(edges.map((e) => e.target));
+      nodes = [...tests, ...DATA.nodes.filter((n) => !n.test && targets.has(n.id))];
+    }
+    return { nodes, edges };
+  }
+
+  // Sizing
+  const ctx = document.createElement("canvas").getContext("2d");
+  const textW = (s, size, weight = 500) => { ctx.font = `${weight} ${size}px "IBM Plex Mono", ui-monospace, monospace`; return ctx.measureText(s).width; };
+  const MAX_NAME = 46;
+  const label = (n) => n.qual.length > MAX_NAME ? n.qual.slice(0, MAX_NAME - 1) + "…" : n.qual;
+  const maxChange = Math.max(1, ...DATA.nodes.map((n) => n.added + n.removed));
+  const BAR_MAX = 120;
+  const barScale = BAR_MAX / maxChange;
+  function nodeSize(n) {
+    const ctxNode = n.status === "context";
+    const nameW = textW(label(n), ctxNode ? 11.5 : 12.5, ctxNode ? 400 : 500);
+    const statsW = ctxNode ? 0 : textW(`+${n.added} −${n.removed}`, 11) + 10 + (n.added + n.removed) * barScale + (n.orphaned ? 70 : 0);
+    const badgeW = ctxNode && n.orphaned ? 70 : 0;
+    return { width: Math.ceil(Math.max(nameW + badgeW, statsW) + 24), height: ctxNode ? 30 : 48 };
+  }
+
+  async function layout(graph) {
+    const groups = {};
+    for (const n of graph.nodes) (groups[n.module] ||= []).push(n);
+    const children = Object.entries(groups).map(([mod, ns]) => {
+      const m = modById[mod] || { id: mod };
+      const labelW = textW(modPath(mod), 12, 600) + 24;
+      return {
+        id: "mod::" + mod,
+        layoutOptions: {
+          "elk.padding": "[top=46,left=14,bottom=14,right=14]",
+          "elk.nodeSize.constraints": "MINIMUM_SIZE",
+          "elk.nodeSize.minimum": `(${Math.ceil(labelW)},60)`,
+        },
+        children: ns.map((n) => ({ id: n.id, ...nodeSize(n) })),
+      };
+    });
+    const root = {
+      id: "root",
+      layoutOptions: {
+        "elk.algorithm": "layered",
+        "elk.direction": "DOWN",
+        "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+        "elk.edgeRouting": "ORTHOGONAL",
+        "elk.layered.spacing.nodeNodeBetweenLayers": "38",
+        "elk.spacing.nodeNode": "22",
+        "elk.spacing.edgeNode": "14",
+        "elk.spacing.edgeEdge": "8",
+        "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+        "elk.padding": "[top=24,left=24,bottom=24,right=24]",
+      },
+      children,
+      edges: graph.edges.map((e, i) => ({ id: "e" + i, sources: [e.source], targets: [e.target], data: e })),
+    };
+    return elk.layout(root);
+  }
+
+  // Rendering
+  const el = (tag, attrs = {}, parent) => {
+    const x = document.createElementNS(SVGNS, tag);
+    for (const [k, v] of Object.entries(attrs)) x.setAttribute(k, v);
+    if (parent) parent.appendChild(x);
+    return x;
+  };
+  let view = { x: 0, y: 0, w: 100, h: 100 }, bounds = view;
+  const svg = $("svg");
+  const setView = () => svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
+  function fit() {
+    const r = svg.getBoundingClientRect();
+    const aspect = r.width / Math.max(1, r.height);
+    let w = bounds.w, h = bounds.h;
+    if (w / h > aspect) h = w / aspect; else w = h * aspect;
+    view = { x: bounds.x - (w - bounds.w) / 2, y: bounds.y - (h - bounds.h) / 2, w, h };
+    setView();
+  }
+
+  let nodeEls = {}, edgeEls = [];
+  function render(laid, graph) {
+    svg.replaceChildren();
+    nodeEls = {}; edgeEls = [];
+    const defs = el("defs", {}, svg);
+    for (const [k, color] of [["kept", "var(--ctx)"], ["added", "var(--add)"], ["removed", "var(--del)"], ["hl", "var(--accent)"]]) {
+      const m = el("marker", { id: "arrow-" + k, viewBox: "0 0 10 10", refX: "9", refY: "5", markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse" }, defs);
+      el("path", { d: "M0,0 L10,5 L0,10 z", fill: color }, m);
+    }
+    const gMods = el("g", {}, svg), gEdges = el("g", {}, svg), gNodes = el("g", {}, svg);
+    const abs = { root: { x: 0, y: 0 } };
+    for (const mod of laid.children) {
+      abs[mod.id] = { x: mod.x, y: mod.y };
+      const modId = mod.id.slice(5), m = modById[modId] || {};
+      el("rect", { x: mod.x, y: mod.y, width: mod.width, height: mod.height, rx: 10, fill: m.changed ? "var(--module-fill)" : "none", stroke: "var(--muted)", "stroke-width": 1.2, "stroke-dasharray": "6 5" }, gMods);
+      const t = el("text", { x: mod.x + 12, y: mod.y + 20, "font-size": 12, "font-weight": 600, fill: m.changed ? "var(--ink)" : "var(--muted)" }, gMods);
+      t.textContent = modPath(modId);
+      const ml = m.module_level, extra = [];
+      if (ml && (ml.added || ml.removed)) extra.push(`module level +${ml.added} −${ml.removed}`);
+      if (m.hidden_unchanged) extra.push(`${m.hidden_unchanged} unchanged fn hidden`);
+      if (!m.changed) extra.push("unchanged module");
+      if (extra.length) {
+        const s = el("text", { x: mod.x + 12, y: mod.y + 35, "font-size": 10.5, fill: "var(--muted)" }, gMods);
+        s.textContent = extra.join(" · ");
+      }
+      for (const c of mod.children) {
+        const n = byId[c.id];
+        const x = mod.x + c.x, y = mod.y + c.y;
+        abs[c.id] = { x, y, parent: mod.id };
+        drawNode(gNodes, n, x, y, c.width, c.height);
+      }
+    }
+    for (const e of laid.edges) {
+      const data = e.data;
+      const ps = abs[data.source].parent, pt = abs[data.target].parent;
+      const off = ps === pt ? abs[ps] : abs.root;
+      for (const s of e.sections || []) {
+        const pts = [s.startPoint, ...(s.bendPoints || []), s.endPoint].map((p) => `${p.x + off.x},${p.y + off.y}`);
+        const color = data.status === "added" ? "var(--add)" : data.status === "removed" ? "var(--del)" : "var(--ctx)";
+        const p = el("polyline", {
+          points: pts.join(" "), fill: "none", stroke: color, "stroke-width": data.status === "kept" ? 1.3 : 1.8,
+          "stroke-dasharray": data.status === "removed" ? "5 4" : "none", "marker-end": `url(#arrow-${data.status})`,
+          class: "edge",
+        }, gEdges);
+        edgeEls.push({ el: p, data });
+      }
+    }
+    bounds = { x: 0, y: 0, w: laid.width, h: laid.height };
+    fit();
+    applyHighlight(state.selected);
+  }
+
+  function drawNode(g, n, x, y, w, h) {
+    const ctxNode = n.status === "context";
+    const grp = el("g", { class: "node", tabindex: 0, role: "button", "aria-label": `${n.qual}, ${n.status}, +${n.added} −${n.removed}` }, g);
+    const fill = { added: "var(--add-bg)", removed: "var(--del-bg)", modified: "var(--surface)", context: "var(--bg)" }[n.status];
+    const stroke = { added: "var(--add)", removed: "var(--del)", modified: "var(--ink)", context: "var(--ctx)" }[n.status];
+    el("rect", { class: "box", x, y, width: w, height: h, rx: 6, fill, stroke, "stroke-width": ctxNode ? 1 : 1.5, "stroke-dasharray": n.status === "removed" ? "5 3" : "none" }, grp);
+    const title = el("title", {}, grp); title.textContent = `${n.qual}\n${modPath(n.module)}`;
+    const name = el("text", { x: x + 12, y: y + (ctxNode ? 19 : 20), "font-size": ctxNode ? 11.5 : 12.5, "font-weight": ctxNode ? 400 : 500, fill: ctxNode ? "var(--muted)" : "var(--ink)" }, grp);
+    name.textContent = label(n);
+    if (n.status === "removed") {
+      const tw = textW(label(n), 12.5, 500);
+      el("line", { x1: x + 12, x2: x + 12 + tw, y1: y + 16, y2: y + 16, stroke: "var(--del)", "stroke-width": 1.2 }, grp);
+    }
+    if (!ctxNode) {
+      const by = y + 31;
+      const st = el("text", { x: x + 12, y: by + 7.5, "font-size": 11, "font-variant-numeric": "tabular-nums" }, grp);
+      st.innerHTML = `<tspan fill="var(--add)">+${n.added}</tspan><tspan fill="var(--del)"> −${n.removed}</tspan>`;
+      const bx = x + 12 + textW(`+${n.added} −${n.removed}`, 11) + 10;
+      const aw = n.added * barScale, rw = n.removed * barScale;
+      if (aw) el("rect", { x: bx, y: by, width: aw, height: 9, rx: 2, fill: "var(--add)" }, grp);
+      if (rw) el("rect", { x: bx + aw + (aw ? 1 : 0), y: by, width: rw, height: 9, rx: 2, fill: "var(--del)" }, grp);
+    }
+    if (n.orphaned) {
+      const bw = 62, bx = x + w - bw - 8, byy = ctxNode ? y + 7 : y + 30;
+      el("rect", { x: bx, y: byy, width: bw, height: 15, rx: 7.5, fill: "var(--warn-bg)", stroke: "var(--warn)", "stroke-width": 1 }, grp);
+      const t = el("text", { x: bx + bw / 2, y: byy + 11, "font-size": 9.5, "font-weight": 600, "text-anchor": "middle", fill: "var(--warn)" }, grp);
+      t.textContent = "UNUSED";
+    }
+    grp.addEventListener("click", (ev) => { ev.stopPropagation(); select(n.id); });
+    grp.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); select(n.id); } });
+    grp.addEventListener("mouseenter", () => applyHighlight(n.id));
+    grp.addEventListener("mouseleave", () => applyHighlight(state.selected));
+    nodeEls[n.id] = grp;
+  }
+
+  function applyHighlight(id) {
+    if (!id || !nodeEls[id]) {
+      Object.values(nodeEls).forEach((g) => g.classList.remove("dim"));
+      edgeEls.forEach(({ el: e, data }) => { e.classList.remove("dim"); e.setAttribute("marker-end", `url(#arrow-${data.status})`); });
+      return;
+    }
+    const near = new Set([id]);
+    edgeEls.forEach(({ data }) => { if (data.source === id) near.add(data.target); if (data.target === id) near.add(data.source); });
+    Object.entries(nodeEls).forEach(([k, g]) => g.classList.toggle("dim", !near.has(k)));
+    edgeEls.forEach(({ el: e, data }) => e.classList.toggle("dim", data.source !== id && data.target !== id));
+  }
+
+  // Panel
+  const callers = (id) => DATA.edges.filter((e) => e.target === id);
+  const callees = (id) => DATA.edges.filter((e) => e.source === id);
+  const edgeTag = (s) => s === "added" ? '<span class="edge-tag plus">new</span>' : s === "removed" ? '<span class="edge-tag minus">dropped</span>' : "";
+  const linkList = (es, key) => es.length ? `<ul class="plain">${es.map((e) => `<li><button class="link" data-go="${esc(e[key])}">${esc(byId[e[key]].qual)}</button>${edgeTag(e.status)}</li>`).join("")}</ul>` : '<div class="doc">None in this graph.</div>';
+  function diffHtml(d) {
+    return d.split("\n").map((l) => {
+      const c = l.startsWith("@@") ? "h" : l.startsWith("+") ? "a" : l.startsWith("-") ? "r" : "";
+      return `<div class="${c}">${esc(l) || " "}</div>`;
+    }).join("");
+  }
+
+  function walkOrder() {
+    const g = visibleGraph();
+    const ids = g.nodes.map((n) => n.id);
+    const indeg = Object.fromEntries(ids.map((i) => [i, 0]));
+    g.edges.forEach((e) => indeg[e.target]++);
+    const queue = ids.filter((i) => !indeg[i]), order = [];
+    while (queue.length) {
+      const i = queue.shift(); order.push(i);
+      g.edges.filter((e) => e.source === i).forEach((e) => { if (--indeg[e.target] === 0) queue.push(e.target); });
+    }
+    ids.forEach((i) => { if (!order.includes(i)) order.push(i); });
+    return order.filter((i) => byId[i].status !== "context");
+  }
+
+  function renderPanel() {
+    const p = $("panel");
+    const order = walkOrder();
+    if (!state.selected) {
+      const fileRows = DATA.files.map((f) => `<tr><td class="p">${esc(trim(f.path))}</td><td class="n">${f.binary ? '<span class="doc">binary</span>' : fmt(f.added, f.removed)}</td></tr>`).join("");
+      p.innerHTML = `
+        <div><h3>Review walk</h3><div class="doc" style="margin-bottom:8px">${W.walkHint}</div>
+        <ol class="plain walk">${order.map((id, i) => { const n = byId[id]; const d = rowDir(n); return `<li><span class="idx">${i + 1}</span><button class="link" data-go="${esc(id)}">${esc(n.qual)}</button>${d ? `<span class="dir">${esc(d)}</span>` : ""}<span class="cnt">${fmt(n.added, n.removed)}</span></li>`; }).join("")}</ol></div>
+        <div><h3>Files</h3><table class="files">${fileRows}</table></div>`;
+    } else {
+      const n = byId[state.selected];
+      const i = order.indexOf(n.id);
+      const statusLabel = { added: "added", removed: "removed", modified: "modified", context: "unchanged" }[n.status];
+      p.innerHTML = `
+        <div class="nav"><button class="btn" id="back">All changes</button>
+          ${i > 0 ? `<button class="btn" data-go="${esc(order[i - 1])}">‹ Prev</button>` : ""}
+          ${i >= 0 && i < order.length - 1 ? `<button class="btn" data-go="${esc(order[i + 1])}">Next ›</button>` : ""}</div>
+        <div><h2>${esc(n.qual)}</h2><div class="kv">${esc(modPath(n.module))}${n.line ? ":" + n.line : ""}</div></div>
+        <div class="pills"><span class="pill ${n.status}">${statusLabel}</span>${n.status !== "context" ? `<span class="kv">${fmt(n.added, n.removed)}</span>` : ""}${n.orphaned ? `<span class="pill warn">${W.orphan}</span>` : ""}${n.test ? '<span class="pill context">test</span>' : ""}</div>
+        ${n.signature ? `<div class="sig">${esc(n.signature)}</div>` : ""}
+        ${n.doc ? `<div class="doc">${esc(n.doc)}</div>` : ""}
+        ${n.diff && n.status !== "context" ? `<div><h3>Diff</h3><div class="diff">${diffHtml(n.diff)}</div></div>` : ""}
+        <div><h3>${W.inbound}</h3>${linkList(callers(n.id), "source")}</div>
+        <div><h3>${W.outbound}</h3>${linkList(callees(n.id), "target")}</div>`;
+      $("back").addEventListener("click", () => select(null));
+    }
+    p.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => select(b.dataset.go)));
+  }
+
+  function select(id) {
+    if (id && byId[id]) {
+      const wantTab = byId[id].test ? "tests" : "production";
+      const inGraph = visibleGraph().nodes.some((n) => n.id === id);
+      state.selected = id;
+      if (!inGraph && wantTab !== state.tab) { setTab(wantTab); return; }
+    } else state.selected = null;
+    Object.entries(nodeEls).forEach(([k, g]) => {
+      const r = g.querySelector("rect.box");
+      const n = byId[k];
+      r.setAttribute("stroke", k === state.selected ? "var(--accent)" : { added: "var(--add)", removed: "var(--del)", modified: "var(--ink)", context: "var(--ctx)" }[n.status]);
+      r.setAttribute("stroke-width", k === state.selected ? 2.6 : n.status === "context" ? 1 : 1.5);
+    });
+    applyHighlight(state.selected);
+    renderPanel();
+  }
+
+  // Controls
+  let renderToken = 0;
+  async function refresh() {
+    const token = ++renderToken;
+    const graph = visibleGraph();
+    $("status").hidden = false;
+    $("status").textContent = graph.nodes.length ? W.laying : "Nothing to show with these filters.";
+    if (!graph.nodes.length) { svg.replaceChildren(); renderPanel(); return; }
+    try {
+      const laid = await layout(graph);
+      if (token !== renderToken) return;
+      render(laid, graph);
+      $("status").hidden = true;
+      select(state.selected && graph.nodes.some((n) => n.id === state.selected) ? state.selected : null);
+    } catch (err) {
+      $("status").textContent = "Layout failed: " + err.message;
+    }
+  }
+  function setTab(tab) {
+    state.tab = tab;
+    $("tab-production").setAttribute("aria-pressed", tab === "production");
+    $("tab-tests").setAttribute("aria-pressed", tab === "tests");
+    try { history.replaceState(null, "", "#" + tab); } catch (e) {}
+    refresh();
+  }
+  $("tab-production").addEventListener("click", () => { state.selected = null; setTab("production"); });
+  $("tab-tests").addEventListener("click", () => { state.selected = null; setTab("tests"); });
+  for (const m of ["both", "after", "before"]) {
+    $("mode-" + m).addEventListener("click", () => {
+      state.mode = m;
+      for (const k of ["both", "after", "before"]) $("mode-" + k).setAttribute("aria-pressed", k === m);
+      refresh();
+    });
+  }
+  $("show-context").addEventListener("change", (e) => { state.context = e.target.checked; refresh(); });
+
+  // Pan and zoom
+  const zoomAt = (factor, cx, cy) => {
+    view = { x: cx - (cx - view.x) * factor, y: cy - (cy - view.y) * factor, w: view.w * factor, h: view.h * factor };
+    setView();
+  };
+  const toSvg = (ev) => {
+    const r = svg.getBoundingClientRect();
+    return { x: view.x + ((ev.clientX - r.left) / r.width) * view.w, y: view.y + ((ev.clientY - r.top) / r.height) * view.h };
+  };
+  svg.addEventListener("wheel", (ev) => { ev.preventDefault(); const p = toSvg(ev); zoomAt(Math.exp(ev.deltaY * 0.0015), p.x, p.y); }, { passive: false });
+  let drag = null;
+  svg.addEventListener("pointerdown", (ev) => {
+    if (ev.target.closest(".node")) return;
+    drag = { x: ev.clientX, y: ev.clientY, vx: view.x, vy: view.y, moved: false };
+    svg.setPointerCapture(ev.pointerId); svg.classList.add("dragging");
+  });
+  svg.addEventListener("pointermove", (ev) => {
+    if (!drag) return;
+    const r = svg.getBoundingClientRect();
+    const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+    view.x = drag.vx - (dx / r.width) * view.w; view.y = drag.vy - (dy / r.height) * view.h; setView();
+  });
+  svg.addEventListener("pointerup", () => { if (drag && !drag.moved) select(null); drag = null; svg.classList.remove("dragging"); });
+  $("zoom-in").addEventListener("click", () => zoomAt(0.8, view.x + view.w / 2, view.y + view.h / 2));
+  $("zoom-out").addEventListener("click", () => zoomAt(1.25, view.x + view.w / 2, view.y + view.h / 2));
+  $("zoom-fit").addEventListener("click", fit);
+  window.addEventListener("resize", fit);
+
+  const start = () => setTab(location.hash === "#tests" ? "tests" : "production");
+  (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(start, start);
+})();
+</script>

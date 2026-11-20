@@ -1,6 +1,6 @@
 # Commit Message Generator
 
-Generate a single-line conventional commit message based on the current staged and unstaged changes. The subject line doubles as the MR title, so it must be descriptive enough to stand on its own in a merge request list.
+Generate a single-line conventional commit message based on the current staged and unstaged changes. The subject line doubles as the PR title, so it must be descriptive enough to stand on its own in a pull request list.
 
 ## Step 1: Gather Context
 
@@ -79,7 +79,7 @@ Always use a conventional commit type:
 - Lowercase after the prefix, no period at the end
 - The full line must be under 72 characters
 - Specific — name the actual thing changed (function, file, service, config key)
-- Must read well as an MR title — a reviewer scanning a list of MRs should understand the change from the subject alone
+- Must read well as a PR title — a reviewer scanning a list of PRs should understand the change from the subject alone
 
 ### Examples
 

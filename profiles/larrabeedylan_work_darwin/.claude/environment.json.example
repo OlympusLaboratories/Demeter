@@ -1,0 +1,17 @@
+{
+  "_comment": "Overrides for the fix/review skills. Every key is optional — skill-env.sh carries working defaults for this profile, so deleting a key restores the default rather than breaking a skill. Run: ~/.claude/scripts/skill-env.sh check",
+
+  "forge": "gitlab",
+  "api_script": "~/.claude/scripts/gitlab-api.sh",
+
+  "review_bots": ["griddy-bot", "gemini-mr-reviewer"],
+  "review_job": "ai-review",
+
+  "operational_bots": ["gridmatic-atlantis"],
+  "iac_bot": "gridmatic-atlantis",
+  "iac_plan_marker": "Ran Plan for dir:",
+  "iac_apply_marker": "Apply complete!",
+
+  "artifact_store": "claude",
+  "require_human_approval": true
+}
