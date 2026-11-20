@@ -134,16 +134,19 @@ def push_text(envelope):
     )
 
 
-def blocks_for(envelope):
+def blocks_for(envelope, mention=""):
     blocks = [{
         "type": "context",
         "elements": [{"type": "mrkdwn", "text": headline(envelope)}],
     }]
-    body = (envelope.get("body") or "").strip()
+    body = (envelope.get("body") or "").strip()[:2900]
+    lead = "<@%s>" % mention if mention else ""
+    if lead:
+        body = "%s %s" % (lead, body) if body else lead
     if body:
         blocks.append({
             "type": "section",
-            "text": {"type": "mrkdwn", "text": body[:2900]},
+            "text": {"type": "mrkdwn", "text": body},
         })
     return blocks
 
@@ -151,9 +154,10 @@ def blocks_for(envelope):
 def send(envelope):
     token, channel, webhook, mention, levels = config()
     text = push_text(envelope)
-    if mention and envelope.get("level") in levels:
-        text = "<@%s> %s" % (mention, text)
-    blocks = blocks_for(envelope)
+    at = mention if mention and envelope.get("level") in levels else ""
+    if at:
+        text = "<@%s> %s" % (at, text)
+    blocks = blocks_for(envelope, at)
     if token:
         target = resolve(token, channel)
         payload = {"channel": target, "text": text, "blocks": blocks, "unfurl_links": False}
