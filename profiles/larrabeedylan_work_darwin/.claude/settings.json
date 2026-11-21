@@ -1,5 +1,9 @@
 {
   "cleanupPeriodDays": 30,
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
   "permissions": {
     "allow": [
       "WebSearch",
