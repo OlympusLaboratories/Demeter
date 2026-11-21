@@ -577,6 +577,19 @@ The switch is a file (`~/.claude/notify-state/away.json`), not an environment va
 
 #### What the message says
 
+Every notification is two lines — a header and a body:
+
+```
+✅ Demeter · Demeter ping skill setup and testing
+Notifications now opt-in via /ping. 11 files ready to commit.
+```
+
+The header is **one line, and the glyph carries the class**: ✅ finished, ❓ a question, 🔐 needs permission, 🔄 in progress, 💤 waiting, 🔥 failed. It used to spell that out in words on a line of its own, above a second line that repeated the repo name — so a 140-character lock screen spent a third of its budget restating what the emoji already said.
+
+What follows the glyph is the repo and then **this session's chat title** — the name on the editor tab, either the one Claude Code generated or one you typed over it. That is the field that tells you *which* of a dozen live sessions is talking. It is read straight out of the transcript, where Claude Code writes `ai-title` and `custom-title` records, so it needs no editor API and nothing installed; a title you set yourself wins over the generated one. The read widens the same way `handoff_at` does, because the record is written early and scrolls out of a fixed tail — only 38 of 139 local sessions had one in their last 256KB.
+
+The branch is now only a **fallback** for a session too new to have earned a title. Most work here happens in worktrees, where the branch is the least surprising thing about a session and says nothing about what it is doing. The session id used to be there too and is gone: it looked like a commit hash, identified nothing a human recognises, and cost characters the body needed.
+
 A turn's closing chat message is written for someone sitting in front of a terminal with the diff open — headings, tables, file links, backticks, and routinely several hundred words. None of that survives a push notification, and a phone shows you roughly the first 140 characters. Sending it raw produces a wall of markdown whose first line is often a sentence ending in a colon, pointing at a table you cannot see.
 
 So the body goes through a model on the way out. `notify.py` shells out to the `claude` CLI — your Claude Code subscription, not API credit — and asks for one lock-screen line of at most 30 words: outcome first in concrete nouns, then what you have to do or an explicit "nothing needed". A 497-word message with tables and file links comes out as:
