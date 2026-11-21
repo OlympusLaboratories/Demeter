@@ -6,6 +6,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SETTINGS="$REPO_DIR/vscode/settings.json"
 SCAN_ROOT="${PEACOCK_SCAN_ROOT:-$HOME}"
 SCAN_DEPTH="${PEACOCK_SCAN_DEPTH:-5}"
+ASSUME_YES=false
 
 YELLOW='\033[1;33m'
 GREEN='\033[0;32m'
@@ -25,6 +26,10 @@ ask() {
   local yn_display
   [[ "$default" == "y" ]] && yn_display="[Y/n]" || yn_display="[y/N]"
   echo -en "${BOLD}${prompt} ${yn_display} ${RESET}"
+  if [[ "$ASSUME_YES" == true ]]; then
+    echo "y"
+    return 0
+  fi
   read -r reply
   reply="${reply:-$default}"
   [[ "$reply" =~ ^[Yy]$ ]]
@@ -102,9 +107,30 @@ for path in (line for line in sys.stdin.read().splitlines() if line):
     print("FIXED\t%s\t%s" % (path, ",".join(hits)))
 '
 
+usage() {
+  cat <<EOF
+Usage: ${0##*/} [--quiet] [-y|--yes]
+
+  --quiet   Suppress the banner and the no-op notice; report only findings.
+  -y, --yes Strip without asking, instead of reading stdin.
+EOF
+}
+
 main() {
   local quiet=false
-  [[ "${1:-}" == "--quiet" ]] && quiet=true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) usage; exit 0 ;;
+      --quiet)   quiet=true ;;
+      -y|--yes)  ASSUME_YES=true ;;
+      *)
+        error "Unknown option: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+    esac
+    shift
+  done
 
   [[ "$quiet" == true ]] || bold "\n=== Strip stale workspace color keys ==="
 

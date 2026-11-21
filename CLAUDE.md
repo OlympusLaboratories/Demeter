@@ -50,7 +50,7 @@ Before planning or making changes in a directory, **read the `README.md` and `AG
 
 The installer does the following in order:
 
-1. Selects the profile to install — from the first CLI argument (a `profiles/` subdirectory name or a path), else auto if only one profile exists, else prompts. `install.sh --help` lists available profiles.
+1. Selects the profile to install — from the first CLI argument (a `profiles/` subdirectory name or a path), else auto if only one profile exists, else prompts. `install.sh --help` lists available profiles, and `-y`/`--yes` answers every prompt.
 2. Detects machine type (macOS = `mac`, Linux = `linux`)
 3. Initializes git submodules if `.gitmodules` exists
 4. Symlinks dotfiles from `profiles/<profile>/` to `~/` (skipping `.claude/`, and any path listed in `~/.rdev-managed.json` on an rdev box)
@@ -70,6 +70,7 @@ The installer does the following in order:
 18. Creates data directories for skills that accumulate context
 
 Key behaviors:
+- `-y`/`--yes` answers every prompt instead of reading stdin, and is propagated to `vscode/strip-stale-peacock-keys.sh`, the only sub-script that prompts. It **refuses to run without an explicit profile** when more than one exists: profile selection is the one prompt with no safe default, and defaulting it links another machine's dotfiles over yours. It deliberately consumes no stdin, so `yes | ./install.sh <profile>` keeps working for anything already written against it — the flag's advantage is an exit status that is the installer's own rather than `141` from `yes` catching a `SIGPIPE` under `pipefail`
 - Never copies `~/.claude` aside; it only replaces symlinks, leaving your session data in place
 - Backs up existing real files before replacing
 - Skips already-correct symlinks

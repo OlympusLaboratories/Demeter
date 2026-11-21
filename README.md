@@ -43,13 +43,34 @@ Demeter/
 3. Run the installer, optionally naming the profile to install:
 
 ```bash
-./install.sh [profile]          # e.g. ./install.sh larrabeedylan_work_linux
+./install.sh [-y|--yes] [profile]   # e.g. ./install.sh larrabeedylan_work_linux
 ```
 
 `profile` may be a directory name under `profiles/` or a path to a profile
 directory. If omitted, the installer auto-selects when only one profile exists
 and otherwise prompts you to pick one. Run `./install.sh --help` to list the
 available profiles.
+
+`-y` / `--yes` answers yes to every prompt, for a re-run you do not want to sit
+through:
+
+```bash
+./install.sh --yes larrabeedylan_work_darwin
+```
+
+It needs the profile spelled out whenever more than one exists — there is no
+safe default for which machine you are, and picking wrong links another
+machine's dotfiles over yours. It is also the only prompt `--yes` will not
+answer. The flag reads nothing from stdin, so piping into it still works if you
+have a script that does; `--yes` is simply the version whose exit status is the
+installer's own, rather than `141` from `yes` taking a `SIGPIPE` on the way out.
+
+Everything it says yes to is in the bullet list below. Three of them are slow
+rather than dangerous (building the shared tools, installing missing
+extensions, installing terminal tools), and one writes outside the repo: the
+Peacock sweep strips keys from `.vscode/settings.json` files under `$HOME` (see
+[Editor Settings](#editor-settings)). `vscode/strip-stale-peacock-keys.sh`
+takes the same `--yes` when run on its own.
 
 The script will:
 - Install the profile you selected (by argument, auto-detected, or chosen from the menu)
@@ -262,7 +283,7 @@ enough to have the sweep enforce it everywhere.
 The sweep searches `$HOME` five levels deep, skipping `node_modules`, `.git`,
 `Library` and similar; `PEACOCK_SCAN_ROOT` and `PEACOCK_SCAN_DEPTH` override
 that if your repos live elsewhere. It lists what it found and asks before
-writing, strips only the owned keys, and re-parses each file afterwards to
+writing — pass `--yes` to skip the question — strips only the owned keys, and re-parses each file afterwards to
 confirm nothing else changed — a file that packs several settings onto one line
 is reported and left alone rather than rewritten.
 

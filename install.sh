@@ -7,6 +7,7 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROFILES_DIR="$REPO_DIR/profiles"
+ASSUME_YES=false
 YELLOW='\033[1;33m'
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -27,6 +28,10 @@ ask() {
   local yn_display
   [[ "$default" == "y" ]] && yn_display="[Y/n]" || yn_display="[y/N]"
   echo -en "${BOLD}${prompt} ${yn_display} ${RESET}"
+  if [[ "$ASSUME_YES" == true ]]; then
+    echo "y"
+    return 0
+  fi
   read -r reply
   reply="${reply:-$default}"
   [[ "$reply" =~ ^[Yy]$ ]]
@@ -37,8 +42,11 @@ ask() {
 # Usage / help text. Enumerates the available profiles under profiles/.
 usage() {
   cat <<EOF
-Usage: ${0##*/} [profile]
+Usage: ${0##*/} [-y|--yes] [profile]
 
+  -y, --yes Answer yes to every prompt instead of reading stdin. Needs an
+            explicit profile when more than one exists, since there is no
+            safe default for which machine you are.
   profile   Profile to install. Either the name of a directory under
             profiles/ (e.g. larrabeedylan_work_linux) or a path to a
             profile directory. If omitted, auto-selects when only one
@@ -96,6 +104,11 @@ resolve_profile() {
       echo "  $i) $c" >&2
       ((i++))
     done
+    if [[ "$ASSUME_YES" == true ]]; then
+      error "--yes needs an explicit profile: ${#candidates[@]} exist and none is a safe default." >&2
+      usage >&2
+      exit 1
+    fi
     echo -en "${BOLD}Select your profile (default: 1): ${RESET}" >&2
     read -r choice
     choice="${choice:-1}"
@@ -358,16 +371,38 @@ read_extension_list() {
 # ── main ──────────────────────────────────────────────────────────────────────
 
 main() {
-  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-    usage
-    exit 0
-  fi
+  local profile_arg=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      -y|--yes)
+        ASSUME_YES=true
+        ;;
+      -*)
+        error "Unknown option: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+      *)
+        if [[ -n "$profile_arg" ]]; then
+          error "Unexpected argument: $1" >&2
+          usage >&2
+          exit 1
+        fi
+        profile_arg="$1"
+        ;;
+    esac
+    shift
+  done
 
   bold "\n=== Demeter Dotfile Installer ==="
   echo ""
 
   local profile_dir profile machine
-  profile_dir="$(resolve_profile "${1:-}")"
+  profile_dir="$(resolve_profile "$profile_arg")"
   profile="$(basename "$profile_dir")"
   machine="$(detect_machine)"
 
@@ -682,7 +717,9 @@ main() {
   local stale_keys_sweep="$REPO_DIR/vscode/strip-stale-peacock-keys.sh"
   if [[ -x "$stale_keys_sweep" ]] && ! should_skip "vscode" "$machine"; then
     bold "Checking workspace color overrides ..."
-    if ! "$stale_keys_sweep" --quiet; then
+    local sweep_args=(--quiet)
+    [[ "$ASSUME_YES" == true ]] && sweep_args+=(--yes)
+    if ! "$stale_keys_sweep" "${sweep_args[@]}"; then
       warn "Sweep failed — run vscode/strip-stale-peacock-keys.sh by hand."
     fi
     echo ""
