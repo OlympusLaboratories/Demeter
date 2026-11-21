@@ -15,10 +15,10 @@ Each skill is a subdirectory containing a `SKILL.md` file that defines the skill
 | `commit-msg` | Generate commit messages |
 | `docs-humanize` | Adversarial five-persona swarm (archivist / skimmer / newcomer / slop hawk / doer) that rebuilds an AI-written Notion page, markdown file or Linear ticket into something a human reads once and acts on — builds a fact ledger first, then proves against it that nothing real was lost and nothing was invented (uses the Workflow tool; prints a `wf_…` run ID to watch live with `wfwatch <id>`) |
 | `docs-update` | Audit and update README.md and AGENTS.md to reflect current repo state |
-| `fix-autonomous` | Drives a ticket or a freeform statement all the way to a merged PR with no gates: implements, commits, describes, pushes, opens the PR, watches the pipeline and the review bot with `Monitor`, works the review clean, applies infrastructure plans, merges stacked changes in order, and pings you when done or stuck |
+| `autopilot` | A mode switched on over `fix-linear` or `fix-freeform`, never a task of its own — it overrides none of that skill's flags and adds only the automation: commits, commits, describes, pushes, opens the PR, watches the pipeline and the review bot with `Monitor`, runs a `review-code` swarm alongside that bot, works the review clean, applies infrastructure plans, merges stacked changes in order, and pings you when done or stuck |
 | `fix-feedback` | Work through review feedback — MR/PR threads or a local review agent's output |
-| `fix-freeform` | `fix-linear` without a ticket — implements a freeform problem statement. Defaults to the repo's default branch, a one-shot description and no diagram; escalates to a feature branch on its own when the change touches Terraform, the default branch is protected, or the tree has unrelated uncommitted work |
-| `fix-linear` | Linear ticket implementation |
+| `fix-freeform` | `fix-linear` without a ticket — implements a freeform problem statement. Defaults to the repo's default branch, a one-shot description, no diagram and no review swarm (`--review true` opts in); escalates to a feature branch on its own when the change touches Terraform, the default branch is protected, or the tree has unrelated uncommitted work |
+| `fix-linear` | Linear ticket implementation. After the description it defaults to both a call-flow diagram and a `review-code` swarm over the branch (`--diagram false` / `--review false` to skip either) |
 | `ping` | Send yourself a push notification carrying what this session is doing and what it needs. Invoked directly, or by another skill handing over a status, a question, a blocker or a finished run |
 | `plan-initiative` | Sequence a Linear initiative's subtasks and delegate them across named engineers — dependency graph, parallelism verdict, swimlane chart, per-person work orders |
 | `plan-subtasks` | Turn a design doc + implementation breakdown into a Linear ticket tree — one parent, one MR-sized subtask per reviewable slice, both doc links on every ticket; confirms team/project/assignee and writes to Linear only after the plan is approved |
@@ -30,11 +30,11 @@ Each skill is a subdirectory containing a `SKILL.md` file that defines the skill
 
 ## Worktrees
 
-`fix-linear`, `fix-freeform` (when it escalates to `--branch new`) and `fix-feedback` isolate each fix in its own git worktree by default (under `.claude/worktrees/<branch>`), entered via the `EnterWorktree` tool, so multiple non-blocking fixes can run in parallel — one session per worktree. They offer to install dependencies in the fresh worktree and leave cleanup manual (`git worktree remove`). Pass `in place` / `--here` / `no worktree` in the skill argument to fall back to an in-place checkout. `commit-msg` and `changes-description` operate on the current directory and need no worktree awareness, and `docs-humanize` touches no checkout at all unless its target is a file path. `review-code` does too in its default local mode, but when handed an incoming branch it creates a **detached** review worktree at `.claude/worktrees/review/<branch>` — never checking their branch out over yours — and leaves removal to you. `fix-autonomous` creates no worktree of its own — it inherits whichever one the fix skill it delegated to set up, and owns that single branch for the whole run. Full guide: `WORKTREES.md` at the repo root.
+`fix-linear`, `fix-freeform` (when it escalates to `--branch new`) and `fix-feedback` isolate each fix in its own git worktree by default (under `.claude/worktrees/<branch>`), entered via the `EnterWorktree` tool, so multiple non-blocking fixes can run in parallel — one session per worktree. They offer to install dependencies in the fresh worktree and leave cleanup manual (`git worktree remove`). Pass `in place` / `--here` / `no worktree` in the skill argument to fall back to an in-place checkout. `commit-msg` and `changes-description` operate on the current directory and need no worktree awareness, and `docs-humanize` touches no checkout at all unless its target is a file path. `review-code` does too in its default local mode, but when handed an incoming branch it creates a **detached** review worktree at `.claude/worktrees/review/<branch>` — never checking their branch out over yours — and leaves removal to you. `autopilot` creates no worktree of its own — it inherits whichever one the fix skill it delegated to set up, and owns that single branch for the whole run. Full guide: `WORKTREES.md` at the repo root.
 
 ## Workflow Runs
 
-`changes-description`, `docs-humanize`, `review-code`, and `review-kludge` orchestrate swarms through the **Workflow** tool. Each run leaves a manifest, a script snapshot, and a `journal.jsonl` agent cache under `~/.claude/projects/<slug>/<session>/`. All four **launch and yield**: the tool returns a `wf_…` run id immediately, the skill prints it with the `wfwatch` command, ends the turn, and resumes on the run's completion notification. None of them may hold the session open waiting on a swarm — no `TaskOutput`, `Monitor`, `ScheduleWakeup`, or polling — so the user keeps a free prompt line for the whole run. `workflow-resume` reads all of it through `~/.claude/scripts/workflow-runs.py` (`list`, `show`, `args`, `script`, `link`, `merge`, `harvest`).
+`changes-description`, `docs-humanize`, `review-code`, and `review-kludge` orchestrate swarms through the **Workflow** tool. `fix-linear`, `fix-freeform` and `autopilot` reach two of them indirectly — `changes-description` always, and `review-code` on the `--review` flag — so a single fix run can leave two run directories behind. Each run leaves a manifest, a script snapshot, and a `journal.jsonl` agent cache under `~/.claude/projects/<slug>/<session>/`. All four **launch and yield**: the tool returns a `wf_…` run id immediately, the skill prints it with the `wfwatch` command, ends the turn, and resumes on the run's completion notification. None of them may hold the session open waiting on a swarm — no `TaskOutput`, `Monitor`, `ScheduleWakeup`, or polling — so the user keeps a free prompt line for the whole run. `workflow-resume` reads all of it through `~/.claude/scripts/workflow-runs.py` (`list`, `show`, `args`, `script`, `link`, `merge`, `harvest`).
 
 Two facts those four skills depend on: a workflow reports `completed` even when agents died mid-run (`agent()` returns `null`, the script carries on), and the resume cache is a **prefix** — a hash chain over agent calls that stops replaying at the first agent with no recorded result. Neither is visible from the report a swarm prints.
 
@@ -83,9 +83,12 @@ by the installer and never overwritten.
 
 ## Autonomous Runs
 
-`fix-autonomous` composes the ordinary skills rather than reimplementing them: `fix-linear`
-or `fix-freeform`, then `commit-msg`, `changes-description`, `fix-feedback --autonomous`,
-`changes-diagram` and `ping`. Three invariants it must never lose:
+`autopilot` is a **mode on a fix skill, not a task of its own** — it cannot be invoked
+against nothing, and `/autopilot <ticket or statement>` still routes through `fix-linear`
+or `fix-freeform` and inherits that skill's defaults. It composes the ordinary skills
+rather than reimplementing them: the fix skill, then `commit-msg`,
+`changes-description`, `review-code`, `fix-feedback --autonomous`, `changes-diagram` and
+`ping`. Five invariants it must never lose:
 
 - **It waits with the `Monitor` tool, never a sleep or a poll loop.** Several runs may be
   live at once and each blocking one costs a session. Every terminal state must emit a
@@ -93,9 +96,23 @@ or `fix-freeform`, then `commit-msg`, `changes-description`, `fix-feedback --aut
   is indistinguishable from "still running".
 - **Review comments outrank CI.** Fixing comments means pushing, and a push restarts the
   pipeline, so handling CI first throws away a whole run.
+- **The swarm is launched with the watcher, not after it.** `review-code` and the forge's
+  own reviewer read the same pushed diff and neither gates the other, so both start in the
+  turn that arms the `Monitor` and the run yields once for both. The swarm runs once per
+  run, not once per review round. Whichever run opens a change request also
+  passes `--review false` down, so the swarm runs here rather than before the push and
+  `fix-feedback` has somewhere to post its findings.
+- **It owns no flag but `--merge` and `--max-rounds`, and overrides none.** It is a
+  modifier on a fix skill, not a peer: every decision a parameter expresses was already
+  made there, `--branch` included. `--review` is therefore on through `fix-linear` and off
+  through `fix-freeform`, and being unattended is not a reason to spend a fleet the user
+  declined. A `--branch default` run pushes the default branch and ends — Steps 5–10 have
+  no change request to drive — which is safe to honour because `fix-freeform`'s own Step 2b
+  has already forced a feature branch for Terraform, a protected default branch, or a dirty
+  tree.
 - **It supersedes `fix-linear`/`fix-freeform` Important Rule 1** (never push, never open a
   pull request) for the one branch it created, and for nothing else. That carve-out is
-  written into `fix-autonomous` explicitly; it is not something an agent may infer.
+  written into `autopilot` explicitly; it is not something an agent may infer.
 
 `fix-feedback --autonomous` is the only sanctioned relaxation of that skill's "never write
 unasked" rule. It still never pushes — committing and pushing belong to the caller — and it

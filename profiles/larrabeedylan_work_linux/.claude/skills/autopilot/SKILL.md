@@ -1,13 +1,15 @@
 ---
-name: fix-autonomous
-description: Drive a change all the way from a Linear ticket or a freeform problem statement to a merged merge request, without stopping to ask. Use when the user says one-shot this ticket, take this end to end, handle it autonomously, ship this without checking in, drive it to merge, or invokes /fix-autonomous. Implements, commits, writes the description, opens the MR, watches the pipeline and the review bot, addresses every comment, applies infrastructure plans, merges in the right order across stacked MRs, and pings the user only when finished or genuinely stuck.
+name: autopilot
+description: A modifier on fix-linear or fix-freeform that takes their work all the way to a merged merge request without stopping to ask. Use when the user says autopilot, put it on autopilot, auto mode, one-shot this ticket, take this end to end, handle it autonomously, ship this without checking in, drive it to merge, or invokes /autopilot — on its own or inside another fix skill's invocation. It overrides none of that skill's flags: it commits, opens the MR, watches the pipeline and the review bot, addresses every comment, applies infrastructure plans, merges in the right order across stacked MRs, and pings the user only when finished or genuinely stuck.
 ---
 
-# Fix Autonomous — Ticket or Statement to Merged, Unattended
+# Autopilot — Take a Fix Skill's Work All the Way, Unattended
 
-Run the whole change end to end while the user is away. Everything `fix-linear` or `fix-freeform` does, plus the part they deliberately refuse to do: push, open the merge request, work the review until it is clean, and merge it at the first moment that is actually safe.
+**This is a mode, not a task.** `fix-linear` and `fix-freeform` do the work; engaging autopilot says *and do not stop to ask me anything.* It adds the part those two deliberately refuse to do — push, open the merge request, work the review until it is clean, and merge it at the first moment that is actually safe — and changes nothing else about the run.
 
-The user's standing instruction for this skill is: **trust your judgment, and pull me in only if absolutely needed.** That is a licence to decide, not a licence to guess. Every judgment call you make alone gets written down somewhere durable — the ticket, the MR description, or a thread reply — because the record is what replaces the conversation you would otherwise have had.
+The name is the contract, and it is worth taking literally. An autopilot holds a course somebody else set: it cannot be engaged against nothing, it does not re-decide the destination, and it has no opinion about why the route was chosen. Everything from the branch to the description to whether a review swarm runs was settled before autopilot was engaged — this skill flies the plan it was handed, and the whole of its judgment goes into the part the fix skills leave undone.
+
+The user's standing instruction when autopilot is on is: **trust your judgment, and pull me in only if absolutely needed.** That is a licence to decide, not a licence to guess. Every judgment call you make alone gets written down somewhere durable — the ticket, the MR description, or a thread reply — because the record is what replaces the conversation you would otherwise have had.
 
 **Parameter:** `$ARGUMENTS` — a Linear ticket identifier, or a freeform problem statement, plus optional flags.
 
@@ -15,16 +17,28 @@ The user's standing instruction for this skill is: **trust your judgment, and pu
 |---|---|---|
 | A ticket id (`PLAT-123`) | — | Implement via `fix-linear`. |
 | Anything else | — | Implement via `fix-freeform`. |
-| `--one-shot-description true\|false` | `true` | Passed through to the fix skill, and on to `changes-description`. |
-| `--changes-diagram true\|false` | `true` | Attach a call-flow diagram to the MR. |
 | `--merge true\|false` | `true` | `false` stops after the review is clean and the MR is ready, without merging. |
 | `--max-rounds N` | `3` | Review rounds with the same reviewer before escalating. |
 
-Parse the flags out of `$ARGUMENTS` first; whatever remains is the ticket id or the problem statement. A bare `--one-shot-description` means `true`.
+Those two are the only flags this skill owns, and the test is that no fix skill has an opinion on either: they describe **how far the automation goes**, not what the change is. Every other flag in the invocation — `--quick-description`, `--diagram`, `--review`, `--branch`, the in-place escape hatch — belongs to the fix skill. Forward them untouched, read their effect off that skill's defaults, and do not restate a default for them here.
+
+Parse the flags out of `$ARGUMENTS` first; whatever remains is the ticket id or the problem statement. A bare `--quick-description` means `true`.
+
+### What the mode owns, and what it inherits
+
+Autopilot never does the meat of the work. A fix skill does — `fix-linear` or `fix-freeform` — and by the time either of them has parsed the invocation, every decision a parameter expresses has already been made there.
+
+So **it owns the automation and inherits the change.** It carries no defaults of its own beyond `--merge` and `--max-rounds`, and it never re-decides a question the fix skill already answered. That rule has teeth in the direction that costs the user money: reaching for `fix-freeform` is reaching for the cheap path — a one-shot description, no diagram, no review swarm — and being unattended is not a reason to spend a fleet on any of them. A default this skill restates is a default it will eventually contradict, so it restates none.
+
+**There are no exceptions to this, including the ones that look like safety.** It is tempting to force `--branch new` on a freeform run so that a merge request exists to review — but that judgment was already made, and made better, inside `fix-freeform`: its escalation checks force a feature branch when the change touches Terraform, when the default branch is protected, or when the tree is dirty. If `--branch default` survives those checks, it survived them on this repository's own terms, and this skill is not better placed to overrule it than the skill holding the checks. "I would have chosen differently" is never sufficient, and neither is "I would have felt safer".
 
 ### Two ways in, one behaviour
 
-This skill is reached either directly (`/fix-autonomous <ticket or statement>`) or **by delegation**, when the user names it inside another fix skill's invocation — `/fix-linear --merge false /fix-autonomous PLAT-123`, or `/fix-freeform --branch new /fix-autonomous <statement>`. The second form is a composition, not a mistake and not an ambiguity: it says *run that skill's flow, and take it all the way.* `fix-linear` and `fix-freeform` each strip the token and hand the invocation here with their own flags and the ticket or statement intact, so by the time you are reading this there is nothing left to clarify. Behave identically on both routes, and never re-ask a question the delegating skill was told not to ask.
+Autopilot is reached either **directly** (`/autopilot <ticket or statement>`) or **by delegation**, when the user names it inside another fix skill's invocation — `/fix-linear --merge false /autopilot PLAT-123`, or `/fix-freeform --branch new /autopilot <statement>`.
+
+Those look like different things and are not. A mode has nothing to qualify on its own, so the direct form still runs a fix skill — Step 1 picks `fix-linear` for a ticket id and `fix-freeform` for anything else, and that skill's defaults then govern the run exactly as if the user had typed it themselves. The delegated form only makes the choice explicit, and lets the user set that skill's flags while they are at it. Neither route is the "real" one.
+
+The delegated form is a composition, not a mistake and not an ambiguity: it says *run that skill's flow, and take it all the way.* `fix-linear` and `fix-freeform` each strip the token and hand the invocation here with their own flags and the ticket or statement intact, so by the time you are reading this there is nothing left to clarify. Behave identically on both routes, and never re-ask a question the delegating skill was told not to ask.
 
 ### `--merge false` is the flag to actually honour
 
@@ -59,7 +73,7 @@ Use `$(~/.claude/scripts/skill-env.sh get api_script)` for the helper path throu
 
 ## Step 1: Implement
 
-Invoke `fix-linear` (ticket) or `fix-freeform` (statement) with the `Skill` tool, passing `--one-shot-description` through.
+Invoke `fix-linear` (ticket) or `fix-freeform` (statement) with the `Skill` tool, passing `--quick-description` through.
 
 Those skills have interactive gates. Resolve them yourself, as follows, and **write down every call you make**:
 
@@ -67,7 +81,13 @@ Those skills have interactive gates. Resolve them yourself, as follows, and **wr
 - **Plan approval.** Self-approved — but hold the plan to the same standard the interactive flow would. Autonomy is not an excuse for a thinner plan. Post the locked plan, every judgment call, and its rationale as a comment on the Linear ticket **before implementation starts**. For a freeform run there is no ticket, so the record goes in as a **comment on the MR** — not the description, which `changes-description` deliberately keeps free of design notes — and it must go in before you request any review. Write it as engineering rationale: the alternative considered and why it lost, the constraint that forced a choice, the risk you want looked at. Never narrate the process that produced it, and never open with who or what wrote it. If a discovery later forces a change of plan, record the revision and the reason **before** you resume.
 - **The no-comments rule still applies.** The code you write carries no explanatory comments, no banners, no docstrings that were not already there, no TODOs, no ticket references. The fix skills restate this in full; do not let an autonomous run quietly relax it. Explanation goes in the commit message and the MR description.
 
-`fix-freeform` defaults to committing on the default branch. **Under this skill that default is wrong**: an autonomous run always produces a merge request, because the review is the only thing standing between an unattended agent and the default branch. Pass `--branch new` unless the user explicitly asked otherwise.
+**`--branch` is the fix skill's too — do not force `new`.** A freeform run that stays on the default branch produces no merge request, and that is a coherent thing to have asked for: the automation this skill adds to it is the push, and Steps 5 through 10 have nothing to drive. Step 4 has both paths. The safety argument for overriding does not survive contact with `fix-freeform`'s Step 2b, which has already escalated the run to a feature branch if the change touched Terraform, if the default branch was protected, or if the tree was dirty — so a `--branch default` that reaches this skill is one those checks deliberately let through.
+
+**Every flag but `--merge` and `--max-rounds` is the fix skill's, so forward the invocation and read the result.** `--quick-description`, `--diagram` and `--review` are decided there and this skill does not second-guess any of them. In particular `--review` resolves to `true` through `fix-linear` and `false` through `fix-freeform`, and an unattended run is not grounds to turn a swarm on that the user left off — the forge's own reviewer runs either way, so inheriting a `false` degrades the review rather than removing it, and a fleet of agents is a cost the user notices.
+
+**`--review false` is then passed down — but only on a run that will open a merge request.** This is about *where* the swarm runs, not whether. The delegated skill would otherwise fire it at the end of its own flow, before the push, and `fix-feedback`'s posting step needs a merge request that does not exist yet at that point, so those findings would have nowhere to land. This skill owns the swarm at Step 5b instead, the same way it owns the commit and the description.
+
+On a `--branch default` run there is never going to be a merge request, so that reasoning inverts: leave `--review` alone, let `fix-freeform` run its own Step 5e, and skip Step 5b. Taking the swarm away from the skill that can still act on its findings, to run it later in a place that cannot, is strictly worse than not moving it.
 
 ## Step 2: Commit
 
@@ -75,7 +95,9 @@ Invoke `commit-msg` with the `Skill` tool and commit with the message it produce
 
 ## Step 3: Describe
 
-Invoke `changes-description` with the `Skill` tool. Pass `--one-shot` when `--one-shot-description` is true.
+Invoke `changes-description` with the `Skill` tool. Pass `--one-shot` when `--quick-description` is true.
+
+**On a `--branch default` run there is no description field to fill**, so the text is the change summary that goes into the Step 11 report and, where it is short enough to belong there, the commit body. Everything below still governs it: a summary nobody will read on a merge request is not licence to write it carelessly, because it is the only account of the change a reader will ever get.
 
 **Nothing in the description says how it was produced.** No authorship line, no "written autonomously", no robot emoji, no note that a debate or a fact-check ran, and no count of rounds. A human opens a MR with finite attention, and every line that is not about the change competes with the lines that are. How the text was generated is a fact about the process, not about the change.
 
@@ -85,13 +107,25 @@ Announcing that an agent wrote it is worse than merely useless. It invites the r
 
 ## Step 4: Push and Open the Merge Request
 
-**This is the point where this skill supersedes `fix-linear`'s and `fix-freeform`'s Important Rule 1**, which forbids pushing and creating merge requests. That rule exists so an interactive session never surprises the user with external state. An autonomous run was explicitly asked for exactly this, so the prohibition is lifted **for the branch this run created and for nothing else**. You still never force-push, never touch another branch, never amend a commit that is already on the remote, and never act on a merge request this run did not open.
+**This is the point where this skill supersedes `fix-linear`'s and `fix-freeform`'s Important Rule 1**, which forbids pushing and creating merge requests. That rule exists so an interactive session never surprises the user with external state. An autonomous run was explicitly asked for exactly this, so the prohibition is lifted **for the branch this run worked on and for nothing else**. You still never force-push, never touch another branch, never amend a commit that is already on the remote, and never act on a merge request this run did not open.
+
+### 4a. `--branch default` — push, and the run is over
+
+The fix skill committed onto the default branch and no merge request is coming. Push that branch, report per Step 11, and stop. Steps 5 through 10 are about driving a merge request to merge; with none in existence there is nothing for them to watch, review, approve or merge, and inventing a branch at this point to give them something to do would be making the user's decision over again at the last possible moment.
+
+**Fast-forward only, and never force.** Someone else may have pushed since the fix skill cut its base. `git pull --ff-only` and push again; if that fails the history has diverged and this run no longer knows what it would be writing on top of — stop and report it per Step 11's stop conditions. Do not merge, do not rebase, do not force.
+
+**Say plainly in the report that the change is on the default branch and was not reviewed by anybody.** That is the trade `--branch default` makes, and it is the user's to make, but it is the one fact they need back from a run they were not watching. If `--review` was on and `fix-freeform`'s Step 5e produced findings, those findings now describe code that is already live — lead with them.
+
+### 4b. Everything else — open the merge request
 
 Push the branch, then open the MR with the helper's create command. Title from the commit subject; description from Step 3; reference the ticket where there is one so the forge's integration can transition it on merge.
 
 Open it as a normal merge request, not a draft — the review bot runs as a CI job regardless, and a draft cannot be merged or queued, so opening as a draft buys nothing and blocks Step 9.
 
 ## Step 5: Arm the Watcher — never poll in-turn
+
+**Steps 5 through 10 apply only to a run that opened a merge request.** A `--branch default` run ended at Step 4a; go straight to Step 11.
 
 You now need to know when the pipeline finishes and when the reviewer reports. **Use the `Monitor` tool.** Do not use `sleep` loops, do not call `TaskOutput` in a wait loop, and do not hold the turn open. A monitor runs in the background and wakes the session with a notification, which leaves the user's prompt free and is the only approach that works when several of these runs are in flight at once.
 
@@ -101,13 +135,29 @@ Poll the forge no more often than every 60 seconds; these are remote APIs with r
 
 When the monitor's notification arrives, continue from Step 6. Between arming it and that notification, the turn is over: answer anything else the user asks normally.
 
+## Step 5b: The Review Swarm — launched with the watcher, not after it
+
+When `--review` resolved to `true` — off the fix skill, so `fix-linear` runs it and `fix-freeform` does not — invoke the `review-code` skill using the `Skill` tool **in the same turn that arms the monitor**, with no arguments — the branch is pushed, so its Local mode diffs exactly what the merge request contains.
+
+Arm the monitor first and launch the swarm second, then yield once for both. Neither is a precondition for the other: CI and the forge's reviewer are already running on the push, and the swarm reads the diff from disk. Waiting for one before starting the other adds a full swarm's latency to a run whose entire purpose is to need nothing from anybody.
+
+**Why an unattended run wants both reviews.** The forge's reviewer makes a single pass over the finished diff. The swarm attacks it from independent angles and then has a panel of skeptics try to refute every candidate finding, so what it reports has already survived a filter the bot never applies. Interactively that is a nice-to-have, because a human reads the diff before it lands. Here there is no such human: the review *is* the only thing standing between this run and the default branch, which is the same reason Step 1 forces a merge request in the first place.
+
+The swarm's completion notification wakes you exactly as the monitor's does. When it is the swarm that woke you, its confirmed findings are a new source of review feedback — go to Step 6 and let them enter the loop where a bot's threads do.
+
+**The swarm runs once per run, not once per round.** It reviews the diff as first pushed, and re-running it after every round would spend a fleet re-reviewing code it has already passed. One re-run is justified when a round changed the shape of the change rather than patching it — a redesign, not a fix. More than one is not.
+
+If `review-code` errors or is not installed, record that in the run notes and continue on the forge's reviewer alone. A missing swarm degrades the review; it never stops the run.
+
+When `--review` resolves to `false`, skip this step in silence — do not mention the swarm you did not run, do not offer it, and do not treat the forge's reviewer as a lesser substitute in the run notes. It is the review this run was asked for.
+
 ## Step 6: The Review Loop
 
 Each time the watcher wakes you, gather the current state — MR state, pipeline status, approvals, unresolved threads — and then branch **in this priority order**. The ordering is not arbitrary and is the most commonly botched part of this flow:
 
 > **Review comments outrank CI, always.** Addressing comments means pushing, and every push starts a new pipeline. Waiting for a red or running pipeline before handling open threads throws away a complete CI run, every time.
 
-1. **Unresolved threads exist** (whatever the pipeline is doing) → invoke `fix-feedback --autonomous` with the `Skill` tool. If the pipeline has also failed, diagnose it in the same pass and fold the fix into the **same push** — never push twice. Then return to the watcher.
+1. **Unresolved threads exist, or the Step 5b swarm has reported confirmed findings** (whatever the pipeline is doing) → invoke `fix-feedback --autonomous` with the `Skill` tool. It takes both sources as one queue: its Mode B reads the swarm's findings out of the conversation, and its Step 3b posts every finding the merge request does not already carry as an anchored comment *before* fixing any of them — so a swarm finding becomes a thread on the merge request like any other, and survives this run. If the pipeline has also failed, diagnose it in the same pass and fold the fix into the **same push** — never push twice. Then return to the watcher.
 2. **Pipeline failed, no open threads** → Step 7.
 3. **Approved and green** → Step 8.
 4. **Approved, pipeline still running** → keep waiting.
@@ -151,7 +201,7 @@ Run this gate **after** approval, because the bot will usually refuse to apply b
 
 ## Step 9: Merge
 
-**Check `--merge` before anything else in this step.** When it is `false`, this step is where the run ends: the change request stays open and unarmed, and you go straight to Step 11 to report. Do not merge, do not enable auto-merge, and do not ask whether they have changed their mind — the flag was set before the run started precisely so that nobody has to be available now. Say in one line that the change request is green, reviewed and ready, held unmerged per `--merge false`, and give the link.
+**Check `--merge` before anything else in this step.** When it is `false`, this step is where the run ends: the merge request stays open and unarmed, and you go straight to Step 11 to report. Do not merge, do not enable auto-merge, and do not ask whether they have changed their mind — the flag was set before the run started precisely so that nobody has to be available now. Say in one line that the merge request is green, reviewed and ready, held unmerged per `--merge false`, and give the link.
 
 Everything below applies only when `--merge` is `true`.
 
@@ -178,7 +228,7 @@ dylan/PLAT-3535/03-delete-legacy-path
 
 A reader scanning the branch list must be able to tell these three belong together, and in what order, without opening any of them. Cross-link them in each description: what it depends on, and what depends on it.
 
-**Arm them in order, and as early as possible.** Record the intended order and each MR's dependencies in `.claude/autonomous/<run>/stack.json` so the sequence survives a session restart. Then:
+**Arm them in order, and as early as possible.** Record the intended order and each MR's dependencies in `.claude/autopilot/<run>/stack.json` so the sequence survives a session restart. Then:
 
 - Only the head of the stack is eligible to merge. Take it through Steps 6–9 normally.
 - For each successor, arm a watcher on its predecessor's merge state. When that fires: rebase the successor onto the updated target, let its pipeline re-run, and only then take it through the merge gate.
@@ -190,11 +240,11 @@ The principle: a step is armed the instant its precondition is genuinely satisfi
 
 ## Step 11: Close the Loop and Ping
 
-When the MR merges, or when you stop for any reason:
+When the MR merges, when a `--branch default` run has pushed, or when you stop for any reason:
 
-1. **Record it where the work lives.** On a ticket run, comment the MR URL, what shipped, and anything noteworthy. Work you deliberately did not do becomes its own ticket, linked back — never a buried bullet in a closing comment. Check whether the forge integration already moved the ticket before moving it by hand; that integration is asynchronous.
-2. **Attach the diagram** when `--changes-diagram` is true. Invoke `changes-diagram` with the `Skill` tool and append its link to the MR description. Do this once the code has settled — a diagram of a branch that changed three more times is worse than none. **A failed or unavailable diagram never fails the run**: say so in one line and carry on.
-3. **Ping the user.** Invoke the `ping` skill with the `Skill` tool. This is the only message the user may see, so it carries what happened and whether anything is needed — a ping that says "done" wastes it.
+1. **Record it where the work lives.** On a ticket run, comment the MR URL, what shipped, and anything noteworthy. A `--branch default` run has no MR, so record the pushed commit SHA and its forge URL instead. Work you deliberately did not do becomes its own ticket, linked back — never a buried bullet in a closing comment. Check whether the forge integration already moved the ticket before moving it by hand; that integration is asynchronous.
+2. **Attach the diagram** when `--diagram` is true. Invoke `changes-diagram` with the `Skill` tool and append its link to the MR description — or, on a `--branch default` run, carry the link in the report and the ticket comment, since there is no description to append to. Do this once the code has settled — a diagram of a branch that changed three more times is worse than none. **A failed or unavailable diagram never fails the run**: say so in one line and carry on.
+3. **Ping the user.** Invoke the `ping` skill with the `Skill` tool. This is the only message the user may see, so it carries what happened and whether anything is needed — a ping that says "done" wastes it. **A `--branch default` run says so in the ping**: the change is on the default branch, unreviewed, and already live. That is what the user chose, and it is also the single fact most worth knowing on a phone.
 
 ### When to stop and ping instead of continuing
 
@@ -216,10 +266,11 @@ Stopping is reserved for these. Everything else — surprising test failures, un
 2. **The approval gate is never waived.** When `require_human_approval` is true, a bot approval alone does not merge. Everything else in this skill is a judgment call; this one is not.
 3. **Never blind-retry a failing job.** Read the log and classify it first. Twice the same way is a real failure.
 4. **Comments before CI.** Always.
-5. **This run owns exactly one branch** (or one named stack). Never force-push, never amend a pushed commit, never act on a merge request this run did not open.
-6. **Record every decision you made alone**, at the time you made it — on the ticket, or as a MR comment on a freeform run. The record is what replaces the conversation, so it carries the reasoning and nothing about the process that produced it.
-7. **No comments in the code.** Autonomy does not relax it.
-8. **An empty config value means the capability is absent, not that you should guess at it.** Never substitute a name you saw in an example for one the machine did not supply.
+5. **This run owns exactly one branch** (or one named stack) — including when that branch is the default one. Never force-push, never amend a pushed commit, never act on a merge request this run did not open.
+6. **Never override the fix skill's flags.** `--merge` and `--max-rounds` are this skill's; every other flag was decided before this skill was reached, `--branch` included. Automation is what this skill adds, not a second opinion on what the change should be.
+7. **Record every decision you made alone**, at the time you made it — on the ticket, as a MR comment on a freeform run, or in the Step 11 report when the run produced neither. The record is what replaces the conversation, so it carries the reasoning and nothing about the process that produced it.
+8. **No comments in the code.** Autonomy does not relax it.
+9. **An empty config value means the capability is absent, not that you should guess at it.** Never substitute a name you saw in an example for one the machine did not supply.
 
 ## Step 12: Self-Improvement
 

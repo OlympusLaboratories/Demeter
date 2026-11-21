@@ -30,7 +30,7 @@ index that matters.
 | `fix-linear` | A worktree per ticket, by default. |
 | `fix-freeform` | Only when it escalates to `--branch new`. Its default (`--branch default`) works in place on the default branch and makes no worktree. |
 | `fix-feedback` | A worktree for the branch under review, in its merge/pull-request mode. |
-| `fix-autonomous` | Creates none of its own — it inherits whichever worktree the fix skill it delegated to set up, and owns that one branch for the whole run. |
+| `autopilot` | Creates none of its own — it inherits whichever worktree the fix skill it delegated to set up, and owns that one branch for the whole run. |
 | `review-code` | In incoming mode only, a **detached** worktree at `.claude/worktrees/review/<branch>`. It never checks somebody else's branch out over yours. |
 | `commit-msg`, `changes-description`, `changes-diagram`, `docs-humanize` | None. They read the current directory. |
 

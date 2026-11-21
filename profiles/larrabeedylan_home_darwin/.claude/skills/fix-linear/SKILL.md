@@ -8,24 +8,25 @@ Implement the changes required by a Linear ticket, working on a properly set up 
 |---|---|
 | A Linear ticket identifier (`ENG-123`, `PLAT-3276`) | **Required.** The ticket to implement. |
 | `in place`, `--here`, `no worktree` | Work in the current checkout instead of cutting a git worktree (**Step 2-INPLACE**). Matched case-insensitively. |
-| `--one-shot-description [true\|false]` | Default `false`. Passed straight through to `changes-description` as its `--one-shot` flag: one writer instead of the four-persona debate, 4–6 agents instead of 15–26, with the mechanical word budget and the fact-check kept. Bare `--one-shot-description` means `true`. |
-| `--changes-diagram [true\|false]` | Default **`true`**. After the commit message and description, run the `changes-diagram` skill to produce a call-flow diagram of the branch. Pass `false` to skip it. |
-| `/fix-autonomous` (anywhere in the arguments) | A delegation directive, never part of the ticket identifier. Hand the whole invocation to `fix-autonomous`. See **Delegation** below. |
+| `--quick-description [true\|false]` | Default `false`. Passed straight through to `changes-description` as its `--one-shot` flag: one writer instead of the four-persona debate, 4–6 agents instead of 15–26, with the mechanical word budget and the fact-check kept. Bare `--quick-description` means `true`. |
+| `--diagram [true\|false]` | Default **`true`**. After the commit message and description, run the `changes-diagram` skill to produce a call-flow diagram of the branch. Pass `false` to skip it. |
+| `--review [true\|false]` | Default **`true`**. After the description and the diagram, run the `review-code` skill — an adversarial review swarm over this branch's own diff. Pass `false` to skip it. |
+| `/autopilot` (anywhere in the arguments) | A delegation directive, never part of the ticket identifier. Hand the whole invocation to `autopilot`. See **Delegation** below. |
 
-Parse the flags out of `$ARGUMENTS` **first**; whatever remains is the ticket identifier. Without that, `PLAT-123 --changes-diagram false` is taken whole as the ticket ID and fails validation in Step 1b.
+Parse the flags out of `$ARGUMENTS` **first**; whatever remains is the ticket identifier. Without that, `PLAT-123 --diagram false` is taken whole as the ticket ID and fails validation in Step 1b.
 
-### Delegation: `/fix-autonomous` in the arguments
+### Delegation: `/autopilot` in the arguments
 
-A `/fix-autonomous` or `fix-autonomous` token anywhere in `$ARGUMENTS` is a **delegation directive, not part of the ticket identifier and not a question to put back to the user**. They are composing two skills, which is what naming one skill inside another's invocation means everywhere in this family: *implement this ticket, and drive it the whole way without checking in.* Strip the token, invoke `fix-autonomous` with the `Skill` tool, pass the remaining flags and the ticket id through verbatim, and let it call back into this skill from its own Step 1. Left unstripped the token lands in `TICKET_ID` and fails validation in Step 1b, which is the same failure the flag-parsing rule above exists to prevent.
+A `/autopilot` or `autopilot` token anywhere in `$ARGUMENTS` is a **delegation directive, not part of the ticket identifier and not a question to put back to the user**. They are composing two skills, which is what naming one skill inside another's invocation means everywhere in this family: *implement this ticket, and drive it the whole way without checking in.* Strip the token, invoke `autopilot` with the `Skill` tool, pass the remaining flags and the ticket id through verbatim, and let it call back into this skill from its own Step 1. Left unstripped the token lands in `TICKET_ID` and fails validation in Step 1b, which is the same failure the flag-parsing rule above exists to prevent.
 
 **Do not ask how far the run should go.** The token already answered that, and asking is worse than a wasted turn: it reads as not having understood the invocation, and it strands a user who deliberately set the run up to need nothing from them. The only thing worth saying out loud is one line naming the delegation as you make it.
 
 Flags cross the hand-off in both directions, so forward every one you do not own rather than treating it as unparsed junk:
 
-- **This skill's flags** — `--one-shot-description`, `--changes-diagram`, and the in-place escape hatch — are passed on, and `fix-autonomous` hands them back when it re-enters here.
-- **`fix-autonomous`'s own flags** — `--merge`, `--max-rounds` — mean nothing to this skill and must survive untouched. `--merge false` is how the user says *take it to green, reviewed and ready, then stop*; dropping it silently merges something they wanted held for a second pair of eyes.
+- **This skill's flags** — `--quick-description`, `--diagram`, `--review`, and the in-place escape hatch — are passed on, and `autopilot` hands them back when it re-enters here.
+- **`autopilot`'s own flags** — `--merge`, `--max-rounds` — mean nothing to this skill and must survive untouched. `--merge false` is how the user says *take it to green, reviewed and ready, then stop*; dropping it silently merges something they wanted held for a second pair of eyes.
 
-Reaching `fix-autonomous` this way loosens nothing — it owns the push, the pull request and the merge, and performs them under its own rules. What it does mean is that this skill's rule against pushing and opening a pull request binds **its own flow**, not a run that has been handed over. Never cite that rule back as a reason to refuse the delegation.
+Reaching `autopilot` this way loosens nothing — it owns the push, the pull request and the merge, and performs them under its own rules. What it does mean is that this skill's rule against pushing and opening a pull request binds **its own flow**, not a run that has been handed over. Never cite that rule back as a reason to refuse the delegation.
 
 If nothing remains once the flags are stripped, ask the user for the ticket ID and stop.
 
@@ -253,7 +254,7 @@ If the ticket matches this pattern:
 1. Extract the PR URL from the description.
 2. **Invoke the `fix-feedback` skill** using the `Skill` tool, passing the PR URL as the argument.
 3. After the `fix-feedback` skill completes, skip Steps 4 and 5 (plan and implement) — the fix-feedback skill handles everything.
-4. Proceed directly to Step 6 (commit message and PR description).
+4. Proceed directly to Step 6 (commit message, PR description, diagram and review).
 
 If the ticket does NOT match this pattern, continue to Step 4 as normal.
 
@@ -335,26 +336,40 @@ Execute the approved plan:
 
 After implementation is complete, give the user a summary of what was changed.
 
-## Step 6: Commit Message and PR Description
+## Step 6: Commit Message, PR Description, Diagram and Review
 
 Immediately after implementation is complete — do not wait for the user to commit or ask for these:
 
 1. Invoke the `commit-msg` skill using the `Skill` tool to generate a commit message.
 2. **Immediately** invoke the `changes-description` skill using the `Skill` tool to generate a PR description. Do NOT wait for the user to respond to the commit message first — invoke it in the same turn, back-to-back with the commit message, so the debate is already running while they read the commit message. The `commit-msg` skill ends with a suggestion to run `/commit`, but you must continue and invoke `changes-description` before yielding to the user.
 
-   **Which flag to pass, in precedence order.** `--one-shot-description true` wins: pass `--one-shot` and **nothing else**. The two flags must never both be passed — `--one-shot` already forces the debate's round count to zero, so `--quick` alongside it is at best redundant and at worst read as a request for the panel it just dismissed. Otherwise pass `--quick`, unless the branch is large or the user asked for a thorough description, in which case pass no flag at all and let the full panel sit. The reasoning behind the ladder: `changes-description` runs a multi-agent debate and the full-length version is disproportionate for a routine ticket, while `--one-shot` goes further and drops the debate entirely, keeping the mechanical word budget and the fact-check — the two things a lone writer has been measured getting wrong. What it gives up is the adversarial pressure, so reach for it when the diff is small and the description is not the thing a reviewer will lean on.
+   **The two names are a trap, so read the mapping rather than the words.** This skill's `--quick-description` is *not* `changes-description`'s `--quick`. It maps to `--one-shot`, which is the cheaper of the two settings that skill has; `--quick` is the middle setting, and it is what you pass when `--quick-description` is **false**. A flag named "quick" that means "do not pass `--quick`" is worth one careful read now rather than a wrong description later.
+
+   **Which flag to pass, in precedence order.** `--quick-description true` wins: pass `--one-shot` and **nothing else**. The two flags must never both be passed — `--one-shot` already forces the debate's round count to zero, so `--quick` alongside it is at best redundant and at worst read as a request for the panel it just dismissed. Otherwise pass `--quick`, unless the branch is large or the user asked for a thorough description, in which case pass no flag at all and let the full panel sit. The reasoning behind the ladder: `changes-description` runs a multi-agent debate and the full-length version is disproportionate for a routine ticket, while `--one-shot` goes further and drops the debate entirely, keeping the mechanical word budget and the fact-check — the two things a lone writer has been measured getting wrong. What it gives up is the adversarial pressure, so reach for it when the diff is small and the description is not the thing a reviewer will lean on.
 
    That skill launches its run as a background workflow, prints the run ID, and then yields the turn — that is correct, not a stall. This holds for `--one-shot` too: it is a 4–6 agent workflow, not a synchronous call, so it still returns a `wf_` run ID and still hands the turn back before the description exists. Yield with it: the description arrives when the swarm's completion notification does, and blocking on it (`TaskOutput`, `Monitor`, a poll loop) only takes the user's prompt line away for the length of the run.
 3. **Re-print the commit message after the PR description, verbatim.** The `changes-description` output is long, so by the time it finishes the commit message from step 1 has scrolled far up the terminal. In the turn that presents the description — the one the swarm's completion notification wakes you into — close by repeating it — unchanged from what `commit-msg` produced, no re-generation, no re-wording, no summary of it — in its own fenced block under a `Commit message` heading, so both blocks the user copies sit next to each other at the bottom. If the user corrected the commit message between step 1 and here, repeat the corrected version.
-4. **Then produce the call-flow diagram, unless `--changes-diagram false` was passed.** In that same turn, once the description and the re-printed commit message are out, invoke the `changes-diagram` skill using the `Skill` tool with no arguments — it defaults to the current branch against the default branch, which is exactly this branch. It publishes an HTML page and hands back a link, or returns a local file path when no artifact store is reachable; **either outcome is a success.** Print whichever you got as a single line under the commit message block, so it cannot push the two blocks the user copies apart.
+4. **Then produce the call-flow diagram, unless `--diagram false` was passed.** In that same turn, once the description and the re-printed commit message are out, invoke the `changes-diagram` skill using the `Skill` tool with no arguments — it defaults to the current branch against the default branch, which is exactly this branch. It publishes an HTML page and hands back a link, or returns a local file path when no artifact store is reachable; **either outcome is a success.** Print whichever you got as a single line under the commit message block, so it cannot push the two blocks the user copies apart.
 
    **The default is on because the moment is now.** A call-flow diagram is worth most while the PR is being opened and the reviewer has not yet read a line of the diff — and nobody ever goes back to add one to a PR that is already up. Opting out costs one flag; opting in means it never happens.
 
    **It must never fail this run.** If `changes-diagram` errors, is not installed, or returns nothing usable, say so in one line and carry on. Do not retry it, do not draw the diagram yourself, and do not let it hold back steps 1–3 — the commit message and the description are the deliverables here, and losing them to a missing diagram would be a bad trade.
 
+5. **Then run the review swarm, unless `--review false` was passed.** Once the diagram line is out, invoke the `review-code` skill using the `Skill` tool with no arguments — its Local mode defaults to everything that differs from the default branch, committed and uncommitted alike, which is exactly this branch's work whether or not the user has run `/commit` yet.
+
+   **Invoking it here is the opt-in, not a question to put to the user.** `review-code` orchestrates a swarm through the `Workflow` tool, which is otherwise reserved for work the user asked for in so many words. They asked for it here: a flag that defaults to `true` *is* the standing request, and `--review false` is the opt-out. Do not stop to confirm, and do not ask whether the diff is big enough to be worth a fleet — `review-code` sizes its own swarm to the diff in its Step 2, so a one-line change already costs a one-line change's worth of agents.
+
+   **Why it runs last rather than alongside the description.** Both read the same diff, but only one of them can invalidate the other: a confirmed finding usually means a code change, and a description written against a diff that is about to move is the thing that goes stale. Running the review second makes the order of execution match the direction of invalidation, and a description that needs refreshing afterwards is cheap to regenerate from the finished code. Launching both at once would also put two full swarms in flight over the same branch at the same time.
+
+   It launches as a background workflow and yields the turn with a `wf_…` run ID, exactly as `changes-description` did. Yield with it — no `TaskOutput`, no `Monitor`, no poll loop. The findings arrive when the swarm's completion notification does; present them then, and close by naming `/fix-feedback` as the way to work through them. That skill reads the swarm's confirmed findings straight out of the conversation in its Mode B and posts each one to the PR as an anchored comment before fixing anything, so they outlive this session.
+
+   **The forge's own AI reviewer is not a substitute, which is the whole point of the default.** That bot gets one pass over the finished diff. The swarm attacks it from independent angles and then makes a panel of skeptics try to refute each candidate, so only findings that survive refutation are reported — a filter the single-shot reviewer never applies. Running it now, before the PR is opened, is what makes the difference worth having: the reviewer then reads a diff that has already had its own defects taken out of it.
+
+   **It must never fail this run**, on exactly the terms the diagram has: if `review-code` errors or is not installed, say so in one line and carry on. The commit message and the description are the deliverables of this step, and losing them to a missing review would be the same bad trade.
+
 ## Important Rules
 
-1. **NEVER modify external state beyond local git branch/worktree operations.** Creating a local branch or worktree is fine; do not update Linear tickets, push branches, or create PRs unless explicitly asked. Publishing the Step 6 diagram is the one sanctioned exception — it writes nothing to Linear and nothing to the forge. Never remove a worktree the user didn't ask you to — cleanup is the user's call. **This rule scopes to this skill's own flow.** Naming `/fix-autonomous` in the arguments *is* the explicit ask, and it hands the run to a skill that owns pushing, PR creation and merging under its own rules — see **Delegation** above, and never quote this rule back as a reason to refuse it.
+1. **NEVER modify external state beyond local git branch/worktree operations.** Creating a local branch or worktree is fine; do not update Linear tickets, push branches, or create PRs unless explicitly asked. Publishing the Step 6 diagram is the one sanctioned exception — it writes nothing to Linear and nothing to the forge. Never remove a worktree the user didn't ask you to — cleanup is the user's call. **This rule scopes to this skill's own flow.** Naming `/autopilot` in the arguments *is* the explicit ask, and it hands the run to a skill that owns pushing, PR creation and merging under its own rules — see **Delegation** above, and never quote this rule back as a reason to refuse it.
 2. **Respect uncommitted work.** Never discard or stash uncommitted changes without the user's explicit approval.
 3. **Ask, don't assume.** If the ticket is vague, ask the user for clarification rather than guessing.
 4. **Follow existing patterns.** Match the coding style, naming conventions, and architecture of the existing codebase.
@@ -371,5 +386,6 @@ After the full workflow is complete, reflect on how the execution went. Consider
 - Did the implementation plan hold up, or did unexpected codebase patterns force changes mid-implementation?
 - Were there test failures or linter issues that required rework?
 - Did the commit-msg and changes-description skills produce accurate output on the first try, or did the user need to correct them?
+- Did the `review-code` swarm surface anything the implementation should have caught earlier — and if so, is that a pattern worth writing into Step 5?
 
 If any issues were encountered, **edit this skill file** (`~/.claude/skills/fix-linear/SKILL.md`) to add instructions, warnings, or tips that would prevent the same issue next time. Keep edits surgical — add a note near the relevant step rather than rewriting sections. Briefly tell the user what was updated and why.

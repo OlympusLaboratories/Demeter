@@ -14,27 +14,28 @@ Implement a change the user described in plain words. This is `fix-linear` with 
 | *(everything left after the flags)* | The problem statement — what to fix, change, or build. Required: if nothing is left over, ask the user what they want done and stop. |
 | `--branch default` | Work on the repository's **default branch** directly — no feature branch, no worktree, no pull request. The default, and the reason this skill exists apart from `fix-linear`. |
 | `--branch new` | Cut `<FIRST_NAME>/<slug>` off the default branch and set up a worktree, exactly as `fix-linear` does. |
-| `--one-shot-description [true\|false]` | Default `true`. Passed through to `changes-description` as `--one-shot`: one writer plus the measured word budget and the fact-check — 4–6 agents instead of 20. `false` runs the full four-persona debate. |
-| `--changes-diagram [true\|false]` | Default `false`. `true` adds a call-flow diagram of the change (Step 5c). |
+| `--quick-description [true\|false]` | Default `true`. Passed through to `changes-description` as `--one-shot`: one writer plus the measured word budget and the fact-check — 4–6 agents instead of 20. `false` runs the full four-persona debate. |
+| `--diagram [true\|false]` | Default `false`. `true` adds a call-flow diagram of the change (Step 5c). |
+| `--review [true\|false]` | Default `false`. `true` runs the `review-code` adversarial swarm over the change once the description is away (Step 5e). |
 | `in place` / `--here` / `no worktree` | Only meaningful once the run is on `--branch new`: take the branch in the current working tree instead of a worktree (Step 2-INPLACE). |
-| `/fix-autonomous` (anywhere in the arguments) | A delegation directive, never part of the problem statement. Hand the whole invocation to `fix-autonomous`. See **Delegation** below. |
+| `/autopilot` (anywhere in the arguments) | A delegation directive, never part of the problem statement. Hand the whole invocation to `autopilot`. See **Delegation** below. |
 
-Parse the flags out of `$ARGUMENTS` **first**; whatever remains is the problem statement. A bare `--one-shot-description` or `--changes-diagram` means `true`. Leaving a flag unparsed hands it to the planner as part of the request, which produces a plan to implement the words "branch new".
+Parse the flags out of `$ARGUMENTS` **first**; whatever remains is the problem statement. A bare `--quick-description` or `--diagram` means `true`. Leaving a flag unparsed hands it to the planner as part of the request, which produces a plan to implement the words "branch new".
 
-### Delegation: `/fix-autonomous` in the arguments
+### Delegation: `/autopilot` in the arguments
 
-A `/fix-autonomous` or `fix-autonomous` token anywhere in `$ARGUMENTS` is a **delegation directive, not part of the problem statement and not a question to put back to the user**. They are composing two skills, which is what naming one skill inside another's invocation means everywhere in this family: *do this freeform request, and drive it the whole way without checking in.* Strip the token, invoke `fix-autonomous` with the `Skill` tool, pass the remaining flags and the problem statement through verbatim, and let it call back into this skill from its own Step 1.
+A `/autopilot` or `autopilot` token anywhere in `$ARGUMENTS` is a **delegation directive, not part of the problem statement and not a question to put back to the user**. They are composing two skills, which is what naming one skill inside another's invocation means everywhere in this family: *do this freeform request, and drive it the whole way without checking in.* Strip the token, invoke `autopilot` with the `Skill` tool, pass the remaining flags and the problem statement through verbatim, and let it call back into this skill from its own Step 1.
 
 **Do not ask how far the run should go.** The token already answered that, and asking is worse than a wasted turn: it reads as not having understood the invocation, and it strands a user who deliberately set the run up to need nothing from them. The only thing worth saying out loud is one line naming the delegation as you make it.
 
 Flags cross the hand-off in both directions, so forward every one you do not own rather than treating it as unparsed junk:
 
-- **This skill's flags** — `--branch`, `--one-shot-description`, `--changes-diagram` — are passed on, and `fix-autonomous` hands them back when it re-enters here. Note it overrides `--branch` to `new`: an unattended run always produces a pull request, because review is the only thing between it and the default branch.
-- **`fix-autonomous`'s own flags** — `--merge`, `--max-rounds` — mean nothing to this skill and must survive untouched. `--merge false` is how the user says *take it to green, reviewed and ready, then stop*; dropping it silently merges something they wanted held for a second pair of eyes.
+- **This skill's flags** — `--branch`, `--quick-description`, `--diagram`, `--review` — are passed on, and `autopilot` hands them back when it re-enters here. Note it overrides `--branch` to `new`: an unattended run always produces a pull request, because review is the only thing between it and the default branch.
+- **`autopilot`'s own flags** — `--merge`, `--max-rounds` — mean nothing to this skill and must survive untouched. `--merge false` is how the user says *take it to green, reviewed and ready, then stop*; dropping it silently merges something they wanted held for a second pair of eyes.
 
-Reaching `fix-autonomous` this way loosens nothing — it owns the push, the pull request and the merge, and performs them under its own rules. What it does mean is that Important Rule 1 below binds **this skill's own flow**, not a run that has been handed over. Never cite that rule back as a reason to refuse the delegation.
+Reaching `autopilot` this way loosens nothing — it owns the push, the pull request and the merge, and performs them under its own rules. What it does mean is that Important Rule 1 below binds **this skill's own flow**, not a run that has been handed over. Never cite that rule back as a reason to refuse the delegation.
 
-**These defaults are deliberately the opposite of `fix-linear`'s**, which defaults to a worktree, a full description debate, and a diagram. Freeform work is usually small and local, so the cheap path is the right default and the user escalates explicitly — a ticket exists precisely because somebody judged the work big enough to write down first.
+**These defaults are deliberately the opposite of `fix-linear`'s**, which defaults to a worktree, a full description debate, a diagram, and a review swarm. Freeform work is usually small and local, so the cheap path is the right default and the user escalates explicitly — a ticket exists precisely because somebody judged the work big enough to write down first.
 
 ## Step 1: Understand What Is Being Asked
 
@@ -312,7 +313,7 @@ After implementation is complete, give the user a summary of what was changed, w
 
 Immediately after implementation is complete — do not wait for the user to commit or ask for these.
 
-**What these are for depends on the branch mode, and the difference is worth stating plainly.** On `--branch new` (or any escalated run) this is the `fix-linear` path: a commit message and a description the user pastes into the PR they open later. On `--branch default` **there is no pull request** — nothing is opened, nothing is reviewed, nothing has a description field. So the description is a change summary for the commit body and for the user's own reference, and `--changes-diagram` defaults to `false` precisely because there is nothing to attach a diagram to.
+**What these are for depends on the branch mode, and the difference is worth stating plainly.** On `--branch new` (or any escalated run) this is the `fix-linear` path: a commit message and a description the user pastes into the PR they open later. On `--branch default` **there is no pull request** — nothing is opened, nothing is reviewed, nothing has a description field. So the description is a change summary for the commit body and for the user's own reference, and `--diagram` defaults to `false` precisely because there is nothing to attach a diagram to.
 
 ### 5a. Commit message
 
@@ -322,11 +323,11 @@ Invoke the `commit-msg` skill using the `Skill` tool.
 
 **Immediately** invoke the `changes-description` skill using the `Skill` tool. Do NOT wait for the user to respond to the commit message first — invoke it in the same turn, back-to-back with the commit message, so the work is already running while they read the commit message. The `commit-msg` skill ends with a suggestion to run `/commit`, but you must continue and invoke `changes-description` before yielding to the user.
 
-Pass `--one-shot` unless `--one-shot-description false` was given: a single writer plus the measured word budget and the fact-check, which is the right shape for a change small enough to have gone to the default branch. Pass nothing (the full debate) when the flag is `false` or the user asked for a thorough description.
+**`--quick-description` is this skill's flag; `--one-shot` is what `changes-description` is actually handed.** The names do not line up — that skill also has a `--quick`, which is its *middle* setting and not what this maps to. Pass `--one-shot` unless `--quick-description false` was given: a single writer plus the measured word budget and the fact-check, which is the right shape for a change small enough to have gone to the default branch. Pass nothing (the full debate) when the flag is `false` or the user asked for a thorough description.
 
 If `changes-description` launches its debate as a background workflow, it prints a run ID and yields the turn — that is correct, not a stall. Yield with it: the description arrives when the completion notification does, and blocking on it (`TaskOutput`, `Monitor`, a poll loop) only takes the user's prompt line away for the length of the run.
 
-### 5c. Call-flow diagram (`--changes-diagram true` only)
+### 5c. Call-flow diagram (`--diagram true` only)
 
 Skipped entirely by default. When the flag is `true`, invoke the `changes-diagram` skill using the `Skill` tool once the description is away — it diffs the branch against its base and publishes one self-contained page: a call-flow chart of the changed functions, or a file-and-import map when the change is Terraform, Go or TypeScript. Pass the base explicitly on the `--branch default` path (`origin/<DEFAULT_BRANCH>`), since there is no feature branch for it to infer one from. If the skill is not installed on this machine, say so rather than hand-rolling a diagram.
 
@@ -334,9 +335,23 @@ Skipped entirely by default. When the flag is `true`, invoke the `changes-diagra
 
 The description output is long, so by the time it finishes the commit message from 5a has scrolled far up the terminal. In the turn that presents the description, close by repeating it — unchanged from what `commit-msg` produced, no re-generation, no re-wording, no summary of it — in its own fenced block under a `Commit message` heading, so both blocks the user copies sit next to each other at the bottom. If the user corrected the commit message in between, repeat the corrected version.
 
+### 5e. Review swarm (`--review true` only)
+
+Skipped entirely by default, for the same reason `--diagram` is: the default path here puts a small change straight onto the default branch, where there is no review gate to feed and an adversarial swarm is more machinery than the work is worth. `fix-linear` defaults the flag the other way round, because a ticket exists precisely because somebody judged the work big enough to write down first.
+
+When the flag is `true`, invoke the `review-code` skill using the `Skill` tool once the commit message has been re-printed. It prints only its run-ID block before yielding, so the two blocks the user copies stay within a screen of the prompt.
+
+**Pass the base explicitly on the `--branch default` path** — `--base <DEFAULT_BRANCH>`, the bare branch name rather than `origin/<DEFAULT_BRANCH>`, since `review-code` prepends the remote itself when it computes the merge-base. On an escalated `--branch new` run pass no argument at all and let it infer the base from the branch, which is what it does best.
+
+Invoking it is the opt-in — `--review true` was the user asking for a swarm, and `review-code` sizes its own fleet to the diff — so do not stop to confirm that one is warranted.
+
+It launches as a background workflow and yields the turn with a `wf_…` run ID. Yield with it, present the findings when the completion notification arrives, and name `/fix-feedback` as the way to work through them. If the skill is not installed on this machine, say so in one line rather than hand-rolling a review.
+
+**On `--branch default` the findings land on code that is already on the default branch**, and that is the one thing worth saying out loud when you present them: there was no review gate between this change and every other checkout, so a confirmed finding is a follow-up commit rather than a comment on a pull request. That asymmetry is also the argument for passing `--review true` on anything that turned out bigger than it looked.
+
 ## Important Rules
 
-1. **NEVER push, NEVER open a pull request, and never modify external state.** Local git is yours: creating a branch, creating a worktree, and — when the user asks for it — committing are all fine. **`--branch default` means the commit lands on the default branch, not that it leaves this machine.** That distinction matters more here than anywhere else in these skills: a stray push of a feature branch creates a branch nobody asked for, while a stray push of the default branch is a direct write to the branch every other checkout, every CI pipeline, and (with Atlantis) every apply is cut from. So do not run `git push` in any form — not with `-u`, not as a `--dry-run` "check", not because "it would be rejected anyway" — and do not create a pull request. Pushing is the user's explicit action, always. Never remove a worktree the user didn't ask you to — cleanup is the user's call. **This rule scopes to this skill's own flow.** Naming `/fix-autonomous` in the arguments *is* the user's explicit action, and it hands the run to a skill that owns pushing and merging under its own rules — see **Delegation** above, and never quote this rule back as a reason to refuse it.
+1. **NEVER push, NEVER open a pull request, and never modify external state.** Local git is yours: creating a branch, creating a worktree, and — when the user asks for it — committing are all fine. **`--branch default` means the commit lands on the default branch, not that it leaves this machine.** That distinction matters more here than anywhere else in these skills: a stray push of a feature branch creates a branch nobody asked for, while a stray push of the default branch is a direct write to the branch every other checkout, every CI pipeline, and (with Atlantis) every apply is cut from. So do not run `git push` in any form — not with `-u`, not as a `--dry-run` "check", not because "it would be rejected anyway" — and do not create a pull request. Pushing is the user's explicit action, always. Never remove a worktree the user didn't ask you to — cleanup is the user's call. **This rule scopes to this skill's own flow.** Naming `/autopilot` in the arguments *is* the user's explicit action, and it hands the run to a skill that owns pushing and merging under its own rules — see **Delegation** above, and never quote this rule back as a reason to refuse it.
 2. **Respect uncommitted work.** Never discard or stash uncommitted changes without the user's explicit approval. A dirty tree escalates the branch mode (Step 2b); it never gets cleared to keep the cheap path.
 3. **Ask, don't assume.** If the problem statement is vague, ask the user rather than guessing — and where the statement and the code disagree, the code wins and you say so out loud.
 4. **Follow existing patterns.** Match the coding style, naming conventions, and architecture of the existing codebase.
