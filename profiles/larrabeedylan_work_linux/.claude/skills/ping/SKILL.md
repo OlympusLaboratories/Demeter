@@ -77,7 +77,7 @@ Notice what the good ones share: a concrete noun from the actual work, and an ex
 ```bash
 REPO=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 BRANCH=$(git branch --show-current 2>/dev/null)
-SESSION="${CLAUDE_SESSION_ID:-}"
+SESSION="${CLAUDE_CODE_SESSION_ID:-${CLAUDE_SESSION_ID:-}}"
 echo "repo=$REPO branch=$BRANCH session=${SESSION:0:8}"
 ```
 
@@ -95,7 +95,7 @@ Fill in `LEVEL`, `TITLE` and `BODY` from Steps 1 and 2, then run the whole block
 set -o pipefail
 REPO=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 BRANCH=$(git branch --show-current 2>/dev/null)
-SESSION="${CLAUDE_SESSION_ID:-}"
+SESSION="${CLAUDE_CODE_SESSION_ID:-${CLAUDE_SESSION_ID:-}}"
 STATE_DIR="$HOME/.claude/notify-state/sessions"
 
 REPLY=$(python3 - "$REPO" "$BRANCH" "$SESSION" "$STATE_DIR" <<'PY' | "$HOME/.claude/scripts/notify-send.sh" send
