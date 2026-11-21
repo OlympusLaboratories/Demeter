@@ -6,7 +6,7 @@ import urllib.error
 import urllib.request
 
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".claude", "notify.json")
-POST_TIMEOUT = 5
+POST_TIMEOUT = 20
 BODY_LIMIT = 3000
 
 GLYPHS = {

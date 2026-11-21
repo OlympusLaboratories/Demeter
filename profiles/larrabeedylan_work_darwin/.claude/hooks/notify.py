@@ -3,6 +3,7 @@ import calendar
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -17,15 +18,54 @@ SESSIONS = os.path.join(STATE, "sessions")
 LOG_PATH = os.path.join(STATE, "notify.log")
 LOG_LIMIT = 1024 * 1024
 PLACEHOLDER = "REPLACE_ME"
-SEND_TIMEOUT = 10
+SEND_TIMEOUT = 30
 BODY_LIMIT = 1200
 TAIL_CHUNK = 262144
 TAIL_LIMIT = 8 * 1024 * 1024
+SUMMARY_MODEL = "claude-haiku-4-5-20251001"
+SUMMARY_MAX_WORDS = 30
+SUMMARY_MIN_CHARS = 200
+SUMMARY_MAX_INPUT = 8000
+SUMMARY_TIMEOUT = 180
+CONDENSE_LIMIT = 240
+SUMMARY_GUARD = "NOTIFY_SUMMARIZING"
+SUMMARY_SETTINGS = os.path.join(STATE, "summarize-settings.json")
+SUMMARY_CWD = os.path.join(STATE, "summarize-cwd")
+CLI_CANDIDATES = (
+    "~/.claude/local/claude",
+    "~/.local/bin/claude",
+    "/opt/homebrew/bin/claude",
+    "/usr/local/bin/claude",
+    "/usr/bin/claude",
+    "~/.npm-global/bin/claude",
+    "~/.local/share/mise/shims/claude",
+    "~/.volta/bin/claude",
+    "~/.bun/bin/claude",
+)
+CLI_SEARCH_PATH = (
+    "~/.claude/local",
+    "~/.local/bin",
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "~/.npm-global/bin",
+    "~/.local/share/mise/shims",
+)
+
+SUMMARY_PROMPT = (
+    "Rewrite the text below as ONE push-notification line for a phone lock screen."
+    " Reply with that line only: no markdown, no quotes, no preamble, no trailing list."
+    " Use at most %d words."
+    " Lead with the outcome, naming concrete nouns from the actual work."
+    " Then say what the user has to do, or state plainly that nothing is needed."
+    " Never invent a detail that is not in the text below.\n\n%s"
+)
 
 DEFAULTS = {
     "min_turn_seconds": 60,
     "min_interval_seconds": 30,
     "quiet_hours": None,
+    "only_when_armed": True,
     "events": {
         "stop": True,
         "permission": True,
@@ -251,11 +291,10 @@ def answers_question(content, asked):
     return False
 
 
-def turn_seconds(transcript_path):
+def handoff_at(transcript_path):
     if not transcript_path or not os.path.isfile(transcript_path):
         return None
     try:
-        ended = os.path.getmtime(transcript_path)
         with open(transcript_path, "rb") as handle:
             handle.seek(0, os.SEEK_END)
             size = handle.tell()
@@ -268,12 +307,183 @@ def turn_seconds(transcript_path):
                     chunk = chunk.split("\n", 1)[-1]
                 began = handoff_epoch(chunk)
                 if began is not None:
-                    return max(0.0, ended - began)
+                    return began
                 if start == 0 or window >= TAIL_LIMIT:
                     return None
                 window *= 4
     except OSError:
         return None
+
+
+def turn_seconds(transcript_path):
+    began = handoff_at(transcript_path)
+    if began is None:
+        return None
+    try:
+        return max(0.0, os.path.getmtime(transcript_path) - began)
+    except OSError:
+        return None
+
+
+def armed_state(state):
+    if isinstance(state.get("armed_at"), (int, float)):
+        return True, None
+    return False, "session not armed - no ping has opted it in"
+
+
+def armed_sessions():
+    try:
+        names = os.listdir(SESSIONS)
+    except OSError:
+        return []
+    found = []
+    for name in sorted(names):
+        if not name.endswith(".json"):
+            continue
+        state = read_json(os.path.join(SESSIONS, name))
+        if isinstance(state, dict) and isinstance(state.get("armed_at"), (int, float)):
+            found.append(name[:-5])
+    return found
+
+
+def disarm_sessions():
+    cleared = 0
+    for session in armed_sessions():
+        path = session_path(session)
+        state = read_json(path)
+        if not isinstance(state, dict):
+            continue
+        state.pop("armed_at", None)
+        if write_json(path, state):
+            cleared += 1
+    return cleared
+
+
+def strip_markdown(text):
+    text = re.sub(r"```.*?```", " ", text or "", flags=re.S)
+    text = re.sub(r"`([^`]*)`", r"\1", text)
+    text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"^\s{0,3}#{1,6}\s*", "", text, flags=re.M)
+    text = re.sub(r"^\s*\|.*$", " ", text, flags=re.M)
+    text = re.sub(r"^\s*[-*+]\s+", "", text, flags=re.M)
+    text = re.sub(r"[*_>]", "", text)
+    return " ".join(text.split())
+
+
+def condense(text, limit=CONDENSE_LIMIT):
+    flat = strip_markdown(text)
+    if len(flat) <= limit:
+        return flat
+    cut = flat[:limit]
+    stop = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+    if stop > limit // 3:
+        return cut[:stop + 1]
+    return cut.rstrip() + "\u2026"
+
+
+def summarizer_path(settings):
+    explicit = settings.get("command")
+    if explicit:
+        path = os.path.expanduser(str(explicit))
+        return path if os.access(path, os.X_OK) else None
+    for candidate in CLI_CANDIDATES:
+        path = os.path.expanduser(candidate)
+        if os.access(path, os.X_OK) and not os.path.isdir(path):
+            return path
+    search = os.pathsep.join(
+        [os.path.expanduser(d) for d in CLI_SEARCH_PATH]
+        + (os.environ.get("PATH") or "").split(os.pathsep))
+    return shutil.which("claude", path=search)
+
+
+def summarizer_env(binary):
+    environ = dict(os.environ)
+    environ.pop("ANTHROPIC_API_KEY", None)
+    environ[SUMMARY_GUARD] = "1"
+    extra = [os.path.dirname(binary)] + [os.path.expanduser(d) for d in CLI_SEARCH_PATH]
+    present = (environ.get("PATH") or "").split(os.pathsep)
+    environ["PATH"] = os.pathsep.join(
+        [d for d in extra if d and d not in present] + present)
+    return environ
+
+
+def summarizer_cwd():
+    try:
+        os.makedirs(SUMMARY_CWD, exist_ok=True)
+        return SUMMARY_CWD
+    except OSError:
+        return None
+
+
+def summarizer_settings():
+    try:
+        os.makedirs(STATE, exist_ok=True)
+        with open(SUMMARY_SETTINGS, "w") as handle:
+            json.dump({"hooks": {}}, handle)
+        return SUMMARY_SETTINGS
+    except OSError:
+        return None
+
+
+def window(text, limit=SUMMARY_MAX_INPUT):
+    if len(text) <= limit:
+        return text
+    head = limit * 2 // 3
+    return text[:head].rstrip() + " [...] " + text[-(limit - head):].lstrip()
+
+
+def summarize(text, config):
+    settings = config.get("summarize")
+    if not isinstance(settings, dict):
+        return None, "no summarize section"
+    if settings.get("enabled") is False:
+        return None, "disabled"
+    if os.environ.get(SUMMARY_GUARD):
+        return None, "already inside a summarizer"
+    binary = summarizer_path(settings)
+    if not binary:
+        return None, "no claude cli found"
+    words = settings.get("max_words") or SUMMARY_MAX_WORDS
+    argv = [
+        binary, "-p",
+        "--model", settings.get("model") or SUMMARY_MODEL,
+        "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+    ]
+    bare = summarizer_settings()
+    if bare:
+        argv += ["--settings", bare]
+    argv.append(SUMMARY_PROMPT % (words, window(strip_markdown(text))))
+    try:
+        done = subprocess.run(
+            argv, input="", capture_output=True, text=True,
+            env=summarizer_env(binary), cwd=summarizer_cwd(),
+            timeout=settings.get("timeout") or SUMMARY_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return None, "summarizer timed out"
+    except (OSError, subprocess.SubprocessError) as error:
+        return None, "summarizer failed: %r" % (error,)
+    if done.returncode != 0:
+        return None, "summarizer exit %d: %s" % (
+            done.returncode, " ".join((done.stderr or "").split())[:160])
+    line = " ".join((done.stdout or "").split())
+    if not line:
+        return None, "summarizer returned nothing"
+    parts = line.split()
+    if len(parts) > words:
+        line = " ".join(parts[:words]).rstrip(",;:") + "\u2026"
+    return line, None
+
+
+def shorten(raw, kind, config):
+    text = (raw or "").strip()
+    if not text:
+        return "", "no body"
+    if len(text) < SUMMARY_MIN_CHARS:
+        return condense(text), "already short"
+    line, problem = summarize(text, config)
+    if line:
+        return line, "summarized %d->%d chars" % (len(text), len(line))
+    return condense(text), "condensed, %s" % problem
 
 
 def send(envelope):
@@ -352,17 +562,22 @@ def handle(payload):
         return "skip: quiet hours"
 
     _, away = away_until()
-
-    if payload.get("hook_event_name") == "Stop" and not away:
-        elapsed = turn_seconds(payload.get("transcript_path"))
-        minimum = config["min_turn_seconds"]
-        if elapsed is not None and elapsed < minimum:
-            return "skip: turn %.0fs < %ss" % (elapsed, minimum)
-        if elapsed is None:
-            return "skip: turn length unknown"
-
     session_id = payload.get("session_id") or "unknown"
     state = read_json(session_path(session_id), {}) or {}
+
+    if not away:
+        armed, reason = armed_state(state)
+        if config["only_when_armed"]:
+            if not armed:
+                return "skip: %s" % reason
+        elif payload.get("hook_event_name") == "Stop" and not armed:
+            elapsed = turn_seconds(payload.get("transcript_path"))
+            minimum = config["min_turn_seconds"]
+            if elapsed is not None and elapsed < minimum:
+                return "skip: turn %.0fs < %ss" % (elapsed, minimum)
+            if elapsed is None:
+                return "skip: turn length unknown"
+
     now = time.time()
     last = state.get("last_sent")
     if isinstance(last, (int, float)) and now - last < config["min_interval_seconds"]:
@@ -371,9 +586,10 @@ def handle(payload):
     cwd = payload.get("cwd") or os.getcwd()
     repo = repo_label(cwd)
     branch = branch_label(cwd)
+    body, how = shorten(body_for(kind, payload), kind, config)
     envelope = {
         "title": "%s %s" % (repo, label),
-        "body": clip(body_for(kind, payload)),
+        "body": body,
         "session": session_id[:8],
         "repo": repo,
         "branch": branch,
@@ -392,12 +608,13 @@ def handle(payload):
     if thread:
         state["thread"] = thread
     write_json(session_path(session_id), state)
-    return "sent %s for %s" % (kind, repo)
+    return "sent %s for %s (%s)" % (kind, repo, how)
 
 
 def cmd_away(args):
     if args and args[0] == "status":
         print(describe_away())
+        print("sessions opted in: %d" % len(armed_sessions()))
         return 0
     if args and args[0] in ("off", "back"):
         write_json(AWAY_PATH, {"away": False, "until": None})
@@ -415,6 +632,25 @@ def cmd_away(args):
     return 0
 
 
+def cmd_disarm(args):
+    target = args[0] if args else ""
+    if not target:
+        print("usage: notify.py --disarm <session-id>|all", file=sys.stderr)
+        return 2
+    if target == "all":
+        cleared = disarm_sessions()
+        print("disarmed %d session%s" % (cleared, "" if cleared == 1 else "s"))
+        return 0
+    path = session_path(target)
+    state = read_json(path)
+    if not isinstance(state, dict) or state.pop("armed_at", None) is None:
+        print("session %s was not armed" % target[:8])
+        return 0
+    write_json(path, state)
+    print("disarmed session %s" % target[:8])
+    return 0
+
+
 def cmd_test():
     config, problem = load_config()
     if not config:
@@ -428,7 +664,44 @@ def cmd_test():
     output = (done.stdout or "").strip() or (done.stderr or "").strip()
     print(output or ("ok" if done.returncode == 0 else "failed"))
     print("away state: %s" % describe_away())
+    print("sessions opted in: %d" % len(armed_sessions()))
+    report_summarizer(config)
     return done.returncode
+
+
+def report_summarizer(config):
+    settings = config.get("summarize")
+    if not isinstance(settings, dict):
+        print("summarizer: no summarize section in %s" % CONFIG_PATH)
+        return
+    if settings.get("enabled") is False:
+        print("summarizer: switched off in %s" % CONFIG_PATH)
+        return
+    binary = summarizer_path(settings)
+    if not binary:
+        print("summarizer: no claude cli found - notifications will be condensed, not summarized")
+        print("  looked in: %s" % ", ".join(CLI_CANDIDATES))
+        print("  set summarize.command in %s to point at it" % CONFIG_PATH)
+        return
+    print("summarizer: %s (model %s, %d words, %ss budget)" % (
+        binary, settings.get("model") or SUMMARY_MODEL,
+        settings.get("max_words") or SUMMARY_MAX_WORDS,
+        settings.get("timeout") or SUMMARY_TIMEOUT))
+    sample = (
+        "The migration finished. I moved all fourteen cron jobs onto the new scheduler,"
+        " updated the terraform module that provisions them, and the full test suite is"
+        " green. There is nothing blocking and nothing for you to do, though the change"
+        " is worth a look when you are back at a keyboard since it touches production"
+        " scheduling. I have not committed any of it yet."
+    )
+    began = time.time()
+    line, problem = summarize(sample, config)
+    took = time.time() - began
+    if line:
+        print("  working, %.1fs: %s" % (took, line))
+    else:
+        print("  FAILED after %.1fs: %s" % (took, problem))
+        print("  notifications still work; they will be condensed instead of summarized")
 
 
 def main():
@@ -437,8 +710,12 @@ def main():
         return cmd_away(args[1:])
     if args and args[0] == "--test":
         return cmd_test()
+    if args and args[0] == "--disarm":
+        return cmd_disarm(args[1:])
     if args:
-        print("usage: notify.py [--test | --away [<duration>|off|status]]", file=sys.stderr)
+        print(
+            "usage: notify.py [--test | --away [<duration>|off|status]"
+            " | --disarm <session-id>|all]", file=sys.stderr)
         return 2
     payload = json.load(sys.stdin)
     log("%s %s" % (payload.get("hook_event_name"), handle(payload)))

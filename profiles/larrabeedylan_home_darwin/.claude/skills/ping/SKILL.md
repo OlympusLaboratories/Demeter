@@ -11,6 +11,23 @@ The transport (and its credentials) live in `~/.claude/scripts/notify-send.sh` a
 
 **Parameter:** `$ARGUMENTS` — an optional level word, plus an optional note about what to say. Both may be absent.
 
+## Step 0: Is This a Switch-Off?
+
+If `$ARGUMENTS` is `off`, `quiet`, `disarm` or `mute`, on its own, the user is switching this session's notifications off rather than asking for a message. Run this and stop — **send nothing**:
+
+```bash
+SESSION="${CLAUDE_CODE_SESSION_ID:-${CLAUDE_SESSION_ID:-}}"
+if [ -n "$SESSION" ]; then
+  "$HOME/.claude/hooks/notify.py" --disarm "$SESSION"
+else
+  echo "no session id — nothing to disarm"
+fi
+```
+
+Then report in one line that this session will not notify again until the next ping. Sending a notification on this path would be precisely backwards: the user is at the keyboard telling you they are at the keyboard.
+
+Everything below is for an actual ping.
+
 ## Step 1: Pick the Level
 
 Take the level from `$ARGUMENTS` if it names one. Otherwise infer it from the state of the session.
@@ -31,12 +48,16 @@ Whatever in `$ARGUMENTS` is not a level word is a note from the user about what 
 
 The title is `<repo> <short label>` — the same shape the automatic notifications use: `demeter finished`, `ingestion needs a decision`, `billing-api failed`.
 
-The body is **one or two short lines** and must answer both of these:
+The body is **one sentence, at most two, and never more than 30 words**. That is a hard budget, not a style note. It must answer both of these:
 
 1. What was this session working on?
 2. What does it need from the user — or does it need nothing?
 
-Take the context from the session, never from imagination. If the work cannot be described in a line, that is a signal the line is too vague, not that the line should be longer. Only the first ~140 characters reach a lock screen, so put the answer first and detail second.
+Take the context from the session, never from imagination. If the work cannot be described in 30 words, that is a signal the line is too vague, not that the budget is too small. Only the first ~140 characters reach a lock screen, so put the answer first and the detail second.
+
+**Never paste your chat response into the body.** A turn's closing message is written for someone reading a terminal with the diff in front of them — it has headings, tables, file links and backticks, none of which survive a notification, and it is routinely twenty times the budget. Write the line from scratch, for someone holding a phone who cannot see any of that.
+
+Before sending, count. If the body is over 30 words, cut it rather than sending it long — drop the detail and keep the outcome and the ask, in that order. These are the things to cut first, in order: file paths and counts, tool and library names, anything about how the work was done, and every clause that would still be true if the work had gone differently.
 
 ### Worked examples
 
@@ -124,7 +145,7 @@ PY
 ) || { echo "ping NOT delivered — notify-send.sh failed, see its stderr above" >&2; exit 1; }
 
 python3 - "$SESSION" "$STATE_DIR" "$REPLY" <<'PY'
-import json, os, re, sys
+import json, os, re, sys, time
 
 session, state_dir, reply = sys.argv[1:4]
 if not session:
@@ -133,8 +154,6 @@ try:
     thread = json.loads(reply or "{}").get("thread")
 except ValueError:
     thread = None
-if not thread:
-    raise SystemExit(0)
 path = os.path.join(state_dir, re.sub(r"[^A-Za-z0-9_-]", "-", session)[:80] + ".json")
 try:
     with open(path) as handle:
@@ -143,17 +162,37 @@ except (OSError, ValueError):
     state = {}
 if not isinstance(state, dict):
     state = {}
-state["thread"] = thread
+state["armed_at"] = time.time()
+if thread:
+    state["thread"] = thread
 os.makedirs(state_dir, exist_ok=True)
 with open(path, "w") as handle:
     json.dump(state, handle)
 PY
 ```
 
-Two things that block are worth understanding rather than copying:
+Three things that block are worth understanding rather than copying:
 
 - **Reading the thread first** is what makes the ping land in the same conversation as this session's other notifications instead of starting a new one. The state file may not exist — no notification has fired on this machine yet, or not for this session. That is the normal case, not an error: an unreadable or absent file means no thread, and the ping goes out unthreaded.
 - **Writing the thread back is read-modify-write.** The file also holds `last_sent` and `last_kind`, which the `notify.py` hook owns. Overwriting the file with `{"thread": ...}` alone would drop the hook's rate-limit state. Load, set one key, dump. Create `notify-state/sessions/` if it is missing.
+- **`armed_at` is written whether or not a thread came back**, which is why it sits outside the `if thread:` branch. A transport that cannot thread returns no id, and arming the session is the more important of the two jobs — gating it on a thread id would silently leave the session muted on exactly the machines where threading is unavailable.
+
+## What a Ping Opts Into
+
+Sending the message is half of what this skill does. The other half is **arming the session**: `armed_at` in the session state is what switches the automatic `notify.py` notifications on for this session and nothing else.
+
+Automatic notifications are off by default in every session. That is deliberate — a hook that fires on every turn over a minute is indistinguishable from no notifications at all once a dozen sessions are live, because the user stops reading them. So the user opts a session in by asking for a ping, which is the same gesture as saying "I am walking away from this one".
+
+What that means in practice:
+
+- **Before any ping**, the session is silent. `notify.py` logs `skip: session not armed` and sends nothing, however long the turn ran or however stuck it got.
+- **After a ping**, that session notifies on the events its config enables — finishing a turn, needing permission, needing a decision, failing. No turn-length floor applies, because the user already said they are not at the keyboard.
+- **Arming persists until the user switches it off.** It is a latch, not a timer. Only `/ping off` clears it (Step 0). Nothing else does — not the next prompt, not `back`, not time passing, not the session going idle.
+- **Arming is per-session, never global.** Three sessions running and a ping from one of them opts in only that one. The global override is `away`, which is a different gesture with different semantics — it notifies for everything everywhere.
+
+**Never infer that the user has come back.** Answering in chat and then walking away again is the normal case, not the exception, so a prompt arriving is not evidence they are at the keyboard for the rest of the run. Guessing wrong here is expensive and silent: the session goes quiet exactly when the user is relying on it, and nothing reports that it did. The latch is the user's to clear, never this skill's and never the hook's.
+
+A ping is therefore never only a message. Sending one commits this session to notifying the user until they say stop, which is another reason the body has to say what the session is doing: it is the first of a series, not a one-off.
 
 ## Step 5: Say What Happened
 
@@ -170,9 +209,11 @@ Other skills reach this one through the `Skill` tool rather than by re-implement
 ## Important Rules
 
 - **Never send a body without context.** "Done", "Finished", "Task complete" are failures. State what the work was and what is needed.
+- **Never exceed 30 words.** A notification that has to be opened and scrolled has failed at the one job it has. Over budget means cut, never means send anyway.
 - **Never say what is or is not needed unless you know.** If the user has to do something, name it. If they do not, say so explicitly — "nothing needed" is information.
 - **Never name the transport.** Say "your phone" or nothing. The transport is a per-machine detail of `notify-send.sh` and this skill is identical on every machine.
 - **Never build the envelope with shell string concatenation.** Prose contains quotes, apostrophes, backticks and newlines. `json.dumps` handles all of them; `echo "{\"body\": \"$BODY\"}"` does not.
 - **An explicit ping bypasses the gates deliberately.** `notify.py`'s `min_turn_seconds`, `min_interval_seconds`, quiet hours and subagent suppression exist to stop *automatic* notifications from becoming noise across a dozen live sessions. A ping the user asked for is never noise, so this skill calls the sender directly and none of those gates apply. It still depends on `~/.claude/notify.json` being configured — that is the one thing it cannot route around.
+- **Never arm a session without sending.** The arming and the message are one gesture; writing `armed_at` after a failed send would leave the session opted in to notifications the user has no reason to expect, having just been told the ping did not go out. The write-back runs only on the success path, which is what the `||` bail-out above protects.
 - **Never fail silently.** Non-zero exit from `notify-send.sh` gets reported in chat with its stderr intact.
 - **One ping per request.** If the user wants to be told again later, they will ask again, or a longer-running skill will call this one again at its own checkpoint.

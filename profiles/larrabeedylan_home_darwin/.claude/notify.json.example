@@ -7,6 +7,13 @@
   "min_turn_seconds": 60,
   "min_interval_seconds": 30,
   "quiet_hours": null,
+  "only_when_armed": true,
+  "summarize": {
+    "command": "",
+    "model": "claude-haiku-4-5-20251001",
+    "max_words": 30,
+    "timeout": 180
+  },
   "events": {
     "stop": true,
     "permission": true,

@@ -7,7 +7,7 @@ import urllib.request
 
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".claude", "notify.json")
 DM_CACHE = os.path.join(os.path.expanduser("~"), ".claude", "notify-state", "slack-dm.json")
-POST_TIMEOUT = 5
+POST_TIMEOUT = 20
 PUSH_LIMIT = 140
 MENTION_LEVELS = ("stop", "question", "permission", "failure")
 

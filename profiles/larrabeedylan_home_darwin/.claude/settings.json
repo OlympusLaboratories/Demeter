@@ -35,7 +35,7 @@
           {
             "type": "command",
             "command": "$HOME/.claude/hooks/notify.py",
-            "timeout": 15
+            "timeout": 240
           }
         ]
       }
@@ -74,7 +74,7 @@
           {
             "type": "command",
             "command": "$HOME/.claude/hooks/notify.py",
-            "timeout": 15
+            "timeout": 240
           }
         ]
       }
@@ -86,7 +86,7 @@
           {
             "type": "command",
             "command": "$HOME/.claude/hooks/notify.py",
-            "timeout": 15
+            "timeout": 240
           }
         ]
       }
@@ -97,7 +97,7 @@
           {
             "type": "command",
             "command": "$HOME/.claude/hooks/notify.py",
-            "timeout": 15
+            "timeout": 240
           }
         ]
       }

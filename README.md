@@ -524,17 +524,43 @@ Claude Code spawns hooks with a **bare `PATH`**, not the one your shell builds, 
 
 **`notify.py`** (`Stop`, `StopFailure`, `Notification`, `PreToolUse` on `AskUserQuestion|ExitPlanMode`) — pushes a message to Slack or Telegram when a session finishes, gets stuck, or needs you. With a dozen sessions open across three machines, there is otherwise no way to know one is waiting without going and looking at it.
 
-It notifies on five things:
+It is **off in every session until you ask for a ping** — see [Opting a session in](#opting-a-session-in) below. Once a session is opted in, it notifies on five things:
 
 | | fires when |
 |---|---|
-| **finished** | a turn ends — gated on the turn having taken longer than `min_turn_seconds` (60s) so ordinary keyboard back-and-forth stays silent |
+| **finished** | a turn ends |
 | **needs permission** | Claude is sitting on a permission prompt |
 | **asking you a question** | `AskUserQuestion` or `ExitPlanMode` — the question text itself is in the message |
 | **waiting on you** | 60s idle after a turn ended |
 | **stopped** | the session died on a rate limit, an overload, or an auth failure |
 
 Subagents never notify, only the session that spawned them.
+
+#### Opting a session in
+
+Automatic notifications are off in every session until you ask for one. The gesture that switches them on is asking for a ping:
+
+```bash
+/ping                 # or "ping me when you're done", "let me know if you get stuck"
+```
+
+That sends the message you asked for and, in the same move, **arms the session** — `armed_at` in `~/.claude/notify-state/sessions/<id>.json`. From then on that session notifies on everything its `events` config allows, with no turn-length floor, because you have already said you are not watching it.
+
+The reason it works this way round rather than notifying by default: a hook that fires on every turn longer than a minute is indistinguishable from no notifications at all once a dozen sessions are live, because you stop reading them. Asking for a ping is the same gesture as walking away from that session, so it is the thing worth triggering on.
+
+**It stays armed until you switch it off.** It is a latch, not a timer:
+
+```bash
+/ping off             # or quiet, disarm, mute — this session stops notifying
+```
+
+Nothing else clears it — not your next prompt, not `back`, not time passing, not the session going idle. Replying in chat and then walking away again is the normal way to use this, so a prompt arriving is not evidence you are back for the rest of the run. Anything that guessed otherwise would go quiet exactly when you were relying on it, and would not tell you it had.
+
+From the shell, `notify.py --disarm <session-id>` does the same thing, and `--disarm all` clears every session.
+
+Arming is per-session: three sessions running and a ping from one opts in only that one. `away` is the global override.
+
+Setting `only_when_armed` to `false` restores the old always-on behaviour, where any turn longer than `min_turn_seconds` notifies whether or not you asked for it.
 
 #### Away mode
 
@@ -545,7 +571,29 @@ away status
 back
 ```
 
-Away mode drops the `min_turn_seconds` gate, so **every** turn ending pings you rather than only the long ones. That is the difference between the two modes — the per-session rate limit and all the other events apply either way. The switch is a file (`~/.claude/notify-state/away.json`), not an environment variable, because hooks do not inherit your shell's environment. `away` and `back` are defined in `shell/terminal.zsh` and only appear once the hook is installed.
+Away mode is the global override: it notifies for **every** session, opted in or not, and drops the turn-length floor. That is the difference between the two gestures — a ping opts in the one session you asked, `away` opts in all of them at once. The per-session rate limit and the `events` switches apply either way. `away status` also reports how many sessions are currently opted in.
+
+The switch is a file (`~/.claude/notify-state/away.json`), not an environment variable, because hooks do not inherit your shell's environment. `away` and `back` are defined in `shell/terminal.zsh` and only appear once the hook is installed.
+
+#### What the message says
+
+A turn's closing chat message is written for someone sitting in front of a terminal with the diff open — headings, tables, file links, backticks, and routinely several hundred words. None of that survives a push notification, and a phone shows you roughly the first 140 characters. Sending it raw produces a wall of markdown whose first line is often a sentence ending in a colon, pointing at a table you cannot see.
+
+So the body goes through a model on the way out. `notify.py` shells out to the `claude` CLI — your Claude Code subscription, not API credit — and asks for one lock-screen line of at most 30 words: outcome first in concrete nouns, then what you have to do or an explicit "nothing needed". A 497-word message with tables and file links comes out as:
+
+```
+Built & tested: Notifications now opt-in via /ping — arms session, auto-disarms
+next prompt. 11 files ready to commit.
+```
+
+Four things about it are deliberate:
+
+- **It degrades, never fails.** If the CLI is missing, not logged in, slow, or errors, the body falls back to a mechanical condense — markdown stripped, first sentence or two, 240 characters. A notification always goes out. The log says which path ran, so a silently-degraded setup is visible rather than guessed at.
+- **The budgets are generous on purpose.** The summarizer gets 180 seconds and the hook 240. The alternative to waiting is a truncated markdown dump, and if you are away from the keyboard — which is the only state in which any of this fires — waiting costs you nothing while degrading costs you the whole feature. Tight timeouts optimise the wrong thing here.
+- **It runs with a neutral working directory and no MCP, hooks or plugins.** Otherwise the summarizer loads this repo's `CLAUDE.md` and every skill before answering, and a hook that spawns a session that fires hooks recurses. `NOTIFY_SUMMARIZING=1` in the child's environment is the backstop that breaks any recursion in one step.
+- **Long messages are windowed head-and-tail**, not truncated. The outcome is at the top of a message and the ask is usually at the bottom, so cutting the end would reliably discard the one thing you need to see.
+
+Check it on any machine with `notify.py --test`, which prints the CLI it resolved, the model, the budget, and a live sample run with its timing.
 
 #### Setup
 
@@ -579,10 +627,16 @@ Then check it:
 
 | key | default | |
 |---|---|---|
-| `min_turn_seconds` | 60 | shortest turn that earns a "finished" ping when not away |
+| `only_when_armed` | `true` | notify only in sessions a ping has opted in; `false` restores always-on |
+| `min_turn_seconds` | 60 | shortest turn that earns a "finished" ping, and only when `only_when_armed` is `false` |
 | `min_interval_seconds` | 30 | floor between two messages from the same session |
 | `quiet_hours` | `null` | `[22, 7]` to stay silent overnight |
 | `events` | all `true` | switch off any of `stop`, `permission`, `question`, `idle`, `failure` |
+| `summarize.command` | probe | path to the `claude` CLI; empty searches the usual install locations |
+| `summarize.model` | `claude-haiku-4-5-20251001` | model that writes the notification line |
+| `summarize.max_words` | 30 | hard word budget, enforced after the model answers |
+| `summarize.timeout` | 180 | seconds the summarizer may take before falling back to a condense |
+| `summarize.enabled` | `true` | `false` skips the model and always condenses mechanically |
 | `slack.mention` | `slack.channel` when it is a `U…` id | member ID to `<@…>` so a threaded reply still notifies |
 | `slack.mention_levels` | `stop`, `question`, `permission`, `failure` | which levels earn the mention |
 
