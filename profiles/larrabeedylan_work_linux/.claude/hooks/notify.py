@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import calendar
+import glob
 import json
 import os
 import re
@@ -291,7 +292,7 @@ def answers_question(content, asked):
     return False
 
 
-def handoff_at(transcript_path):
+def scan_tail(transcript_path, finder):
     if not transcript_path or not os.path.isfile(transcript_path):
         return None
     try:
@@ -305,14 +306,54 @@ def handoff_at(transcript_path):
                 chunk = handle.read(size - start).decode("utf-8", "replace")
                 if start:
                     chunk = chunk.split("\n", 1)[-1]
-                began = handoff_epoch(chunk)
-                if began is not None:
-                    return began
+                found = finder(chunk)
+                if found is not None:
+                    return found
                 if start == 0 or window >= TAIL_LIMIT:
                     return None
                 window *= 4
     except OSError:
         return None
+
+
+def handoff_at(transcript_path):
+    return scan_tail(transcript_path, handoff_epoch)
+
+
+def title_in(chunk):
+    generated = None
+    for line in reversed(chunk.splitlines()):
+        if '"ai-title"' not in line and '"custom-title"' not in line:
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        if record.get("type") == "custom-title":
+            chosen = record.get("customTitle")
+            if isinstance(chosen, str) and chosen.strip():
+                return chosen.strip()
+        elif record.get("type") == "ai-title" and generated is None:
+            chosen = record.get("aiTitle")
+            if isinstance(chosen, str) and chosen.strip():
+                generated = chosen.strip()
+    return generated
+
+
+def session_title(transcript_path):
+    return scan_tail(transcript_path, title_in)
+
+
+def transcript_for(session_id):
+    safe = re.sub(r"[^A-Za-z0-9_-]", "-", session_id or "")
+    if not safe:
+        return None
+    found = glob.glob(os.path.join(HOME, ".claude", "projects", "*", safe + ".jsonl"))
+    if not found:
+        return None
+    return max(found, key=lambda p: os.path.getmtime(p))
 
 
 def turn_seconds(transcript_path):
@@ -594,6 +635,7 @@ def handle(payload):
         "repo": repo,
         "branch": branch,
         "level": kind,
+        "session_label": session_title(payload.get("transcript_path")),
         "cwd": cwd,
         "thread": state.get("thread"),
         "away": away,
@@ -712,10 +754,13 @@ def main():
         return cmd_test()
     if args and args[0] == "--disarm":
         return cmd_disarm(args[1:])
+    if args and args[0] == "--label":
+        print(session_title(transcript_for(args[1] if len(args) > 1 else "")) or "")
+        return 0
     if args:
         print(
             "usage: notify.py [--test | --away [<duration>|off|status]"
-            " | --disarm <session-id>|all]", file=sys.stderr)
+            " | --disarm <session-id>|all | --label <session-id>]", file=sys.stderr)
         return 2
     payload = json.load(sys.stdin)
     log("%s %s" % (payload.get("hook_event_name"), handle(payload)))

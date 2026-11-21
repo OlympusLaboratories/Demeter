@@ -84,14 +84,12 @@ def escape(text):
 def compose(envelope):
     glyph = GLYPHS.get(envelope.get("level"), "•")
     parts = [envelope.get("repo") or "?"]
-    if envelope.get("branch"):
-        parts.append(envelope["branch"])
-    if envelope.get("session"):
-        parts.append(envelope["session"])
-    header = "%s <b>%s</b>" % (glyph, escape(envelope.get("title") or "Claude Code"))
-    trail = "<i>%s</i>" % escape(" · ".join(parts))
+    context = envelope.get("session_label") or envelope.get("branch")
+    if context:
+        parts.append(context)
+    header = "%s <b>%s</b>" % (glyph, escape(" · ".join(parts)))
     body = (envelope.get("body") or "").strip()
-    lines = [header, trail]
+    lines = [header]
     if body:
         lines.append("<pre>%s</pre>" % escape(body[:BODY_LIMIT]))
     return "\n".join(lines)

@@ -115,10 +115,9 @@ def resolve(token, channel):
 def headline(envelope):
     glyph = GLYPHS.get(envelope.get("level"), "•")
     parts = [envelope.get("repo") or "?"]
-    if envelope.get("branch"):
-        parts.append(envelope["branch"])
-    if envelope.get("session"):
-        parts.append(envelope["session"])
+    context = envelope.get("session_label") or envelope.get("branch")
+    if context:
+        parts.append(context)
     return "%s %s" % (glyph, " · ".join(parts))
 
 
@@ -126,12 +125,7 @@ def push_text(envelope):
     body = " ".join((envelope.get("body") or "").split())
     if len(body) > PUSH_LIMIT:
         body = body[:PUSH_LIMIT].rstrip() + "…"
-    title = envelope.get("title") or "Claude Code"
-    return "%s %s%s" % (
-        GLYPHS.get(envelope.get("level"), "•"),
-        title,
-        " — " + body if body else "",
-    )
+    return "%s%s" % (headline(envelope), " — " + body if body else "")
 
 
 def blocks_for(envelope, mention=""):

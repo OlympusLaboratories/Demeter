@@ -99,11 +99,13 @@ Notice what the good ones share: a concrete noun from the actual work, and an ex
 REPO=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 BRANCH=$(git branch --show-current 2>/dev/null)
 SESSION="${CLAUDE_CODE_SESSION_ID:-${CLAUDE_SESSION_ID:-}}"
-echo "repo=$REPO branch=$BRANCH session=${SESSION:0:8}"
+LABEL=$("$HOME/.claude/hooks/notify.py" --label "$SESSION" 2>/dev/null)
+echo "repo=$REPO label=$LABEL branch=$BRANCH session=${SESSION:0:8}"
 ```
 
 - `REPO` always resolves. Outside a git repo it falls back to the directory name — a ping must never fail because the cwd is not a checkout.
-- `BRANCH` is empty on a detached HEAD or outside a repo. Omit the field rather than sending an empty string.
+- `LABEL` is this session's chat title — the name on the editor tab, either the one Claude Code generated or one the user typed over it. It is the single most useful piece of context in the header, because it says *which* of a dozen live sessions is talking. It is empty on a session too new or too short to have earned a title, and on a machine where the hook is not installed; omit the field then rather than sending an empty string.
+- `BRANCH` is empty on a detached HEAD or outside a repo. Omit the field rather than sending an empty string. It is only a **fallback** for a missing `LABEL`: most work here happens in worktrees, where the branch name is the least surprising thing about a session and says nothing about what it is doing.
 - `SESSION` is set in a Claude Code session. Only its first 8 characters go in the envelope. If it is empty, omit the field and skip the thread state entirely.
 
 ## Step 4: Send It
@@ -117,17 +119,20 @@ set -o pipefail
 REPO=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 BRANCH=$(git branch --show-current 2>/dev/null)
 SESSION="${CLAUDE_CODE_SESSION_ID:-${CLAUDE_SESSION_ID:-}}"
+LABEL=$("$HOME/.claude/hooks/notify.py" --label "$SESSION" 2>/dev/null)
 STATE_DIR="$HOME/.claude/notify-state/sessions"
 
-REPLY=$(python3 - "$REPO" "$BRANCH" "$SESSION" "$STATE_DIR" <<'PY' | "$HOME/.claude/scripts/notify-send.sh" send
+REPLY=$(python3 - "$REPO" "$BRANCH" "$SESSION" "$STATE_DIR" "$LABEL" <<'PY' | "$HOME/.claude/scripts/notify-send.sh" send
 import json, os, re, sys
 
 LEVEL = "stop"
 TITLE = """demeter finished"""
 BODY = """Migrated the 14 cron jobs to the new scheduler; tests green. Nothing needed — review when you're back."""
 
-repo, branch, session, state_dir = sys.argv[1:5]
+repo, branch, session, state_dir, label = sys.argv[1:6]
 envelope = {"title": TITLE, "body": BODY, "level": LEVEL, "repo": repo, "cwd": os.getcwd()}
+if label:
+    envelope["session_label"] = label
 if branch:
     envelope["branch"] = branch
 if session:
