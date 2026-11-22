@@ -1,6 +1,6 @@
 ---
 name: autopilot
-description: The automated tail of fix-linear and fix-freeform — it commits, pushes, opens the PR, watches the pipeline and the review bot, addresses every comment, applies infrastructure plans, merges in the right order across stacked PRs, and pings the user only when finished or genuinely stuck. It is on by default in every fix run, so it is usually reached by hand-off rather than invoked. Invoke it directly when the user says autopilot, put it on autopilot, auto mode, one-shot this ticket, take this end to end, handle it autonomously, ship this without checking in, drive it to merge, or runs /autopilot — including mid-run, where /autopilot with flags amends the run already in flight (take over the merge, turn on a diagram, hold a merge that was about to happen).
+description: The automated tail of fix-linear and fix-freeform — it commits, pushes, opens the PR, watches the pipeline and the review bot, addresses every comment, applies infrastructure plans, merges in the right order across stacked PRs, verifies the change actually deployed after the merge, and pings the user only when finished or genuinely stuck. It is on by default in every fix run, so it is usually reached by hand-off rather than invoked. Invoke it directly when the user says autopilot, put it on autopilot, auto mode, one-shot this ticket, take this end to end, handle it autonomously, ship this without checking in, drive it to merge, or runs /autopilot — including mid-run, where /autopilot with flags amends the run already in flight (take over the merge, turn on a diagram, hold a merge that was about to happen).
 ---
 
 # Autopilot — The Automated Tail of a Fix Run
@@ -161,6 +161,31 @@ The values that matter here:
 
 Use `$(~/.claude/scripts/skill-env.sh get api_script)` for the helper path throughout. Read that script's usage before calling a subcommand — **do not assume a subcommand exists on both forges**, because the two helpers are not symmetric and the GitHub one is thinner.
 
+## Step 0b: Work out how this change reaches production
+
+Merging is not shipping, and the gap between the two is where an unattended run goes quietly wrong: the merge succeeds, the run reports success, and the change is sitting in a pipeline that went red twenty minutes later with nobody watching. So **before** the merge gate, not after it, work out what happens when this lands and what would prove it worked.
+
+Do this **contextually, from the repository in front of you.** There is no list to match against here on purpose: repositories differ, the same repository changes, and a baked-in expectation is worse than none because it keeps passing after it has gone stale. You are establishing three things, and the third is the one that gets skipped.
+
+1. **The trigger** — what fires when a commit lands on the default branch. The repo's own CI configuration is the first place to look, and the question is narrower than "what CI exists": *which jobs run on a push to the default branch*, as opposed to on a tag, on a schedule, or on a manual dispatch. A repo whose deploy runs on a tag does not deploy when you merge, and reporting that it did would be a lie with a green tick next to it.
+2. **The target** — what the trigger actually changes. A job called `deploy` might roll a container workload, hand off to a GitOps controller, apply infrastructure, publish a package, upload a static build, or print a plan and stop. Read the job, not its name.
+3. **The observable signal** — the thing you could point at afterwards and say *that proves the new code is running*. This decides whether verification is possible at all, and it has to be specific enough to check: a workload's running revision, a published version, a URL serving the new build, an apply marker. "The pipeline is green" is a signal about the pipeline, not about the deploy.
+
+Then establish two facts about your own position, because both change what you are allowed to claim later:
+
+- **Can this session observe that signal at all?** Credentials, a cluster context, a VPN, a registry token — any of them may be missing. Probe it now, read-only, rather than finding out after the merge. A session that cannot reach the deploy target can still merge; it just cannot afterwards say the deploy worked.
+- **How long does it normally take?** Read that off the repository's own recent successful default-branch runs rather than inventing it. That number becomes the verification budget in Step 10b, and a budget guessed from nothing is either a false alarm or a watch that never ends.
+
+Record all of it with the run state, and **say it in one line before the merge gate**:
+
+> `On merge: deploy job on the default branch rolls the api workload; observable via the cluster, ~6 min typical.`
+
+**"Nothing deploys" is a complete and common answer.** Libraries, config repos, dotfiles and most internal tooling do not deploy on merge. Record it, say it, and skip Step 10b — a run that invents a deploy to verify will eventually report a failure for something that was never meant to happen.
+
+**Never carry an expectation you did not derive here.** If the deploy path is genuinely unreadable from the repository — a pipeline shelling out to an opaque internal script, a controller configured somewhere else entirely — then *that* is the finding. Record it as unknown and let Step 10b report the change as merged-but-unverified, rather than manufacturing a check that passes for the wrong reason.
+
+On a `--merge false` run this line is still worth producing, and it is arguably worth more: it tells the user what pressing the button is going to set off.
+
 ## Step 1: Implement — direct invocations only
 
 **Skip this step entirely when you were reached by hand-off.** A fix skill that invokes this skill has already done everything in it, and invoking one back would restart the work that just finished. Go to Step 2.
@@ -200,9 +225,9 @@ Announcing that an agent wrote it is worse than merely useless. It invites the r
 
 **This is the point where this skill supersedes `fix-linear`'s and `fix-freeform`'s Important Rule 1**, which forbids pushing and creating pull requests. That rule exists so an interactive session never surprises the user with external state. An autonomous run was explicitly asked for exactly this, so the prohibition is lifted **for the branch this run worked on and for nothing else**. You still never force-push, never touch another branch, never amend a commit that is already on the remote, and never act on a pull request this run did not open.
 
-### 4a. `--branch default` — push, and the run is over
+### 4a. `--branch default` — push, then verify, then the run is over
 
-The fix skill committed onto the default branch and no pull request is coming. Push that branch, report per Step 11, and stop. Steps 5 through 10 are about driving a pull request to merge; with none in existence there is nothing for them to watch, review, approve or merge, and inventing a branch at this point to give them something to do would be making the user's decision over again at the last possible moment.
+The fix skill committed onto the default branch and no pull request is coming. Push that branch, **verify the deploy per Step 10b**, report per Step 11, and stop. The deploy matters more here than anywhere else in this skill: nobody reviewed this change and it is already on the branch every other checkout is cut from, so whether it actually came up is the only safety net left. Steps 5 through 10 are about driving a pull request to merge; with none in existence there is nothing for them to watch, review, approve or merge, and inventing a branch at this point to give them something to do would be making the user's decision over again at the last possible moment.
 
 **Fast-forward only, and never force.** Someone else may have pushed since the fix skill cut its base. `git pull --ff-only` and push again; if that fails the history has diverged and this run no longer knows what it would be writing on top of — stop and report it per Step 11's stop conditions. Do not merge, do not rebase, do not force.
 
@@ -218,7 +243,7 @@ Open it as a normal pull request, not a draft — the review bot runs as a CI jo
 
 ## Step 5: Arm the Watcher — never poll in-turn
 
-**Steps 5 through 10 apply only to a run that opened a pull request.** A `--branch default` run ended at Step 4a; go straight to Step 11.
+**Steps 5 through 10 apply only to a run that opened a pull request.** A `--branch default` run ended at Step 4a — go to **Step 10b**, because pushing the default branch fires the same deploy a merge would, and then to Step 11.
 
 You now need to know when the pipeline finishes and when the reviewer reports. **Use the `Monitor` tool.** Do not use `sleep` loops, do not call `TaskOutput` in a wait loop, and do not hold the turn open. A monitor runs in the background and wakes the session with a notification, which leaves the user's prompt free and is the only approach that works when several of these runs are in flight at once.
 
@@ -307,6 +332,8 @@ Check `require_human_approval` first. When it is true, a review bot's approval *
 
 Then keep watching until the state is actually `merged`. Auto-merge can be cancelled by a failing pipeline or a new push, so arming it is not the same as it having happened.
 
+Once it is merged, go to **Step 10b**. The merge is not the end of the run: the change has not reached anything yet.
+
 If the merge is refused, report the exact blocker. Rebase if the forge says the branch is behind; surface anything else.
 
 ## Step 10: Several Pull Requests, In Order
@@ -333,6 +360,41 @@ The principle: a step is armed the instant its precondition is genuinely satisfi
 
 **`--merge false` applies to the whole stack, not just its head.** Take every PR to green and reviewed, cross-linked and in order, then leave all of them open and unarmed. A stack is exactly where this is easiest to get wrong: merging the head "to unblock the rest" is still a merge the user asked you not to make, and it is the one that cannot be undone.
 
+## Step 10b: Verify the Deploy
+
+Runs once the change has actually landed on the default branch — by merge, or by a `--branch default` run's push. Skip it when Step 0b established that nothing deploys.
+
+**The rule that carries this whole step: verify the new revision, not that something succeeded.** Every subtle post-merge failure has the same shape — something went green, about the wrong commit. A default-branch pipeline that passed for the commit before yours. A rollout that reported success because the manifest never changed. A GitOps application sitting Healthy on the revision it synced an hour ago. A mutable image tag that let the workload restart onto the same old image. Every one of those is indistinguishable from a good deploy if you are standing one step back from it.
+
+So **every check is tied to the commit that landed.** Resolve that SHA once, and make each check answer *is this SHA what is now running* rather than *did a job pass*. Where a signal cannot be tied back to the SHA, say so and treat the result as unverified — not as confirmation.
+
+Arm a `Monitor` in the turn the merge confirms. Never a sleep loop, never an in-turn poll, exactly as Step 5. Poll remote APIs no faster than every 60 seconds, tolerate a failed request so one blip cannot kill the watch, and bound the watch with the budget from Step 0b. **Every terminal state emits a line** — same reason as Step 5: a watch that only speaks on success is indistinguishable from a watch that died.
+
+Five terminal states, and the difference between the last three is most of this step's value:
+
+| State | What it means | What to do |
+|---|---|---|
+| **Confirmed** | The signal names the commit that landed, and the target is healthy | Report it in the ping with the evidence, not just the word |
+| **Failed** | The deploy ran and did not work — pipeline red, rollout stuck, workload not becoming ready, image pull failing, apply errored | **Ping immediately** with what failed and where to look |
+| **Waiting on a human** | The deploy is gated: a protected environment, a manual job, an approval step | Ping with what to click. This is not a failure and must not be reported as one |
+| **Cannot observe** | No access to the signal — no cluster context, no token, no VPN, or Step 0b recorded the path as unknown | Ping saying the change is merged and the deploy is **unverified**, naming the check a human should run |
+| **Timed out** | The budget expired with no terminal answer | As cannot-observe: merged, unverified, and say how long you waited |
+
+**Never report a deploy as successful because you could not watch it fail.** Cannot-observe and timed-out are not success. Collapsing either into "done" is the single outcome that makes this step worse than not having it, because the user stops checking on the strength of something that was never established.
+
+### Never remediate — warn
+
+A failed deploy gets a ping and nothing else.
+
+- **No rollback, no revert, no re-deploy.** Reverting a merge is itself a production change, with its own blast radius, decided by something that has just demonstrated it does not understand the current state.
+- **Never re-run a deploy job.** Step 7's retry classification is about CI jobs, which are expected to be idempotent. A deploy job is not, and a half-applied deploy run a second time can do what neither run would have done alone.
+- **Never touch the runtime.** No restarting or deleting workloads, no scaling, no editing a live manifest, no forcing a sync.
+- **Do gather evidence thoroughly**, since that is the part that actually helps: the failing job's log, the workload's recent events, the controller's sync status. The specifics go in the Step 11 report; the diagnosis goes in the ping.
+
+### In a stack
+
+Verify after **each** merge, not only after the last one. Every merge to the default branch fires its own deploy, so an intermediate failure is a real failure. **If an intermediate deploy fails, stop the stack** — do not merge the next change onto a default branch that is currently broken — and say that is why you stopped.
+
 ## Step 11: Close the Loop and Ping
 
 When the PR merges, when a `--branch default` run has pushed, or when you stop for any reason:
@@ -340,7 +402,7 @@ When the PR merges, when a `--branch default` run has pushed, or when you stop f
 1. **Record it where the work lives.** On a ticket run, comment the PR URL and what shipped — **not the decision ledger**, which belongs in the description fold at 11.3 and must not be duplicated as a wall of text on the ticket as well. Anything noteworthy beyond those two is a line, not a section. A `--branch default` run has no PR, so record the pushed commit SHA and its forge URL instead. Work you deliberately did not do becomes its own ticket, linked back — never a buried bullet in a closing comment. Check whether the forge integration already moved the ticket before moving it by hand; that integration is asynchronous.
 2. **Attach the diagram** when `--diagram` is true and the run opened a pull request. On a `--branch default` run the fix skill already produced it at its own diagram step, so do not produce a second one — carry the link it gave you into the report and the ticket comment. Invoke `changes-diagram` with the `Skill` tool and append its link to the PR description — or, on a `--branch default` run, carry the link in the report and the ticket comment, since there is no description to append to. Do this once the code has settled — a diagram of a branch that changed three more times is worse than none. **A failed or unavailable diagram never fails the run**: say so in one line and carry on.
 3. **Append the decision record.** Take the scratchpad ledger, apply the filter and the budget from **The decision record**, and append it to the end of the change request description inside the collapsed `<details>` fold — one edit, after the diagram link. An empty ledger publishes nothing. **Never post it as a comment**: if the description edit fails, say so in one line and carry the ledger in the report instead.
-4. **Ping the user.** Invoke the `ping` skill with the `Skill` tool. This is the only message the user may see, so it carries what happened and whether anything is needed — a ping that says "done" wastes it. **A `--branch default` run says so in the ping**: the change is on the default branch, unreviewed, and already live. That is what the user chose, and it is also the single fact most worth knowing on a phone.
+4. **Ping the user.** Invoke the `ping` skill with the `Skill` tool. This is the only message the user may see, so it carries what happened and whether anything is needed — a ping that says "done" wastes it. **It carries Step 10b's verdict in Step 10b's own words**: deployed and verified, deploy failed, waiting on a human, or merged and unverified. "Merged" alone is the one word that reads as finished while leaving out whether the change is actually running. **A `--branch default` run says so in the ping**: the change is on the default branch, unreviewed, and already live. That is what the user chose, and it is also the single fact most worth knowing on a phone.
 
 ### When to stop and ping instead of continuing
 
@@ -348,6 +410,7 @@ Escalate — ping with a level of `question` or `blocked`, saying precisely what
 
 - A thread needs a product or policy decision the code cannot settle.
 - An infrastructure apply failed, or would destroy something.
+- **The deploy failed, or could not be verified** (Step 10b). A change that merged and did not come up is the most urgent thing this skill can discover, and it is never something to fix unattended.
 - A merge conflict needs judgment about intent rather than mechanics.
 - The same thread has reopened `--max-rounds` times.
 - A fix would require changing a repository this run cannot reach.
@@ -367,7 +430,9 @@ Stopping is reserved for these. Everything else — surprising test failures, un
 7. **Capture every decision you made alone at the time you made it, and publish it exactly once.** The capture is a line in the local ledger; the publication is the collapsed fold appended to the description at Step 11.3. Never a comment, on the change request or on a thread. The record is what replaces the conversation, so it carries the reasoning and nothing about the process that produced it — see **The decision record** for what earns an entry and the budget it has to fit in.
 8. **No comments in the code.** Autonomy does not relax it.
 9. **An empty config value means the capability is absent, not that you should guess at it.** Never substitute a name you saw in an example for one the machine did not supply.
+10. **The merge is not the finish line, and "merged" is not "deployed".** Step 0b works out how the change reaches production and Step 10b confirms it got there, tied to the commit that landed rather than to a job going green. Unverified is a reportable outcome — **never** upgrade cannot-observe or timed-out into success.
+11. **A broken deploy is warned about, never fixed.** No rollback, no revert, no re-run of a deploy job, no touching the runtime. Gather the evidence, ping immediately, and stop. An unattended agent reverting production at 2am is worse than a bad deploy somebody has been told about.
 
 ## Step 12: Self-Improvement
 
-After the run, reflect on what actually happened: where the watcher missed an event, where a gate fired that should not have, where a decision you recorded turned out wrong, whether the review loop converged or ping-ponged. Edit this skill file surgically — a note near the relevant step, not a rewrite — and tell the user in one line what you changed and why.
+After the run, reflect on what actually happened: where the watcher missed an event, where a gate fired that should not have, where a decision you recorded turned out wrong, whether the review loop converged or ping-ponged, and — most usefully, because it is the newest part — whether Step 0b's reading of the deploy path matched what Step 10b actually observed. A signal that turned out not to prove what it was supposed to prove is worth writing down for next time; so is a budget that was far too short or long. Edit this skill file surgically — a note near the relevant step, not a rewrite — and tell the user in one line what you changed and why.

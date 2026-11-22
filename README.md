@@ -533,7 +533,21 @@ Six things make it safe to walk away from:
 
 On infrastructure repositories it merges directly rather than enabling auto-merge, because auto-merge fires the moment the pipeline is green and can beat the `apply`, merging a plan that was never applied. Where the work splits across several changes they share a branch prefix and lead with an ordinal (`dylan/PLAT-3535/01-…`), and each one's auto-merge is armed only once its predecessor has actually merged.
 
-It pings you when it finishes, and when it is genuinely stuck — a product decision, a failed apply, a conflict needing judgment, or the same thread reopening three times.
+- **The merge is not the finish line.** Before the merge gate it works out how this repository actually ships — which jobs fire on a push to the default branch, what they change, and what observable thing would prove the new code is running — and after the merge it watches for exactly that. "Nothing deploys" is a valid answer it will tell you plainly, and so is "merged, could not verify".
+
+It pings you when it finishes, and when it is genuinely stuck — a product decision, a failed apply, a failed or unverifiable deploy, a conflict needing judgment, or the same thread reopening three times.
+
+#### Verifying the deploy
+
+A run that stops at "merged" has reported on the easy half. The hard half is whether the change came up, and that is where an unattended run goes quietly wrong: the merge succeeds, the run says success, and the deploy went red twenty minutes later with nobody watching.
+
+So the deploy path is worked out **contextually, from the repository, before the merge** — never from a baked-in list, because repositories differ, the same repository changes, and a stale expectation keeps passing after it stops being true. Three things get established: what fires on a push to the default branch (as opposed to on a tag or a manual dispatch — a tag-triggered deploy does not fire when you merge), what it actually changes, and what observable signal would prove the new code is running. Plus two facts about the run's own position: whether this session can see that signal at all, and how long the repo's own recent runs take, which becomes the watch budget.
+
+Then after the merge, one rule carries the whole thing: **verify the new revision, not that something succeeded.** Every subtle post-merge failure has the same shape — something went green, about the wrong commit. A pipeline that passed for the commit before yours, a rollout that succeeded because the manifest never changed, a GitOps app Healthy on the revision it synced an hour ago, a mutable image tag that let pods restart onto the same old image. All four look like a good deploy from one step back, so every check is tied to the commit that landed.
+
+It reports one of five outcomes, and the last three are the point: confirmed, failed, waiting on a human, **cannot observe**, or **timed out**. Cannot-observe and timed-out are never upgraded into success — being told a deploy worked when nobody established that is the one outcome worse than not checking, because you stop checking too.
+
+**And it warns rather than fixes.** No rollback, no revert, no re-running a deploy job, no touching the runtime. It gathers the evidence — the failing job's log, the workload's events, the controller's sync status — and pings immediately. A deploy job is not a CI job and its idempotency is unknown, and an agent reverting production unattended is worse than a bad deploy somebody has been told about.
 
 ### Worktrees
 
