@@ -227,6 +227,56 @@ git_ignores_probe() {
   return "$status"
 }
 
+# Fields a notification config still needs before the hook can send anything.
+# A placeholder is only half of it: a "<key>_file" form points at a credential
+# file the machine is expected to already have, and that file can be absent or
+# blank — which a REPLACE_ME grep cannot see, so a config using it reported as
+# configured and the hook then failed silently on every send.
+notify_unresolved() {
+  local config="$1"
+  [[ -f "$config" ]] || return 0
+  command -v python3 >/dev/null 2>&1 || { grep -n 'REPLACE_ME' "$config" || true; return 0; }
+  python3 - "$config" <<'NOTIFYPY'
+import json
+import os
+import sys
+
+try:
+    with open(sys.argv[1]) as handle:
+        raw = json.load(handle)
+except (OSError, ValueError) as error:
+    print("unreadable: %s" % error)
+    raise SystemExit(0)
+
+section = raw.get(raw.get("transport") or "") or {}
+if not isinstance(section, dict):
+    print("transport section is missing or not an object")
+    raise SystemExit(0)
+
+for key, value in sorted(section.items()):
+    text = str(value or "").strip()
+    if not text:
+        continue
+    if "REPLACE_ME" in text:
+        print("%s is still REPLACE_ME" % key)
+        continue
+    if not key.endswith("_file"):
+        continue
+    path = os.path.expanduser(text)
+    if not os.path.isfile(path):
+        print("%s points at %s, which does not exist" % (key, path))
+        continue
+    try:
+        with open(path) as handle:
+            body = handle.read().strip()
+    except OSError as error:
+        print("%s points at %s, unreadable: %s" % (key, path, error))
+        continue
+    if not body or "REPLACE_ME" in body:
+        print("%s points at %s, which is empty" % (key, path))
+NOTIFYPY
+}
+
 # ── symlinking ────────────────────────────────────────────────────────────────
 
 link_file() {
@@ -428,6 +478,15 @@ main() {
   info "Repo           : $REPO_DIR"
   echo ""
 
+  # Detection failing open is not cosmetic: every :pi skip entry would miss, and
+  # under -y the shell step would answer yes to an unattended package install on
+  # a box whose service user has no interactive shell.
+  if [[ "$profile" == *_pi && "$machine" != "pi" ]]; then
+    error "Profile $profile expects a Raspberry Pi, but this machine detected as '$machine'."
+    error "  /etc/rpi-issue is missing or unreadable, so every :pi skip entry would miss."
+    exit 1
+  fi
+
   if ! ask "Proceed with this configuration?"; then
     echo "Aborted."
     exit 0
@@ -449,6 +508,9 @@ main() {
   bold "Linking dotfiles to $home ..."
 
   for src in "$user_dir"/.*; do
+    # Same guard, same reason as the .claude/.* loop below: with no hidden
+    # entries the glob stays literal and link_file creates a dangling ".*".
+    [[ -e "$src" ]] || continue
     local name
     name="$(basename "$src")"
 
@@ -587,10 +649,10 @@ main() {
       warn "The notify hook cannot run the way Claude Code spawns it."
       info "  Hooks get a bare PATH (/usr/bin:/bin). Install a system python3,"
       info "  then re-run this installer."
-    elif [[ -f "$notify_config" ]] && grep -q 'REPLACE_ME' "$notify_config"; then
-      info "Notifications are installed but dormant until you fill in:"
+    elif unresolved="$(notify_unresolved "$notify_config")" && [[ -n "$unresolved" ]]; then
+      info "Notifications are installed but dormant until you resolve:"
       info "  $notify_config"
-      grep -n 'REPLACE_ME' "$notify_config" | sed 's/^/    /'
+      sed 's/^/    /' <<<"$unresolved"
       info "  Then check it with: ~/.claude/hooks/notify.py --test"
     else
       success "Notifications configured. Verify with: ~/.claude/hooks/notify.py --test"

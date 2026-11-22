@@ -44,7 +44,12 @@ def setting(settings, name):
     if direct:
         return direct
     path = usable(settings.get(name + "_file"))
-    return from_file(path) if path else ""
+    if not path:
+        return ""
+    value = from_file(path)
+    if not value:
+        fail("telegram.%s_file points at %s, which is empty" % (name, path))
+    return value
 
 
 def config():

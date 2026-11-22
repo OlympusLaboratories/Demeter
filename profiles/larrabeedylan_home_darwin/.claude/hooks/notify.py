@@ -216,21 +216,28 @@ def git(cwd, *args):
 
 
 def repo_label(cwd, host_label=""):
-    # A session rooted outside a checkout has no repo to name. The directory
+    # A session rooted outside a project has no repo to name. The directory
     # basename is what the field used to fall back to, and on a box whose
     # sessions all start in one fixed directory that is the same uninformative
     # word every time. host_label replaces it with something that identifies
     # the machine instead, and stays empty everywhere it is not configured.
+    #
+    # A repository rooted at $HOME counts as "no project": a dotfiles-style home
+    # repo answers rev-parse for every path beneath it, so without this the
+    # label is the home directory's name and host_label is never reached.
     if not cwd or not os.path.isdir(cwd):
         return host_label or os.path.basename(cwd or "") or "?"
     top = git(cwd, "rev-parse", "--show-toplevel")
-    if top:
+    if top and os.path.realpath(top) != os.path.realpath(HOME):
         return os.path.basename(top) or "?"
     return host_label or os.path.basename(cwd) or "?"
 
 
 def branch_label(cwd):
     if not cwd or not os.path.isdir(cwd):
+        return None
+    top = git(cwd, "rev-parse", "--show-toplevel")
+    if top and os.path.realpath(top) == os.path.realpath(HOME):
         return None
     head = git(cwd, "rev-parse", "--abbrev-ref", "HEAD")
     return head if head and head != "HEAD" else None
