@@ -175,7 +175,7 @@ Do this **contextually, from the repository in front of you.** There is no list 
 
 Then establish two facts about your own position, because both change what you are allowed to claim later:
 
-- **Can this session observe that signal at all?** Credentials, a cluster context, a VPN, a registry token — any of them may be missing. Probe it now, read-only, rather than finding out after the merge. A session that cannot reach the deploy target can still merge; it just cannot afterwards say the deploy worked.
+- **Can this session observe that signal at all?** Credentials, a cluster context, a VPN, a registry token — any of them may be missing. Probe it now, read-only, rather than finding out after the merge. A session that cannot reach the deploy target can still merge; it just cannot afterwards say the deploy worked. Probe **every** tool the signal needs, not the first one: one expired credential often disables several commands at once, and a session that proves `gcloud` is dead still learns nothing about `kubectl` until it tries it. Probing one and assuming the rest pushes the discovery into Step 10b, which is exactly where it is too late to pick a different signal.
 - **How long does it normally take?** Read that off the repository's own recent successful default-branch runs rather than inventing it. That number becomes the verification budget in Step 10b, and a budget guessed from nothing is either a false alarm or a watch that never ends.
 
 Record all of it with the run state, and **say it in one line before the merge gate**:

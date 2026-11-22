@@ -113,27 +113,36 @@ def resolve(token, channel):
 
 
 def headline(envelope):
-    glyph = GLYPHS.get(envelope.get("level"), "•")
     parts = [envelope.get("repo") or "?"]
     context = envelope.get("session_label") or envelope.get("branch")
     if context:
         parts.append(context)
-    return "%s %s" % (glyph, " · ".join(parts))
+    return " · ".join(parts)
+
+
+def glyph_for(envelope):
+    return GLYPHS.get(envelope.get("level"), "•")
 
 
 def push_text(envelope):
     body = " ".join((envelope.get("body") or "").split())
     if len(body) > PUSH_LIMIT:
         body = body[:PUSH_LIMIT].rstrip() + "…"
+    if envelope.get("thread"):
+        return "%s %s" % (glyph_for(envelope), body) if body else glyph_for(envelope)
     return "%s%s" % (headline(envelope), " — " + body if body else "")
 
 
 def blocks_for(envelope, mention=""):
-    blocks = [{
-        "type": "context",
-        "elements": [{"type": "mrkdwn", "text": headline(envelope)}],
-    }]
+    blocks = []
     body = (envelope.get("body") or "").strip()[:2900]
+    if envelope.get("thread"):
+        body = "%s %s" % (glyph_for(envelope), body) if body else glyph_for(envelope)
+    else:
+        blocks.append({
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": headline(envelope)}],
+        })
     lead = "<@%s>" % mention if mention else ""
     if lead:
         body = "%s %s" % (lead, body) if body else lead

@@ -82,17 +82,16 @@ def escape(text):
 
 
 def compose(envelope):
+    body = escape((envelope.get("body") or "").strip()[:BODY_LIMIT])
     glyph = GLYPHS.get(envelope.get("level"), "•")
+    if envelope.get("thread"):
+        return "%s %s" % (glyph, body) if body else glyph
     parts = [envelope.get("repo") or "?"]
     context = envelope.get("session_label") or envelope.get("branch")
     if context:
         parts.append(context)
-    header = "%s <b>%s</b>" % (glyph, escape(" · ".join(parts)))
-    body = (envelope.get("body") or "").strip()
-    lines = [header]
-    if body:
-        lines.append("<pre>%s</pre>" % escape(body[:BODY_LIMIT]))
-    return "\n".join(lines)
+    header = "<b>%s</b>" % escape(" · ".join(parts))
+    return "%s\n%s" % (header, body) if body else header
 
 
 def send(envelope):

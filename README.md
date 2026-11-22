@@ -655,14 +655,18 @@ The switch is a file (`~/.claude/notify-state/away.json`), not an environment va
 
 #### What the message says
 
-Every notification is two lines — a header and a body:
+Every session's notifications form **one thread**, and the shape differs between the message that starts it and the ones that answer it:
 
 ```
-✅ Demeter · Demeter ping skill setup and testing
+Demeter · Demeter ping skill setup and testing
 Notifications now opt-in via /ping. 11 files ready to commit.
+  └─ ✅ Branch pushed, pr-checks green, ai-review running.
+  └─ 🔥 Apply failed on the staging workspace; needs a look.
 ```
 
-The header is **one line, and the glyph carries the class**: ✅ finished, ❓ a question, 🔐 needs permission, 🔄 in progress, 💤 waiting, 🔥 failed. It used to spell that out in words on a line of its own, above a second line that repeated the repo name — so a 140-character lock screen spent a third of its budget restating what the emoji already said.
+The **first message** carries the repo and this session's chat title, then its body — and no glyph. The **replies** carry a glyph and the body, and nothing else. Every reply quotes the first message, so the repo and the title are already on screen; repeating them in each one spent roughly a third of a 140-character lock screen saying what was directly above it.
+
+The glyph carries the class: ✅ finished, ❓ a question, 🔐 needs permission, 🔄 in progress, 💤 waiting, 🔥 failed. It used to spell that out in words on a line of its own, above a second line that repeated the repo name — so a 140-character lock screen spent a third of its budget restating what the emoji already said.
 
 What follows the glyph is the repo and then **this session's chat title** — the name on the editor tab, either the one Claude Code generated or one you typed over it. That is the field that tells you *which* of a dozen live sessions is talking. It is read straight out of the transcript, where Claude Code writes `ai-title` and `custom-title` records, so it needs no editor API and nothing installed; a title you set yourself wins over the generated one. The read widens the same way `handoff_at` does, because the record is written early and scrolls out of a fixed tail — only 38 of 139 local sessions had one in their last 256KB.
 
