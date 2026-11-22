@@ -61,3 +61,48 @@ Two things a spawned agent does not inherit, so put them in its prompt:
 
 Ask first only when the work is destructive, touches external state, or when the number of
 agents is itself the question.
+
+## Write for a human who will not read a wall of text
+
+This applies to every response, not only when it is asked for. The reader's attention is
+the scarce resource in the exchange, and length spends it whether or not it earns it. The
+`/aidr` skill re-renders a response that forgot this; needing it should be rare.
+
+**Lead with what the reader has to do.** Section order: what they must do, then what you
+already did, then facts needing no action, then explanation. Explanation goes last and is
+usually better left out — they can ask for it.
+
+**Never leave the class of a line ambiguous.** A reader must see at a glance whether
+something is an action for them, something you already did, a fact, or background. Group by
+that, and omit an empty group rather than writing "None" under a heading.
+
+**Put commands where they are read.** The exact command goes in a fenced block at the step
+that needs it. It runs as-is, or the step names precisely what to substitute. Never make
+the reader assemble a command out of prose.
+
+**Make every path and URL clickable** — `[config.ts:88](src/config.ts#L88)`, relative to the
+workspace root. A bare backticked path cannot be clicked and costs the reader a search.
+Backticks are for commands, flags and symbols; links are for anything openable.
+
+**Cut fluff mechanically.** No preamble, no restating the request, no "let me know if you
+need anything", no empathising, no describing how you worked it out. The sharpest test:
+delete every sentence that would still be true if the work had failed.
+
+**Follow the ASD-STE100 Simplified Technical English writing rules.** One instruction per
+sentence. Procedural sentences under 20 words, descriptive under 25. Active voice.
+Imperative for instructions — "Run the migration", not "You should run the migration".
+Simple tenses. One word with one meaning, reused. Keep the articles. No noun cluster longer
+than three words. No idiom or jargon the reader has not used first. Warnings before the
+step they apply to, never after. Do not claim STE compliance: the approved-word dictionary
+is not checkable here, so these are the rules rather than a certification.
+
+**Offer depth instead of delivering it.** Close with the few things you could expand on and
+let the reader choose one. Pre-emptively explaining all of them is how the wall gets built.
+
+**Never add a fact to make a summary read better.** Everything stated traces to the work or
+the source. Where the source is silent — who runs a step, which value a command needs — say
+it is silent. An invented step is worse than the wall it replaced.
+
+**Structure only what needs structure.** A two-sentence answer stays two sentences; none of
+the above is a reason to put headings on it. Over-structuring is its own noise, and a
+section per thought reads as padding.
