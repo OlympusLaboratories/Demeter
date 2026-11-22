@@ -512,6 +512,27 @@ wide, and how deep the nesting went.
   still gates on `workspaceFolders`, so a window with no folder open is unaffected rather
   than empty, and the two store tests that exercise the *on* transition now switch it off
   explicitly instead of leaning on the default.
+- **`active only` filters the tree, not the node list, and keeps failures.** With a dozen
+  sessions retained per repo, nearly everything on the canvas is finished work, and the one
+  thing you opened the panel for is a single green box among them. The filter drops any node
+  with nothing `live` or `running` in it — which is a *subtree* question, not a node one, so
+  it is answered by the `activity` field `propagateActivity` already computes: the same rule
+  that paints the path to a working agent green keeps that path on the canvas, and a node is
+  kept whenever it is active itself or any descendant survived. Two deliberate exceptions.
+  An `error` node is kept whatever its activity, because `propagateActivity` pointedly does
+  not propagate failure upward, so a filter that took activity alone would delete a crashed
+  agent out of a finished tree and leave the run looking merely over — the one reading the
+  filter must never produce. And the prune **copies** rather than mutating: `view()` runs on
+  every 2s poll off the same loaded trees, so a mutating filter would progressively eat the
+  model and never grow back when it was switched off.
+
+  It starts **off** while the this-window filter starts on, which looks inconsistent and is
+  not: the this-window filter hides work this window could not resume anyway, while this one
+  hides work by the clock, and a panel that opened onto an empty canvas on a quiet machine
+  reads as a broken extension. `inactiveHidden` is reported in the status line next to the
+  `hideDeletedWork` count for the same reason the latter is — the UI never silently shrinks —
+  and the empty state names the filter rather than claiming there are no sessions, since the
+  worktree chips underneath it are still showing their live counts.
 - **The this-window filter is applied at discovery, not only on load.** Learning a repo is
   empty by loading it only works for the repo you are *on*; every other chip keeps its
   place until you click it, which is the opposite of hiding it. The filter needs no load

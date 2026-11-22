@@ -106,7 +106,7 @@ describe('AgentWatchPanel', () => {
     const row = /<div class="row status" id="status">([\s\S]*?)<\/div>/.exec(html)?.[1] ?? '';
 
     expect(row).toContain('id="status-text"');
-    for (const id of ['only-window', 'expand-all', 'zoom-out', 'zoom-in', 'zoom-level', 'fit']) {
+    for (const id of ['only-window', 'active-only', 'expand-all', 'zoom-out', 'zoom-in', 'zoom-level', 'fit']) {
       expect(row).toContain(`id="${id}"`);
     }
     expect(/<span id="status-text">\s*<\/span>/.test(row)).toBe(true);

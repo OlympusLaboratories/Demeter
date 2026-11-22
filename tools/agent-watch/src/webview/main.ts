@@ -117,6 +117,7 @@ let userAdjusted = false;
 let lastShape = '';
 let zoomSensitivity = 1;
 let onlyThisWindow = true;
+let activeOnly = false;
 let pendingFocus: { id: string; expanding: boolean } | undefined;
 
 function applyTransform(): void {
@@ -235,6 +236,10 @@ function wireViewport(): void {
     pendingFocus = undefined;
     vscode.postMessage({ type: 'setOnlyThisWindow', value: !onlyThisWindow });
   });
+  byId('active-only').addEventListener('click', () => {
+    pendingFocus = undefined;
+    vscode.postMessage({ type: 'setActiveOnly', value: !activeOnly });
+  });
   byId('fit').addEventListener('click', () => {
     pendingFocus = undefined;
     fitToView();
@@ -252,6 +257,8 @@ function wireViewport(): void {
 function renderStatus(state: ViewState): void {
   onlyThisWindow = state.onlyThisWindow;
   byId('only-window').classList.toggle('on', state.onlyThisWindow);
+  activeOnly = state.activeOnly;
+  byId('active-only').classList.toggle('on', state.activeOnly);
   const status = byId('status-text');
   status.replaceChildren();
 
@@ -259,6 +266,12 @@ function renderStatus(state: ViewState): void {
   if (liveTotal > 0) {
     const dot = el('span', 'dot', `● ${liveTotal} live`);
     status.append(dot);
+  }
+
+  if (state.inactiveHidden > 0) {
+    const quiet = el('span', 'hidden-count', `${state.inactiveHidden} inactive`);
+    quiet.title = `${state.inactiveHidden} node${state.inactiveHidden === 1 ? '' : 's'} hidden: nothing live or running in them. Turn off "active only" to show them.`;
+    status.append(quiet);
   }
 
   if (state.removedCount > 0) {
@@ -291,9 +304,11 @@ function renderGraph(state: ViewState): void {
         ? 'Scanning…'
         : state.repos.length === 0
           ? 'No Claude Code sessions found. Check agentWatch.projectsDir if your transcripts live elsewhere.'
-          : state.worktrees.length === 0
-            ? `No sessions in the last ${state.recentDays} days for this repo.`
-            : 'No sessions in this worktree.';
+          : state.activeOnly && state.inactiveHidden > 0
+            ? `Nothing live or running here. ${state.inactiveHidden} node${state.inactiveHidden === 1 ? '' : 's'} hidden by "active only".`
+            : state.worktrees.length === 0
+              ? `No sessions in the last ${state.recentDays} days for this repo.`
+              : 'No sessions in this worktree.';
     lastLayout = state.graph;
     lastShape = '';
     return;

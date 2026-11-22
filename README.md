@@ -592,7 +592,7 @@ The branch is now only a **fallback** for a session too new to have earned a tit
 
 A turn's closing chat message is written for someone sitting in front of a terminal with the diff open — headings, tables, file links, backticks, and routinely several hundred words. None of that survives a push notification, and a phone shows you roughly the first 140 characters. Sending it raw produces a wall of markdown whose first line is often a sentence ending in a colon, pointing at a table you cannot see.
 
-So the body goes through a model on the way out. `notify.py` shells out to the `claude` CLI — your Claude Code subscription, not API credit — and asks for one lock-screen line of at most 30 words: outcome first in concrete nouns, then what you have to do or an explicit "nothing needed". A 497-word message with tables and file links comes out as:
+So the body goes through a model on the way out. `notify.py` shells out to the `claude` CLI — your Claude Code subscription, not API credit — and asks for one lock-screen line of at most 45 words: outcome first in concrete nouns, then what you have to do or an explicit "nothing needed". A 497-word message with tables and file links comes out as:
 
 ```
 Built & tested: Notifications now opt-in via /ping — arms session, auto-disarms
@@ -647,7 +647,7 @@ Then check it:
 | `events` | all `true` | switch off any of `stop`, `permission`, `question`, `idle`, `failure` |
 | `summarize.command` | probe | path to the `claude` CLI; empty searches the usual install locations |
 | `summarize.model` | `claude-haiku-4-5-20251001` | model that writes the notification line |
-| `summarize.max_words` | 30 | hard word budget, enforced after the model answers |
+| `summarize.max_words` | 45 | hard word budget, enforced after the model answers |
 | `summarize.timeout` | 180 | seconds the summarizer may take before falling back to a condense |
 | `summarize.enabled` | `true` | `false` skips the model and always condenses mechanically |
 | `slack.mention` | `slack.channel` when it is a `U…` id | member ID to `<@…>` so a threaded reply still notifies |

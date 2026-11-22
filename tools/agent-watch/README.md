@@ -100,15 +100,31 @@ to the row's **top**, since the first child is where you start reading, while a 
 keeps the **node you clicked** centred, so collapsing one agent inside a 90-sibling row
 does not throw you to that row's start.
 
-The status row carries three toggles. **this repo** hides sessions that ran outside the
+The status row carries four toggles. **this repo** hides sessions that ran outside the
 repo this window has open — the ones whose `↗` would refuse to resume them here. It is
 **on when the tab opens**, since the work this window can actually resume is almost always
 what you came for; switch it off to see every repo. A window with no folder open has
-nothing to scope to, so the filter sits inert there and the full list shows regardless. **expand
+nothing to scope to, so the filter sits inert there and the full list shows regardless.
+**active only** drops everything that is neither `●` live nor `◐` running, so a repo with
+nine finished sessions in it shows you the one that is working. **expand
 all** opens every branch, and opens nothing further once everything is open, so a second
 click closes them again. **Fit** reframes the whole graph; it drops below the floor the
 expand-framing uses, so a wide deep tree lands fully on screen instead of being clipped,
 and stops at `0.15` rather than shrinking a 96-agent run to nothing.
+
+**active only** keeps the path, not just the leaf: a session is kept because something
+under it is working, which is the same rule that paints that path green, so a live agent
+nine levels down still arrives with its ancestors attached. A `✗` **failure is never
+hidden** by it — an errored agent and the path to it stay on the canvas, since a filter
+that swallowed failures would make a broken run look like an empty one. The status line
+reports how many nodes it hid, and if nothing in the branch you are on is working the
+canvas says that rather than going blank. The count badges follow the filter too: a node
+whose 90 children have finished reads `▸2` while two of them are still going.
+
+It starts **off**, the opposite of **this repo**, because it is a filter on the clock
+rather than on the workspace — switching it on by default would show an empty canvas every
+time you opened the panel with nothing running, which reads as a broken extension rather
+than as a quiet machine.
 
 A repo or branch chip with nothing to show is hidden rather than left to click into an
 empty canvas, and if the one you are on becomes empty the selection moves to a repo that

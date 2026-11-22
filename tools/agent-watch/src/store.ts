@@ -6,6 +6,7 @@ import { DEFAULT_AUTO_COLLAPSE, layoutForest } from './graphLayout';
 import { TranscriptCache } from './tail';
 import type { NodeDetail, RepoSummary, ViewState, WorktreeSummary } from './protocol';
 import { FirstChildrenWatch } from './firstChildren';
+import { pruneInactive } from './activeOnly';
 import { isInAnyFolder } from './workspacePaths';
 
 export interface StoreSettings {
@@ -44,6 +45,7 @@ export class Store {
   private workspaceFor?: string;
   private emptyRepos = new Set<string>();
   private onlyThisWindow = true;
+  private activeOnly = false;
 
   constructor(private settings: StoreSettings) {}
 
@@ -208,6 +210,10 @@ export class Store {
     this.selectedWorktree = undefined;
   }
 
+  setActiveOnly(value: boolean): void {
+    this.activeOnly = value;
+  }
+
   toggleAll(): void {
     const expandable = [...this.nodesById.values()].filter((node) => node.children.length > 0);
     const allOpen = expandable.every((node) => this.renderedExpansion.get(node.id) === true);
@@ -273,7 +279,9 @@ export class Store {
     }));
 
     const active = this.groups.find((group) => group.key === this.selectedWorktree);
-    const graph = layoutForest((active?.sessions ?? []).map((session) => session.tree), {
+    const trees = (active?.sessions ?? []).map((session) => session.tree);
+    const shown = this.activeOnly ? pruneInactive(trees) : { roots: trees, hidden: 0 };
+    const graph = layoutForest(shown.roots, {
       overrides: this.overrides,
       initialDepth: this.settings.initialDepth,
     });
@@ -291,6 +299,8 @@ export class Store {
       updatedAtMs: Date.now(),
       recentDays: this.settings.recentDays,
       onlyThisWindow: this.onlyThisWindow,
+      activeOnly: this.activeOnly,
+      inactiveHidden: shown.hidden,
       scopeKey: this.scopeKey(),
       zoomSensitivity: this.settings.zoomSensitivity,
       removedCount: this.removedCount,

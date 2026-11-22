@@ -39,6 +39,8 @@ export interface ViewState {
   recentDays: number;
   scopeKey: string;
   onlyThisWindow: boolean;
+  activeOnly: boolean;
+  inactiveHidden: number;
   zoomSensitivity: number;
   removedCount: number;
 }
@@ -58,4 +60,5 @@ export type ViewMessage =
   | { type: 'openSession'; id: string }
   | { type: 'toggleAll' }
   | { type: 'setOnlyThisWindow'; value: boolean }
+  | { type: 'setActiveOnly'; value: boolean }
   | { type: 'closeDetail' };

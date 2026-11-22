@@ -202,6 +202,10 @@ export class AgentWatchPanel {
         this.store.toggleAll();
         this.postState(false);
         return;
+      case 'setActiveOnly':
+        this.store.setActiveOnly(message.value);
+        this.postState(false);
+        return;
       case 'setOnlyThisWindow':
         this.store.setOnlyThisWindow(message.value);
         this.postState(true);
@@ -290,6 +294,7 @@ export class AgentWatchPanel {
     <span id="status-text"></span>
     <span class="spacer"></span>
     <button class="chip" id="only-window" type="button" title="Show only sessions that ran in the repo this window has open">this repo</button>
+    <button class="chip" id="active-only" type="button" title="Show only sessions and agents that are live or running — failures stay visible">active only</button>
     <button class="chip" id="expand-all" type="button" title="Expand or collapse every branch">expand all</button>
     <button class="chip" id="zoom-out" type="button">−</button>
     <span id="zoom-level">100%</span>

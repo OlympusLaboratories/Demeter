@@ -41,6 +41,11 @@ function settings(projects: string): StoreSettings {
   };
 }
 
+async function stale(...files: string[]): Promise<void> {
+  const when = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  for (const file of files) await fs.utimes(file, when, when);
+}
+
 afterEach(async () => {
   while (temps.length > 0) {
     const dir = temps.pop();
@@ -174,6 +179,56 @@ describe('Store', () => {
     expect(view.selectedRepo).toBe('-tmp-elsewhere');
     expect(view.repos.map((entry) => entry.slug)).toEqual(['-tmp-elsewhere']);
     expect(view.graph.nodes.length).toBeGreaterThan(0);
+  });
+
+  it('hides what is not working when active only is on, and says how much it hid', async () => {
+    const { projects, transcript, subagents } = await fixture();
+    await fs.writeFile(path.join(subagents, 'agent-a1.meta.json'), JSON.stringify({ description: 'finished' }));
+    await fs.writeFile(path.join(subagents, 'agent-a1.jsonl'), '');
+    await fs.writeFile(
+      path.join(subagents, 'agent-a2.meta.json'),
+      JSON.stringify({ description: 'still going', toolUseId: 'toolu_pending' }),
+    );
+    await fs.writeFile(path.join(subagents, 'agent-a2.jsonl'), '');
+    await stale(transcript, path.join(subagents, 'agent-a1.jsonl'), path.join(subagents, 'agent-a2.jsonl'));
+
+    const store = new Store({ ...settings(projects), liveWindowSeconds: 60 });
+    await store.discover();
+    await store.loadSelected();
+
+    const everything = store.view(false);
+    expect(everything.activeOnly).toBe(false);
+    expect(everything.inactiveHidden).toBe(0);
+    expect(everything.graph.nodes.map((node) => node.id)).toEqual([
+      `session:${SESSION_ID}`,
+      'agent:a1',
+      'agent:a2',
+    ]);
+
+    store.setActiveOnly(true);
+    const filtered = store.view(false);
+
+    expect(filtered.activeOnly).toBe(true);
+    expect(filtered.graph.nodes.map((node) => node.id)).toEqual([`session:${SESSION_ID}`, 'agent:a2']);
+    expect(filtered.inactiveHidden).toBe(1);
+
+    store.setActiveOnly(false);
+    expect(store.view(false).graph.nodes).toHaveLength(3);
+  });
+
+  it('empties the graph rather than showing stale work when nothing is active', async () => {
+    const { projects, transcript } = await fixture();
+    await stale(transcript);
+    const store = new Store({ ...settings(projects), liveWindowSeconds: 60 });
+    await store.discover();
+    await store.loadSelected();
+
+    store.setActiveOnly(true);
+    const view = store.view(false);
+
+    expect(view.graph.nodes).toHaveLength(0);
+    expect(view.inactiveHidden).toBe(1);
+    expect(view.worktrees).toHaveLength(1);
   });
 
   it('drops the other repos as soon as the window filter goes on', async () => {

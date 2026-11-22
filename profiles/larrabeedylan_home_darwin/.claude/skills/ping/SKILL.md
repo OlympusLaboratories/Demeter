@@ -48,16 +48,16 @@ Whatever in `$ARGUMENTS` is not a level word is a note from the user about what 
 
 The title is `<repo> <short label>` — the same shape the automatic notifications use: `demeter finished`, `ingestion needs a decision`, `billing-api failed`.
 
-The body is **one sentence, at most two, and never more than 30 words**. That is a hard budget, not a style note. It must answer both of these:
+The body is **one sentence, at most two, and never more than 45 words**. That is a hard budget, not a style note. It must answer both of these:
 
 1. What was this session working on?
 2. What does it need from the user — or does it need nothing?
 
-Take the context from the session, never from imagination. If the work cannot be described in 30 words, that is a signal the line is too vague, not that the budget is too small. Only the first ~140 characters reach a lock screen, so put the answer first and the detail second.
+Take the context from the session, never from imagination. If the work cannot be described in 45 words, that is a signal the line is too vague, not that the budget is too small. Only the first ~140 characters reach a lock screen, so put the answer first and the detail second.
 
 **Never paste your chat response into the body.** A turn's closing message is written for someone reading a terminal with the diff in front of them — it has headings, tables, file links and backticks, none of which survive a notification, and it is routinely twenty times the budget. Write the line from scratch, for someone holding a phone who cannot see any of that.
 
-Before sending, count. If the body is over 30 words, cut it rather than sending it long — drop the detail and keep the outcome and the ask, in that order. These are the things to cut first, in order: file paths and counts, tool and library names, anything about how the work was done, and every clause that would still be true if the work had gone differently.
+Before sending, count. If the body is over 45 words, cut it rather than sending it long — drop the detail and keep the outcome and the ask, in that order. These are the things to cut first, in order: file paths and counts, tool and library names, anything about how the work was done, and every clause that would still be true if the work had gone differently.
 
 ### Worked examples
 
@@ -214,7 +214,7 @@ Other skills reach this one through the `Skill` tool rather than by re-implement
 ## Important Rules
 
 - **Never send a body without context.** "Done", "Finished", "Task complete" are failures. State what the work was and what is needed.
-- **Never exceed 30 words.** A notification that has to be opened and scrolled has failed at the one job it has. Over budget means cut, never means send anyway.
+- **Never exceed 45 words.** A notification that has to be opened and scrolled has failed at the one job it has. Over budget means cut, never means send anyway.
 - **Never say what is or is not needed unless you know.** If the user has to do something, name it. If they do not, say so explicitly — "nothing needed" is information.
 - **Never name the transport.** Say "your phone" or nothing. The transport is a per-machine detail of `notify-send.sh` and this skill is identical on every machine.
 - **Never build the envelope with shell string concatenation.** Prose contains quotes, apostrophes, backticks and newlines. `json.dumps` handles all of them; `echo "{\"body\": \"$BODY\"}"` does not.
