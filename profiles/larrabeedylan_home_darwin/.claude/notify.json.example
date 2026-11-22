@@ -4,6 +4,7 @@
     "bot_token": "REPLACE_ME",
     "chat_id": "REPLACE_ME"
   },
+  "host_label": "",
   "min_turn_seconds": 60,
   "min_interval_seconds": 30,
   "quiet_hours": null,

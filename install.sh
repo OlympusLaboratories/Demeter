@@ -121,11 +121,15 @@ resolve_profile() {
 }
 
 detect_machine() {
-  # Heuristic: macOS = local machine, Linux = remote dev box
+  # Heuristic: macOS = local machine, Raspberry Pi = headless app host,
+  # other Linux = remote dev box. The Pi runs no editor and its Claude Code
+  # config is owned by another repo, so it cannot share "linux" with rdev.
   local os
   os="$(uname -s)"
   if [[ "$os" == "Darwin" ]]; then
     echo "mac"
+  elif [[ -f /etc/rpi-issue ]]; then
+    echo "pi"
   else
     echo "linux"
   fi
@@ -133,11 +137,21 @@ detect_machine() {
 
 # ── skip list ─────────────────────────────────────────────────────────────────
 # Files/dirs to skip on specific machines.
-# Format: "filename:machine"  (machine = mac | linux | both)
+# Format: "filename:machine"  (machine = mac | linux | pi | both)
 # "both" means skip everywhere. Add more entries as needed.
 
 SKIP_LIST=(
   # ".bash_profile:linux"   # example: skip bash_profile on linux
+
+  # The Pi is a headless app host with no editor and no interactive shell for
+  # the service user the profile installs as. settings.json and CLAUDE.md are
+  # owned by the Gaia repo there and must not be linked over; see
+  # profiles/larrabeedylan_home_pi/AGENTS.md.
+  "vscode:pi"
+  "shell:pi"
+  "tools:pi"
+  "settings.json:pi"
+  "CLAUDE.md:pi"
 )
 
 # Vendor packages whose skills should NOT be linked.
@@ -257,6 +271,8 @@ link_directory_contents() {
     [[ -e "$item" ]] || continue
     local name
     name="$(basename "$item")"
+    # Untracked build cruft, never a thing to publish into ~/.claude.
+    [[ "$name" == "__pycache__" ]] && continue
     should_skip "$name" "$machine" && { warn "Skipping $name (machine=$machine)"; continue; }
     link_file "$item" "$dst_dir/$name"
   done
@@ -419,8 +435,11 @@ main() {
   echo ""
 
   # ── init submodules if needed ───────────────────────────────────────────────
+  # Never fatal: under set -e a failed fetch here would abort the whole run,
+  # which on an unattended timer turns a flaky network into "nothing installed".
   if [[ -f "$REPO_DIR/.gitmodules" ]]; then
-    git -C "$REPO_DIR" submodule update --init --recursive 2>/dev/null
+    git -C "$REPO_DIR" submodule update --init --recursive 2>/dev/null ||
+      warn "Could not update submodules — vendor skills may be missing or stale."
   fi
 
   local user_dir="$profile_dir"
@@ -501,6 +520,8 @@ main() {
       local name
       name="$(basename "$src")"
 
+      should_skip "$name" "$machine" && { warn "  Skipping $name (machine=$machine)"; continue; }
+
       if [[ -d "$src" ]]; then
         # For subdirectories (e.g. skills/), link each item inside
         bold "  Linking $name/ entries..."
@@ -521,11 +542,15 @@ main() {
       fi
     done
 
-    # Hidden files inside .claude
+    # Hidden files inside .claude. The -e guard is load-bearing: with no hidden
+    # entries the glob stays literal and link_file happily creates a dangling
+    # symlink named ".*".
     for src in "$claude_src"/.*; do
+      [[ -e "$src" ]] || continue
       local name
       name="$(basename "$src")"
       [[ "$name" == "." || "$name" == ".." ]] && continue
+      should_skip "$name" "$machine" && { warn "  Skipping $name (machine=$machine)"; continue; }
       link_file "$src" "$claude_dst/$name"
     done
   fi
@@ -635,7 +660,7 @@ main() {
   # exposes an `install` target is then offered a build: the symlink gives no
   # signal that an already-installed artefact is older than the source.
   local tools_dir="$REPO_DIR/tools"
-  if [[ -d "$tools_dir" ]]; then
+  if [[ -d "$tools_dir" ]] && ! should_skip "tools" "$machine"; then
     bold "Linking shared tools to $claude_dst/tools ..."
     link_directory_contents "$tools_dir" "$claude_dst/tools" "$machine"
 

@@ -29,6 +29,24 @@ def usable(value):
     return "" if "REPLACE_ME" in text else text
 
 
+def from_file(path):
+    # A box that already holds this bot's token in its own file reads it from
+    # there rather than keeping a second copy. One owner per credential.
+    try:
+        with open(os.path.expanduser(path)) as handle:
+            return usable(handle.read())
+    except OSError as error:
+        fail("cannot read %s: %s" % (path, error))
+
+
+def setting(settings, name):
+    direct = usable(settings.get(name))
+    if direct:
+        return direct
+    path = usable(settings.get(name + "_file"))
+    return from_file(path) if path else ""
+
+
 def config():
     try:
         with open(CONFIG_PATH) as handle:
@@ -40,12 +58,12 @@ def config():
     settings = raw.get("telegram")
     if not isinstance(settings, dict):
         fail("%s has no telegram section" % CONFIG_PATH)
-    token = usable(settings.get("bot_token"))
-    chat = usable(settings.get("chat_id"))
+    token = setting(settings, "bot_token")
+    chat = setting(settings, "chat_id")
     if not token:
-        fail("telegram.bot_token is empty")
+        fail("telegram.bot_token and telegram.bot_token_file are both empty")
     if not chat:
-        fail("telegram.chat_id is empty")
+        fail("telegram.chat_id and telegram.chat_id_file are both empty")
     return token, chat
 
 
