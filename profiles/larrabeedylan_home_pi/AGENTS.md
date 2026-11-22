@@ -144,3 +144,14 @@ which is the gate that actually matters.
   installer, and the hook-registration merge — lives in Gaia under
   `bare-metal/piserver/bootstrap/demeter/`. Changing what this profile installs may
   mean changing that too.
+- **The five `:pi` skip entries are bare basenames, so they are reserved names
+  here.** `should_skip` matches a filename with no notion of which step asked, and
+  it is consulted by both `.claude/` loops as well as `link_directory_contents`. A
+  skill, hook or script named `vscode`, `shell`, `tools`, `settings.json` or
+  `CLAUDE.md` would therefore be dropped on the Pi and nowhere else, with only a
+  warning in a log nobody reads.
+- **A name that collides with a skill Gaia installs is not benign.** Linking is
+  additive and nothing collides today, but `link_file` on a real directory asks
+  "back up and replace?", which under `-y` is answered yes — so a future Demeter
+  skill named `publishing-artifacts` would move Gaia's aside to a `.bak` and warn
+  rather than fail.

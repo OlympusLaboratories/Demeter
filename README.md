@@ -127,10 +127,15 @@ SKIP_LIST=(
 )
 ```
 
-There are four machine types: `mac`, `linux`, `pi` and `both` (skip everywhere).
+`detect_machine` returns one of three values — `mac`, `linux` or `pi`. `both` is
+not a machine type but a wildcard in the skip list itself, matching whichever of
+the three you are on.
+
 `pi` is detected from `/etc/rpi-issue` and exists because the Raspberry Pi app
 host and the rdev box are both Linux while needing opposite treatment — the Pi
-runs no editor, and its Claude Code config is owned by another repo.
+runs no editor, and its Claude Code config is owned by another repo. Detection
+failing open would be expensive rather than cosmetic, so installing a `*_pi`
+profile on a machine that did not detect as `pi` is refused outright.
 
 The list is honoured by the dotfile loop, both `.claude/` loops,
 `link_directory_contents`, and the `vscode`, `shell`, `tools` and `gitignore`
