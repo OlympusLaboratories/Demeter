@@ -184,6 +184,8 @@ Record all of it with the run state, and **say it in one line before the merge g
 
 **"Nothing deploys" is a complete and common answer.** Libraries, config repos, dotfiles and most internal tooling do not deploy on merge. Record it, say it, and skip Step 10b — a run that invents a deploy to verify will eventually report a failure for something that was never meant to happen.
 
+**"Nothing deploys on merge" is not the same as "nothing left to do."** Plenty of changes reach their target through a command somebody runs afterwards — a bootstrap or setup script, an `scp` and a remote install, a `make deploy`, a config pushed to a box. That is still the deploy, and **Step 10c runs it**. So when the trigger question answers "nothing", ask the follow-up before moving on: *is there a command that makes this change take effect, and can this session run it?* Record the command and whether this session can reach the target, exactly as you recorded the rest.
+
 **Never carry an expectation you did not derive here.** If the deploy path is genuinely unreadable from the repository — a pipeline shelling out to an opaque internal script, a controller configured somewhere else entirely — then *that* is the finding. Record it as unknown and let Step 10b report the change as merged-but-unverified, rather than manufacturing a check that passes for the wrong reason.
 
 On a `--merge false` run this line is still worth producing, and it is arguably worth more: it tells the user what pressing the button is going to set off.
@@ -317,7 +319,7 @@ The fix skill committed onto the default branch and no merge request is coming. 
 
 Push the branch, then open the MR with the helper's create command. Title from the commit subject; description from Step 3; reference the ticket where there is one so the forge's integration can transition it on merge.
 
-**The user may land the change themselves while the run is still working.** It is not a conflict and not a race to recover from — a human merging is strictly stronger than the gate this skill was going to apply. What it breaks is the assumption that the branch is still the place to put work: a squash merge rewrites the commit, so a later push onto that branch no longer shares history with the default branch, and the forge may have deleted the branch under you so the push silently recreates it. Observed exactly that way — a review round finished after the merge and pushed a fix onto a branch with no open merge request, where it would have sat unnoticed.
+**The user may land the change themselves while the run is still working.** It is not a conflict and not a race to recover from — a human merging is strictly stronger than the gate this skill was going to apply. Most often the run invited it — see Step 5b on never reporting a change request as ready while a review is still running. What it breaks is the assumption that the branch is still the place to put work: a squash merge rewrites the commit, so a later push onto that branch no longer shares history with the default branch, and the forge may have deleted the branch under you so the push silently recreates it. Observed exactly that way — a review round finished after the merge and pushed a fix onto a branch with no open merge request, where it would have sat unnoticed.
 
 So before pushing anything at Step 6 or later, **re-read the merge request's state**. Found merged: do not push to the old branch, do not reopen anything. Cut a fresh branch from the updated default branch, cherry-pick only the commits that did not land, and open a second merge request for them. Say in the report who merged the first one and which commits the follow-up carries, because the user's mental model is that everything went in together.
 
@@ -348,6 +350,12 @@ Arm the monitor first and launch the swarm second, then yield once for both. Nei
 The swarm's completion notification wakes you exactly as the monitor's does. When it is the swarm that woke you, its confirmed findings are a new source of review feedback — go to Step 6 and let them enter the loop where a bot's threads do.
 
 **The swarm runs once per run, not once per round.** It reviews the diff as first pushed, and re-running it after every round would spend a fleet re-reviewing code it has already passed. One re-run is justified when a round changed the shape of the change rather than patching it — a redesign, not a fix. More than one is not.
+
+**Never report a change request as ready while a review you commissioned is still running.** The user reads "green, mergeable, no reviewer configured" as "this is waiting on me" — and on a repository with no reviewer of its own they are right to read it that way. So they merge it, and the review's findings land afterwards with nowhere to go.
+
+That is not a hypothetical. A run reported an MR as `MERGEABLE/CLEAN`, said the forge's reviewer could not run in that repository, and then yielded the turn with the substitute review still in flight. The user merged it, which was the correct reading of what they had been told, and the findings then needed a second change request. **The run caused that, not the user.**
+
+So while a review is outstanding: either say nothing about mergeability, or say in the same breath that it is not ready and why. One line is enough — *"holding this until the review I started comes back."* And never describe an absent reviewer without naming what is standing in for it and when that will report.
 
 If `review-code` errors or is not installed, record that in the run notes and continue on the forge's reviewer alone. A missing swarm degrades the review; it never stops the run.
 
@@ -479,6 +487,27 @@ A failed deploy gets a ping and nothing else.
 
 Verify after **each** merge, not only after the last one. Every merge to the default branch fires its own deploy, so an intermediate failure is a real failure. **If an intermediate deploy fails, stop the stack** — do not merge the next change onto a default branch that is currently broken — and say that is why you stopped.
 
+## Step 10c: Run the Deploy Yourself
+
+Step 0b established whether a command is what makes this change take effect. If one is, and this session can reach the target, **run it.**
+
+Do not end a run by handing the user a block of commands they could have watched you execute. This is the most common way an unattended run fails at being unattended, and the shape of the failure is particular: everything hard is already done, the report reads like completion, and the user discovers at the bottom that they have been given homework by something which had the credentials, the access and the authority to do the job. A merge is irreversible and this skill performs it without asking. A scripted, idempotent deploy is almost always *less* consequential than the merge that preceded it, so stopping short of it is backwards.
+
+Run it when all of these hold, which is the normal case:
+
+- Step 0b identified the command, and a read-only probe showed this session can reach the target.
+- It is the repository's own documented deploy path, not one you composed for the occasion.
+- It is idempotent, or this is its first run.
+- It destroys nothing beyond what this change replaces.
+
+Then verify per Step 10b, and report what you **ran** rather than what they should run.
+
+**Ask first only for the specific hazards**, and ask by pinging rather than parking silently: a step that interrupts other people, a one-way data migration, anything that spends money, or a target the change request never mentioned. Even then, say what you intend to run and ask for a yes — do not hand over the commands and call it a hand-off.
+
+**Report the side effects, because they are the part the diff does not show.** A restarted service and what it dropped, a cache cleared, a window where something was unavailable. "Restarted the server; no sessions were live" is the sentence that makes a deploy auditable.
+
+If the command fails, that is Step 10b's **failed** state: gather the evidence, ping, and change nothing else. Never remediate.
+
 ## Step 11: Close the Loop and Ping
 
 When the MR merges, when a `--branch default` run has pushed, or when you stop for any reason:
@@ -517,6 +546,7 @@ Stopping is reserved for these. Everything else — surprising test failures, un
 10. **The merge is not the finish line, and "merged" is not "deployed".** Step 0b works out how the change reaches production and Step 10b confirms it got there, tied to the commit that landed rather than to a job going green. Unverified is a reportable outcome — **never** upgrade cannot-observe or timed-out into success.
 11. **Arm the notifications before the first unattended step.** A ping is the only thing that writes `armed_at`, and an unarmed session is silent through every permission prompt, question and failure in the run. Step 0d sends it once, on every route in — hand-off, direct, or a mid-run `/autopilot` amendment. Pinging only at the end arms the session at the exact moment it stops mattering.
 12. **Pause on purpose; never run out mid-flight.** Read the quota from the `claude-usage` cache at step boundaries, never from the API, and pause at 85% of the session window. Journal the step, the next action and the ledger as you go, so the pause costs one write. A weekly, scoped or spend limit pauses and pings and **never** arms its own return — that window is the user's to spend.
+14. **Never hand the user a command you can run yourself.** If Step 0b found the deploy and this session can reach the target, Step 10c runs it. A run that finishes with a block of commands for the user to paste has failed at the one thing it was for, and it fails in the worst way — looking finished. The same goes for anything else in reach: pulling a repo, restarting a service, installing a file on a box you already have access to.
 13. **A broken deploy is warned about, never fixed.** No rollback, no revert, no re-run of a deploy job, no touching the runtime. Gather the evidence, ping immediately, and stop. An unattended agent reverting production at 2am is worse than a bad deploy somebody has been told about.
 
 ## Step 12: Self-Improvement

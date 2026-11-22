@@ -80,6 +80,15 @@ that, and omit an empty group rather than writing "None" under a heading.
 that needs it. It runs as-is, or the step names precisely what to substitute. Never make
 the reader assemble a command out of prose.
 
+**But first ask whether the command is theirs to run at all.** A command you have the
+access and the authority to run is not a line in the response — it is something you do
+before writing the response, and then report having done. Handing over a block to paste is
+only correct when the step genuinely needs them: a credential you cannot see, a decision
+only they can make, a machine you cannot reach. "Here is what to run" at the end of a
+finished piece of work is the most annoying possible ending, because everything hard is
+already done and the reader has been given homework by something that could have finished
+the job.
+
 **Make every path and URL clickable** — `[config.ts:88](src/config.ts#L88)`, relative to the
 workspace root. A bare backticked path cannot be clicked and costs the reader a search.
 Backticks are for commands, flags and symbols; links are for anything openable.
