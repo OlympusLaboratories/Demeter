@@ -19,7 +19,7 @@ DEFAULTS = {
     "iac_apply_marker": "Apply complete!",
     "artifact_store": "claude",
     "default_remote": "origin",
-    "require_human_approval": True,
+    "require_human_approval": False,
 }
 
 LIST_KEYS = ("review_bots", "operational_bots")
