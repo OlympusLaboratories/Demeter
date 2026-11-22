@@ -11,7 +11,7 @@ description: The automated tail of fix-linear and fix-freeform — it commits, p
 
 The name is the contract, and it is worth taking literally. An autopilot holds a course somebody else set: it does not re-decide the destination, and it has no opinion about why the route was chosen. Everything from the branch to the description to whether a review swarm runs was settled before this skill was reached — it flies the plan it was handed, and the whole of its judgment goes into the part the fix skills leave undone.
 
-**The standing instruction, scoped precisely: trust your judgment for everything after the code is written, and pull the user in only if absolutely needed.** That scope is the whole of it. Autopilot automates the *tail*; it does not close the fix skill's own gates. A vague ticket still gets a question, an ambiguous requirement still gets `AskUserQuestion`, and a plan worth seeing still gets shown — those happen in the fix skill, before this one is reached, and being unattended later is not a reason to guess earlier. From the commit onwards there is nobody to ask, so every judgment call you make alone gets written down somewhere durable — the ticket, the PR description, or a thread reply — because the record is what replaces the conversation you would otherwise have had.
+**The standing instruction, scoped precisely: trust your judgment for everything after the code is written, and pull the user in only if absolutely needed.** That scope is the whole of it. Autopilot automates the *tail*; it does not close the fix skill's own gates. A vague ticket still gets a question, an ambiguous requirement still gets `AskUserQuestion`, and a plan worth seeing still gets shown — those happen in the fix skill, before this one is reached, and being unattended later is not a reason to guess earlier. From the commit onwards there is nobody to ask, so every judgment call you make alone gets written down, because the record is what replaces the conversation you would otherwise have had. **Where it gets written down is fixed and narrow** — see **The decision record** below. It is never a comment.
 
 **Parameter:** `$ARGUMENTS` — on a direct invocation, a Linear ticket identifier or a freeform problem statement, plus optional flags. On a mid-run amendment, flags only.
 
@@ -61,12 +61,72 @@ Three rules govern every amendment:
 | `--diagram false` | any time | Skip the Step 11 attach. Never delete one already attached. |
 | `--review true` | before the merge | Run the swarm now against what is pushed (Step 5b), and feed its confirmed findings through `fix-feedback` as a fresh round. This is the amendment most likely to arrive with `--merge false` beside it, and the pair means *hold on, let me see it reviewed first*. |
 | `--review false` | before the merge | Stop starting new swarm rounds. Never discard findings already posted to the pull request — they are the reviewer's now. |
-| `--quick-description false` | after the description exists | The user wants the thorough version. Re-run `changes-description` with no flag and replace the description on the pull request. |
+| `--quick-description false` | after the description exists | The user wants the thorough version. Re-run `changes-description` with no flag and replace the description on the pull request — then **re-append the decision fold**, which the replacement drops. |
 | `--quick-description true` | after the description exists | A no-op. Nobody wants a cheaper rewrite of text that already exists; say so in one line. |
 | `--branch new` | before the push | This is the fix skill's own escalation path and it is always available: cut the branch, move the commits (its "escalating after work has already started" step), and carry on. |
 | `--branch default` | after a feature branch has commits | Refuse, in one line. Escalation is one-way within a run, and the commits live on a branch created for a reason. |
 | `--autopilot false` | any time | Stop the automation where it stands and report. Leave the branch, the pull request and the threads exactly as they are — **never delete a pushed branch or close a pull request** to honour this. It means *stop driving*, not *undo*. |
 | `--autopilot true` | on a run that had it off | Engage from Step 2: commit if needed, push, and carry on as normal. |
+
+### The decision record
+
+An unattended run makes calls a reviewer never got to weigh in on, and those calls have to survive the run. That record used to be posted as its own comment on the change request, written at the moment each decision was made, with no format and no budget. It was the right information in the wrong place in the wrong shape: a wall of unedited prose, the first thing a reviewer sees, ahead of the diff it is talking about.
+
+**So capture and publication are separate, and they happen at different times for different reasons.**
+
+**Capture as you go, locally.** The instant you make a call nobody reviewed, append one line to a ledger in the session scratchpad — not to the forge. Writing it at the moment is not a style preference: a ledger reconstructed at the end of a two-hour run is reconstructed from memory, and the entries it invents are indistinguishable from the ones it remembers. Nothing about this is visible to anybody yet.
+
+**Publish once, at Step 11.3, into the description.** The ledger is appended to the **end of the already-generated change request description**, inside a collapsed `<details>` fold, in a single edit. That is the only place it goes. It happens at Step 11 because that is the first point at which a description exists to append to — `changes-description` runs at Step 3, long after the first decision is made, so publishing at capture time is exactly what forced it into a comment before.
+
+**Never post the ledger as a comment**, on the change request or on a thread, not even when the description edit fails. If the edit fails, say so in one line, carry the ledger in the Step 11 report, and move on — a comment is the surface this record is specifically not allowed to use, and a failed append is not a reason to use it.
+
+#### What earns an entry
+
+This is the part that decides whether the fold is four useful lines or a wall, and it matters more than the formatting.
+
+**An entry earns its place only if a reviewer could reasonably have decided differently.** Apply that test to every line before it goes in, and delete the ones that fail. These all fail:
+
+- Anything that followed an existing pattern, convention or lint rule. Matching the codebase is the default, not a decision.
+- Anything the ticket, the problem statement or the spec already said to do.
+- Anything a reader learns faster from the diff — which file was touched, what a function was renamed to, that tests were added.
+- Anything that would be equally true of any run: "ran the tests", "kept the change minimal", "followed the no-comments rule".
+- Anything already recorded where it belongs. A `fix-feedback` thread reply **is** the record of that decision, sitting on the thread it concerns; repeating it in the fold is duplication, and the thread is the better surface.
+
+What is left is the real set: an ambiguity resolved one way when the other way was defensible, a scope boundary drawn, a failure classified as flaky rather than real, an alternative rejected, something deliberately not done.
+
+**More than about eight entries means the test was not applied.** Do not raise the cap — re-apply the filter and keep the ones a reviewer could argue with.
+
+#### Format
+
+One fold, appended last, after the diagram link if there is one:
+
+```markdown
+<details>
+<summary>Decisions made without review (4)</summary>
+
+- **Dropped the retry on 409** — the handler is already idempotent, so a retry duplicates the write. Capping at three was the alternative; it hides the bug rather than fixing it.
+- **Left the legacy `v1` path in place** — two callers outside this repo still use it. Removing it belongs in its own change.
+- **Treated the `e2e-billing` failure as real** — it failed the same way twice, on the same assertion.
+- **Did not backfill historical rows** — the ticket scopes to new writes, and a backfill needs a maintenance window.
+
+</details>
+```
+
+Rules, all mechanical:
+
+- **One bullet per decision.** A bolded lead naming the decision in at most eight words, an em dash, then the reason. Name the rejected alternative when there was one, in the same bullet.
+- **At most 25 words after the bold.** Over budget means cut, never means run on. Cut the reasoning before the decision — a reviewer who disagrees will ask.
+- **No preamble, no heading, no closing sentence.** The `<summary>` is the only label. A sentence introducing the list is a sentence nobody needs.
+- **The count goes in the summary**, so the fold can be judged without expanding it.
+- **Zero hard-slop phrases.** The mechanical list lives in `docs-humanize`'s `HARD_SLOP` — `leverage`, `utilize`, `facilitate`, `seamless`, `in order to`, `plays a crucial role`, `it is worth noting`, `empower`, and the rest. Check the ledger against it before publishing, matching a **whitespace-flattened** copy so a line break inside a phrase cannot hide it. These are the phrases that make a generated block unreadable, and they are the reason this record needs a budget at all.
+- **Past tense, active, first word a verb.** "Dropped", "Left", "Treated", "Did not" — never "It was decided that".
+- **An empty ledger means no fold.** A run that made no unreviewed calls says nothing. Never publish an empty fold, and never pad one to look thorough.
+
+**The fold sits outside the description's word budget.** `changes-description` measures its prose mechanically and the ledger would blow that budget, which is exactly why the fold is appended afterwards rather than handed to that skill as input. Do not ask it to include the ledger, and do not count the fold against its budget.
+
+**A regenerated description loses the fold.** If a `--quick-description false` amendment re-runs `changes-description` and replaces the description, re-append the fold afterwards from the ledger, which is still on disk. The ledger is the source of truth; the fold is a rendering of it.
+
+**On a `--branch default` run there is no description**, so the ledger goes into the Step 11 report and the ticket comment instead — same filter, same budget, same bullets, minus the fold, since there is nothing to collapse it inside.
 
 ### `--merge false` is the flag to actually honour
 
@@ -111,7 +171,7 @@ On a direct invocation, invoke `fix-linear` (ticket id) or `fix-freeform` (anyth
 
 Two things hold on every route:
 
-- **Post the locked plan and every judgment call somewhere durable** once the implementation is done — a comment on the ticket on a ticket run, the pull request description on a freeform one. From the commit onwards there is nobody to ask, so the record is what replaces the conversation.
+- **Start the decision ledger, and append to it as you go.** Every call nobody reviewed gets one line in the scratchpad ledger at the moment you make it, the locked plan's own judgment calls included. Nothing is published to the forge here — the ledger stays local until Step 11.3 appends it to the description. See **The decision record**.
 - **The no-comments rule still applies.** The code carries no explanatory comments, no banners, no docstrings that were not already there, no TODOs, no ticket references. The fix skills restate this in full; do not let an unattended run be the reason it slips.
 
 **Every flag but `--merge` and `--max-rounds` belongs to the fix skill.** `--branch`, `--quick-description`, `--diagram` and `--review` are resolved there, against this machine's defaults, and this skill does not second-guess any of them. In particular, an unattended run is not grounds to turn a swarm on that the machine's default left off, nor to spend the full description panel where it left the one-shot.
@@ -277,9 +337,10 @@ The principle: a step is armed the instant its precondition is genuinely satisfi
 
 When the PR merges, when a `--branch default` run has pushed, or when you stop for any reason:
 
-1. **Record it where the work lives.** On a ticket run, comment the PR URL, what shipped, and anything noteworthy. A `--branch default` run has no PR, so record the pushed commit SHA and its forge URL instead. Work you deliberately did not do becomes its own ticket, linked back — never a buried bullet in a closing comment. Check whether the forge integration already moved the ticket before moving it by hand; that integration is asynchronous.
+1. **Record it where the work lives.** On a ticket run, comment the PR URL and what shipped — **not the decision ledger**, which belongs in the description fold at 11.3 and must not be duplicated as a wall of text on the ticket as well. Anything noteworthy beyond those two is a line, not a section. A `--branch default` run has no PR, so record the pushed commit SHA and its forge URL instead. Work you deliberately did not do becomes its own ticket, linked back — never a buried bullet in a closing comment. Check whether the forge integration already moved the ticket before moving it by hand; that integration is asynchronous.
 2. **Attach the diagram** when `--diagram` is true and the run opened a pull request. On a `--branch default` run the fix skill already produced it at its own diagram step, so do not produce a second one — carry the link it gave you into the report and the ticket comment. Invoke `changes-diagram` with the `Skill` tool and append its link to the PR description — or, on a `--branch default` run, carry the link in the report and the ticket comment, since there is no description to append to. Do this once the code has settled — a diagram of a branch that changed three more times is worse than none. **A failed or unavailable diagram never fails the run**: say so in one line and carry on.
-3. **Ping the user.** Invoke the `ping` skill with the `Skill` tool. This is the only message the user may see, so it carries what happened and whether anything is needed — a ping that says "done" wastes it. **A `--branch default` run says so in the ping**: the change is on the default branch, unreviewed, and already live. That is what the user chose, and it is also the single fact most worth knowing on a phone.
+3. **Append the decision record.** Take the scratchpad ledger, apply the filter and the budget from **The decision record**, and append it to the end of the change request description inside the collapsed `<details>` fold — one edit, after the diagram link. An empty ledger publishes nothing. **Never post it as a comment**: if the description edit fails, say so in one line and carry the ledger in the report instead.
+4. **Ping the user.** Invoke the `ping` skill with the `Skill` tool. This is the only message the user may see, so it carries what happened and whether anything is needed — a ping that says "done" wastes it. **A `--branch default` run says so in the ping**: the change is on the default branch, unreviewed, and already live. That is what the user chose, and it is also the single fact most worth knowing on a phone.
 
 ### When to stop and ping instead of continuing
 
@@ -303,7 +364,7 @@ Stopping is reserved for these. Everything else — surprising test failures, un
 4. **Comments before CI.** Always.
 5. **This run owns exactly one branch** (or one named stack) — including when that branch is the default one. Never force-push, never amend a pushed commit, never act on a pull request this run did not open.
 6. **Never override the fix skill's flags — but always honour an amendment.** `--merge` and `--max-rounds` are this skill's; every other flag was decided before this skill was reached, `--branch` included, and automation is what this skill adds rather than a second opinion on what the change should be. The one thing that does change a flag mid-run is the user saying so with `/autopilot <flags>`, and that is not an override, it is an instruction. When one arrives, change only what they named and leave the rest at its current run value.
-7. **Record every decision you made alone**, at the time you made it — on the ticket, as a PR comment on a freeform run, or in the Step 11 report when the run produced neither. The record is what replaces the conversation, so it carries the reasoning and nothing about the process that produced it.
+7. **Capture every decision you made alone at the time you made it, and publish it exactly once.** The capture is a line in the local ledger; the publication is the collapsed fold appended to the description at Step 11.3. Never a comment, on the change request or on a thread. The record is what replaces the conversation, so it carries the reasoning and nothing about the process that produced it — see **The decision record** for what earns an entry and the budget it has to fit in.
 8. **No comments in the code.** Autonomy does not relax it.
 9. **An empty config value means the capability is absent, not that you should guess at it.** Never substitute a name you saw in an example for one the machine did not supply.
 
