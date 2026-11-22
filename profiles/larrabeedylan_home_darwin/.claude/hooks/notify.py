@@ -67,6 +67,7 @@ DEFAULTS = {
     "min_interval_seconds": 30,
     "quiet_hours": None,
     "only_when_armed": True,
+    "host_label": "",
     "events": {
         "stop": True,
         "permission": True,
@@ -214,11 +215,18 @@ def git(cwd, *args):
     return done.stdout.strip() if done.returncode == 0 else None
 
 
-def repo_label(cwd):
+def repo_label(cwd, host_label=""):
+    # A session rooted outside a checkout has no repo to name. The directory
+    # basename is what the field used to fall back to, and on a box whose
+    # sessions all start in one fixed directory that is the same uninformative
+    # word every time. host_label replaces it with something that identifies
+    # the machine instead, and stays empty everywhere it is not configured.
     if not cwd or not os.path.isdir(cwd):
-        return os.path.basename(cwd or "") or "?"
+        return host_label or os.path.basename(cwd or "") or "?"
     top = git(cwd, "rev-parse", "--show-toplevel")
-    return os.path.basename(top or cwd) or "?"
+    if top:
+        return os.path.basename(top) or "?"
+    return host_label or os.path.basename(cwd) or "?"
 
 
 def branch_label(cwd):
@@ -625,7 +633,7 @@ def handle(payload):
         return "skip: rate limited (%.0fs ago)" % (now - last)
 
     cwd = payload.get("cwd") or os.getcwd()
-    repo = repo_label(cwd)
+    repo = repo_label(cwd, config["host_label"])
     branch = branch_label(cwd)
     body, how = shorten(body_for(kind, payload), kind, config)
     envelope = {
@@ -757,10 +765,19 @@ def main():
     if args and args[0] == "--label":
         print(session_title(transcript_for(args[1] if len(args) > 1 else "")) or "")
         return 0
+    if args and args[0] == "--repo":
+        # The ping skill resolves the same field for a message it sends itself.
+        # Sharing this resolution is what keeps a deliberate ping and an
+        # automatic one from disagreeing about what to call the same session.
+        config, _ = load_config()
+        host_label = (config or DEFAULTS)["host_label"]
+        print(repo_label(args[1] if len(args) > 1 else os.getcwd(), host_label))
+        return 0
     if args:
         print(
             "usage: notify.py [--test | --away [<duration>|off|status]"
-            " | --disarm <session-id>|all | --label <session-id>]", file=sys.stderr)
+            " | --disarm <session-id>|all | --label <session-id>"
+            " | --repo [<cwd>]]", file=sys.stderr)
         return 2
     payload = json.load(sys.stdin)
     log("%s %s" % (payload.get("hook_event_name"), handle(payload)))

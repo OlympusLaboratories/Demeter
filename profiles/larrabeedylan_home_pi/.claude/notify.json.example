@@ -1,0 +1,27 @@
+{
+  "_comment": "This box already holds the bot's credential for its own alerting, so the token is referenced rather than copied. bot_token/chat_id still work if a literal value is ever needed; the _file forms win only when the direct key is empty.",
+  "transport": "telegram",
+  "telegram": {
+    "bot_token_file": "~/.telegram-jarvis-token",
+    "chat_id_file": "~/.telegram-alert-chat"
+  },
+  "_host_label": "What a notification calls a session that is not inside a checkout. Every phone session starts in one fixed directory here, so without this every ping from this box would carry the same uninformative word.",
+  "host_label": "pi",
+  "min_turn_seconds": 60,
+  "min_interval_seconds": 30,
+  "quiet_hours": null,
+  "only_when_armed": true,
+  "summarize": {
+    "command": "",
+    "model": "claude-haiku-4-5-20251001",
+    "max_words": 45,
+    "timeout": 180
+  },
+  "events": {
+    "stop": true,
+    "permission": true,
+    "question": true,
+    "idle": true,
+    "failure": true
+  }
+}

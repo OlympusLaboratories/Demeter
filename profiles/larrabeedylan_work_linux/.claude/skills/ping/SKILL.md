@@ -96,14 +96,15 @@ Notice what the good ones share: a concrete noun from the actual work, and an ex
 ## Step 3: Gather Context
 
 ```bash
-REPO=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+REPO=$("$HOME/.claude/hooks/notify.py" --repo 2>/dev/null) || REPO=""
+[ -n "$REPO" ] || REPO=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 BRANCH=$(git branch --show-current 2>/dev/null)
 SESSION="${CLAUDE_CODE_SESSION_ID:-${CLAUDE_SESSION_ID:-}}"
 LABEL=$("$HOME/.claude/hooks/notify.py" --label "$SESSION" 2>/dev/null)
 echo "repo=$REPO label=$LABEL branch=$BRANCH session=${SESSION:0:8}"
 ```
 
-- `REPO` always resolves. Outside a git repo it falls back to the directory name — a ping must never fail because the cwd is not a checkout.
+- `REPO` always resolves, and it resolves through the hook so a deliberate ping and an automatic one never disagree about what to call the same session. Inside a checkout it is the repository name. Outside one it is the machine's configured `host_label`, or the directory name when that is unset — and the plain `basename` expression remains as a fallback for a machine where the hook is not installed, because a ping must never fail just because the cwd is not a checkout. A session that always starts in one fixed directory is exactly the case `host_label` exists for: without it, every ping from that box carries the same uninformative word.
 - `LABEL` is this session's chat title — the name on the editor tab, either the one Claude Code generated or one the user typed over it. It is the single most useful piece of context in the header, because it says *which* of a dozen live sessions is talking. It is empty on a session too new or too short to have earned a title, and on a machine where the hook is not installed; omit the field then rather than sending an empty string.
 - `BRANCH` is empty on a detached HEAD or outside a repo. Omit the field rather than sending an empty string. It is only a **fallback** for a missing `LABEL`: most work here happens in worktrees, where the branch name is the least surprising thing about a session and says nothing about what it is doing.
 - `SESSION` is set in a Claude Code session. Only its first 8 characters go in the envelope. If it is empty, omit the field and skip the thread state entirely.
@@ -116,7 +117,8 @@ Fill in `LEVEL`, `TITLE` and `BODY` from Steps 1 and 2, then run the whole block
 
 ```bash
 set -o pipefail
-REPO=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+REPO=$("$HOME/.claude/hooks/notify.py" --repo 2>/dev/null) || REPO=""
+[ -n "$REPO" ] || REPO=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 BRANCH=$(git branch --show-current 2>/dev/null)
 SESSION="${CLAUDE_CODE_SESSION_ID:-${CLAUDE_SESSION_ID:-}}"
 LABEL=$("$HOME/.claude/hooks/notify.py" --label "$SESSION" 2>/dev/null)

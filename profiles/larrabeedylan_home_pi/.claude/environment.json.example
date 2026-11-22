@@ -1,0 +1,31 @@
+{
+  "_comment": "Overrides for the fix/review skills on the Raspberry Pi app host. Every key is optional — skill-env.sh carries working defaults, so deleting a key restores the default rather than breaking a skill. Run: ~/.claude/scripts/skill-env.sh check",
+
+  "forge": "github",
+  "api_script": "~/.claude/scripts/github-api.sh",
+
+  "_review_bots": "Usernames of the AI reviewers on this machine. Leave empty and the skills treat every non-operational bot thread as real review feedback, which is the safe default.",
+  "review_bots": [],
+  "_review_job": "CI job/check name that re-runs the AI review. Empty means the skills never try to re-trigger it.",
+  "review_job": "",
+
+  "_operational_bots": "Bots whose comments are plumbing, not review (plan output, merge-conflict reports, pipeline status). Their threads are skipped.",
+  "operational_bots": [],
+  "_iac_bot": "Infrastructure bot that must apply before merge. Empty disables the whole apply-before-merge gate. Gaia is planned and applied by Atlantis on the PR and has no push-to-main trigger, so a Terraform run through this box needs this filled in before autopilot can be trusted to merge one.",
+  "iac_bot": "",
+  "iac_plan_marker": "",
+  "iac_apply_marker": "",
+
+  "_artifact_store": "Pinned to mnemosyne rather than auto: a PreToolUse hook on this box refuses the Artifact tool outright, so claude.ai is not a fallback here. Pages are served from this Pi by publish-artifact.",
+  "artifact_store": "mnemosyne",
+  "require_human_approval": false,
+
+  "_fix_defaults": "Defaults for every /fix-linear and /fix-freeform run on this machine. A flag in the invocation always wins; these only decide what an unflagged run does. Autopilot is on by default, so an unflagged run goes all the way to a merged change request — there is nobody else to press the button.",
+  "fix_autopilot": true,
+  "fix_branch": "new",
+  "fix_quick_description": true,
+  "fix_diagram": false,
+  "fix_review": false,
+  "fix_merge": true,
+  "fix_max_rounds": 3
+}

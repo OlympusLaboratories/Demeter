@@ -117,14 +117,25 @@ cd profiles/<your-profile>
 
 ## Machine-Specific Files
 
-If a file should only be linked on one machine type (macOS vs Linux), add it to the `SKIP_LIST` array near the top of `install.sh`:
+If a file should only be linked on some machine types, add it to the `SKIP_LIST` array near the top of `install.sh`:
 
 ```bash
 SKIP_LIST=(
-  ".bash_profile:linux"   # skip on linux, link on mac only
-  "some-file:mac"         # skip on mac, link on linux only
+  ".bash_profile:linux"   # skip on linux, link on mac and pi
+  "some-file:mac"         # skip on mac, link on linux and pi
+  "vscode:pi"             # skip on the Raspberry Pi, link elsewhere
 )
 ```
+
+There are four machine types: `mac`, `linux`, `pi` and `both` (skip everywhere).
+`pi` is detected from `/etc/rpi-issue` and exists because the Raspberry Pi app
+host and the rdev box are both Linux while needing opposite treatment — the Pi
+runs no editor, and its Claude Code config is owned by another repo.
+
+The list is honoured by the dotfile loop, both `.claude/` loops,
+`link_directory_contents`, and the `vscode`, `shell`, `tools` and `gitignore`
+step gates. A new installer step that checks none of them will fire on a box
+with no editor.
 
 ## Editor Settings
 
@@ -712,6 +723,8 @@ Do not skip that resolution by hand: passing a `U…` id straight to `chat.postM
 
 **Home profile (Telegram).** Message [@BotFather](https://t.me/BotFather), `/newbot`, and put the token in `telegram.bot_token`. Send your new bot a message, then read your chat id out of `https://api.telegram.org/bot<token>/getUpdates` and put it in `telegram.chat_id`.
 
+On a machine that already holds that bot's credential for its own alerting, use `telegram.bot_token_file` and `telegram.chat_id_file` instead and point them at the existing files. The `_file` form is read only when the direct key is empty, so there is one owner per credential and no second copy to rotate. The Pi profile ships configured this way, which is why notifications there are live on the first install rather than dormant.
+
 Then check it:
 
 ```bash
@@ -722,6 +735,7 @@ Then check it:
 
 | key | default | |
 |---|---|---|
+| `host_label` | `""` | what to call a session that is not inside a checkout, in place of the directory name. Set it on a box whose sessions all start in one fixed directory, or every ping from it carries the same uninformative word |
 | `only_when_armed` | `true` | notify only in sessions a ping has opted in; `false` restores always-on |
 | `min_turn_seconds` | 60 | shortest turn that earns a "finished" ping, and only when `only_when_armed` is `false` |
 | `min_interval_seconds` | 30 | floor between two messages from the same session |
@@ -734,6 +748,8 @@ Then check it:
 | `summarize.enabled` | `true` | `false` skips the model and always condenses mechanically |
 | `slack.mention` | `slack.channel` when it is a `U…` id | member ID to `<@…>` so a threaded reply still notifies |
 | `slack.mention_levels` | `stop`, `question`, `permission`, `failure` | which levels earn the mention |
+| `telegram.bot_token_file` | — | path to read the token from, when the box already has one |
+| `telegram.chat_id_file` | — | path to read the chat id from, likewise |
 
 Telegram needs none of this. Its `reply_to_message_id` renders inline in the chat rather than collapsing into a thread, so every message stays top-level and notifies on its own.
 
