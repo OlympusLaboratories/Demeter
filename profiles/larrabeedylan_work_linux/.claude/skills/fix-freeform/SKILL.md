@@ -168,6 +168,7 @@ By default this path isolates the work in its own **git worktree** — a separat
    git worktree list --porcelain
    ```
    If `BRANCH_NAME` (or `WORKTREE_PATH`) is already listed, **enter it** with the `EnterWorktree` tool (`path:` = that worktree's path), merge `origin/<DEFAULT_BRANCH>` (`--no-edit`), then skip to Step 3 — its dependencies are already installed, so skip the install offer below too.
+   **A worktree that already exists may also already have an open merge request** — a previous run can be interrupted after it pushed and opened one (an API rate limit, a killed session). Before re-planning anything, check for one: run `~/.claude/scripts/gitlab-api.sh` with no arguments and use whichever of its subcommands lists merge requests for a branch head. If one is open, its diff, its description and its CI state are the record of what that run completed, and they are read *first* — the work already done is established by reading the merge request, not by re-deriving it from the problem statement. Do not re-implement a change the diff already contains, do not open a second merge request, and do not cut a new branch. Nothing in Step 2d assumes this, which is exactly why it has to be checked here.
 4. **If the branch exists** (locally or remotely) but has no worktree, add a worktree on it:
    ```bash
    git worktree add <WORKTREE_PATH> <BRANCH_NAME>

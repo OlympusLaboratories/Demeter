@@ -121,6 +121,8 @@ The fix skill committed onto the default branch and no pull request is coming. P
 
 Push the branch, then open the PR with the helper's create command. Title from the commit subject; description from Step 3; reference the ticket where there is one so the forge's integration can transition it on merge.
 
+**If a pull request for this branch is already open, this step is already done.** A previous run of this skill can be killed between Step 4b and Step 9 — a rate limit, a dropped session — leaving a pushed branch, an open PR, a written description and a green pipeline, none of which this run produced and all of which it owns. Resume from state rather than re-running the flow: read the PR's diff, description and checks, treat whatever they already contain as complete, and re-enter at Step 6. Do not open a second PR, do not regenerate a description that is already on the PR, and do not re-commit a change the diff already carries. Steps 1 through 4 are skipped in that case, and Rule 5's "this run owns exactly one branch" extends to the branch and PR the interrupted run left behind.
+
 Open it as a normal pull request, not a draft — the review bot runs as a CI job regardless, and a draft cannot be merged or queued, so opening as a draft buys nothing and blocks Step 9.
 
 ## Step 5: Arm the Watcher — never poll in-turn
@@ -162,6 +164,8 @@ Each time the watcher wakes you, gather the current state — PR state, pipeline
 3. **Approved and green** → Step 8.
 4. **Approved, pipeline still running** → keep waiting.
 5. **No verdict yet** → keep waiting. Do not babysit jobs unrelated to the review.
+
+**Before waiting on a verdict, confirm the reviewer can actually run in *this* repository.** Step 0's values are read from one machine-wide config, so `review_bots` and `review_job` are whatever the user's main repo uses and say nothing about the repo this run is in. Check that the job exists here — look for `review_job` by name in the repository's own CI configuration, and confirm the pipeline running on this PR lists it among its jobs — before branch 5 can ever be correct. A configured reviewer with no such job in the repository produces a verdict that *cannot arrive*, and branch 5 then waits forever on it. The same goes for the forge's own approval verdict: where the repository has no approval rule configured it stays permanently empty, so an empty verdict is not evidence that review is outstanding. When the reviewer cannot run here, say so once and substitute a review you perform yourself, sized to what the change actually contains — then merge on green CI plus that review. Never report a reviewer as silent when it was never installed.
 
 Two facts that look like failures and are not:
 - **A push revokes approval and re-triggers the review.** That is the loop working.
