@@ -1,6 +1,6 @@
 ---
 name: autopilot
-description: The automated tail of fix-linear and fix-freeform — it commits, pushes, opens the PR, watches the pipeline and the review bot, addresses every comment, applies infrastructure plans, merges in the right order across stacked PRs, verifies the change actually deployed after the merge, and pings the user only when finished or genuinely stuck. It is on by default in every fix run, so it is usually reached by hand-off rather than invoked. Invoke it directly when the user says autopilot, put it on autopilot, auto mode, one-shot this ticket, take this end to end, handle it autonomously, ship this without checking in, drive it to merge, or runs /autopilot — including mid-run, where /autopilot with flags amends the run already in flight (take over the merge, turn on a diagram, hold a merge that was about to happen).
+description: The automated tail of fix-linear and fix-freeform — it commits, pushes, opens the PR, watches the pipeline and the review bot, addresses every comment, applies infrastructure plans, merges in the right order across stacked PRs, verifies the change actually deployed after the merge, pauses itself gracefully when the session quota runs low and comes back when it resets, and pings the user only when finished or genuinely stuck. It is on by default in every fix run, so it is usually reached by hand-off rather than invoked. Invoke it directly when the user says autopilot, put it on autopilot, auto mode, one-shot this ticket, take this end to end, handle it autonomously, ship this without checking in, drive it to merge, or runs /autopilot — including mid-run, where /autopilot with flags amends the run already in flight (take over the merge, turn on a diagram, hold a merge that was about to happen).
 ---
 
 # Autopilot — The Automated Tail of a Fix Run
@@ -186,6 +186,58 @@ Record all of it with the run state, and **say it in one line before the merge g
 
 On a `--merge false` run this line is still worth producing, and it is arguably worth more: it tells the user what pressing the button is going to set off.
 
+## Step 0c: Know the Budget, and Plan to Pause
+
+A run of this skill can outlive a 5-hour quota window. Running out mid-flight is not a graceful stop: swarms, watchers and in-flight subagents are left wherever they were, and nothing records what the run was doing. So the budget is something to watch, and pausing is a step this skill performs on purpose rather than something that happens to it.
+
+### Reading the quota — never call the API
+
+The `claude-usage` extension already maintains a shared cache, and `/api/oauth/usage` is rate-limited **per account** with the Claude Code CLI itself polling it from every open session. Adding another caller is how a run gets itself throttled.
+
+```bash
+cat "${CLAUDE_USAGE_CACHE_DIR:-$HOME/Library/Caches/claude-usage}/usage.json"
+```
+
+On Linux the default is `${XDG_CACHE_HOME:-$HOME/.cache}/claude-usage/usage.json`.
+
+- `snapshot.meters[]`, each `{id, percent, severity, resetsAt}`. `percent` is quota **used**, 0–100. `resetsAt` is absolute epoch **milliseconds**.
+- Meter ids: `session`, `weekly`, `scoped:<Model>`, `spend`.
+- Writes are atomic, so a read needs no lock. **Never take `usage.lock`** — holding it makes every open editor window skip its own refresh, and a dead holder stalls them for a minute. **Never write into that directory**, either: a file-watch there fires in every window.
+- `snapshot.fetchedAt` says how old the numbers are. `retryUntil` in the future means the account is already rate-limited — do not fetch.
+- Only if the cache is missing or badly stale, fetch **once**: read the token from the macOS keychain service `Claude Code-credentials`, else `~/.claude/.credentials.json` → `claudeAiOauth.accessToken`, and `GET https://api.anthropic.com/api/oauth/usage` with `Authorization: Bearer <token>`, `anthropic-beta: oauth-2025-04-20`, `Accept: application/json`. Never write the result into the cache directory.
+
+**Check all four meter kinds, not just the headline.** A `session` meter at 40% with a `scoped:<Model>` meter at 100% fails every agent you launch while the number you looked at says healthy.
+
+### When to pause
+
+Check at **step boundaries** — it is a local file read, so it is cheap enough to do often, and a step boundary is where pausing is safe anyway.
+
+| Reading | Action |
+|---|---|
+| `session` at **85% used or more** | Pause. Invoke the `pause` skill. |
+| `weekly`, `scoped:*` or `spend` near its limit | Pause, ping, and **do not arm a return.** |
+| Anything below that, parked on a watcher | Do nothing. A parked run spends nothing; wall-clock is not the thing being budgeted. |
+
+**85% is a floor, not a suggestion, and "I am nearly finished" does not raise it.** The pause itself costs tokens — stopping watchers, flushing state, writing the file, sending the ping — so the threshold exists to leave enough window to perform it. A run that pushes past the floor because the merge is two minutes away is the run that cannot pause cleanly when those two minutes turn out to be twenty.
+
+**The weekly window is the user's call, and the stricter window always wins.** A session reset is not permission to spend a nearly-dead weekly quota, so a weekly-driven pause pings and waits for a human. `/pause` arms a return only for the session window; see that skill.
+
+### Journal as you go, so the pause is affordable
+
+The usual moment to pause is the moment there is least budget to do it with, and a half-written state file reads as resumable while being useless. So do not compose it from scratch at the end. **Append to the pause state at every step boundary** — one small write, exactly as the decision ledger is already appended to as decisions happen. Three fields are enough to keep current:
+
+- the step and round you are in,
+- `next_action` — the single next thing to do, as an instruction,
+- the decision ledger text.
+
+Everything else is read from the forge or from `git` at pause time, which is affordable. Prose is not. A run that journals as it goes pauses with one atomic write.
+
+### At an interactive gate, just ask
+
+A blocked `AskUserQuestion` spends nothing while it waits, so the threshold cannot be crossed during the wait. The real case is that the answer arrives and the window has gone in the meantime — and at that exact moment the user is demonstrably at the keyboard. **That is the one point where asking is both cheap and correct**: say the window is nearly out and ask whether to pause here or push on. Deciding it silently from a threshold throws away the only moment the question is free.
+
+**Never pause with an unanswered question dangling.** The question exists only in the transcript, and a paused session swallows the answer the user is in the middle of giving.
+
 ## Step 1: Implement — direct invocations only
 
 **Skip this step entirely when you were reached by hand-off.** A fix skill that invokes this skill has already done everything in it, and invoking one back would restart the work that just finished. Go to Step 2.
@@ -350,7 +402,7 @@ dylan/PLAT-3535/03-delete-legacy-path
 
 A reader scanning the branch list must be able to tell these three belong together, and in what order, without opening any of them. Cross-link them in each description: what it depends on, and what depends on it.
 
-**Arm them in order, and as early as possible.** Record the intended order and each PR's dependencies in `.claude/autopilot/<run>/stack.json` so the sequence survives a session restart. Then:
+**Arm them in order, and as early as possible.** Record the intended order and each PR's dependencies in `~/.claude/autopilot/<run>/stack.json` so the sequence survives a session restart. **That path is outside the repository on purpose:** the machine-wide ignore file covers only `**/.claude/settings.local.json`, so an in-repo `.claude/autopilot/` file shows up as untracked in `git status` and a run that stages broadly can commit it. It also sits beside the pause state, so a resumed run finds both kinds of run state in one place. Then:
 
 - Only the head of the stack is eligible to merge. Take it through Steps 6–9 normally.
 - For each successor, arm a watcher on its predecessor's merge state. When that fires: rebase the successor onto the updated target, let its pipeline re-run, and only then take it through the merge gate.
@@ -431,7 +483,8 @@ Stopping is reserved for these. Everything else — surprising test failures, un
 8. **No comments in the code.** Autonomy does not relax it.
 9. **An empty config value means the capability is absent, not that you should guess at it.** Never substitute a name you saw in an example for one the machine did not supply.
 10. **The merge is not the finish line, and "merged" is not "deployed".** Step 0b works out how the change reaches production and Step 10b confirms it got there, tied to the commit that landed rather than to a job going green. Unverified is a reportable outcome — **never** upgrade cannot-observe or timed-out into success.
-11. **A broken deploy is warned about, never fixed.** No rollback, no revert, no re-run of a deploy job, no touching the runtime. Gather the evidence, ping immediately, and stop. An unattended agent reverting production at 2am is worse than a bad deploy somebody has been told about.
+11. **Pause on purpose; never run out mid-flight.** Read the quota from the `claude-usage` cache at step boundaries, never from the API, and pause at 85% of the session window. Journal the step, the next action and the ledger as you go, so the pause costs one write. A weekly, scoped or spend limit pauses and pings and **never** arms its own return — that window is the user's to spend.
+12. **A broken deploy is warned about, never fixed.** No rollback, no revert, no re-run of a deploy job, no touching the runtime. Gather the evidence, ping immediately, and stop. An unattended agent reverting production at 2am is worse than a bad deploy somebody has been told about.
 
 ## Step 12: Self-Improvement
 

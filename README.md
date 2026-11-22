@@ -551,6 +551,28 @@ It reports one of five outcomes, and the last three are the point: confirmed, fa
 
 **And it warns rather than fixes.** No rollback, no revert, no re-running a deploy job, no touching the runtime. It gathers the evidence — the failing job's log, the workload's events, the controller's sync status — and pings immediately. A deploy job is not a CI job and its idempotency is unknown, and an agent reverting production unattended is worse than a bad deploy somebody has been told about.
 
+### Pausing and resuming a run
+
+A long `autopilot` run can outlive a 5-hour quota window. Running out mid-flight is not a graceful stop — swarms, watchers and in-flight subagents are left wherever they were, and nothing records what the run was doing or what to do next.
+
+`/pause` parks a run at a safe point and `/unpause` brings it back. Autopilot also pauses itself: it reads the quota at step boundaries and pauses at **85% of the session window**, pings you, arms a return, and resumes when the window resets.
+
+**The name is `/unpause`, not `/resume`,** because `/resume` is already a built-in Claude Code command (the past-session picker) and a skill by that name would be unreachable.
+
+**Quota comes from the `claude-usage` cache, never the API.** `/api/oauth/usage` is rate-limited per account and the CLI already polls it from every open session, so the skills read the shared cache the extension maintains — never taking `usage.lock` (which would make every editor window skip its own refresh) and never writing into that directory (a file-watch there fires in every window). All four meters are checked, not just the headline: a session at 40% with a model-scoped meter at 100% fails every agent you launch.
+
+**The session window auto-resumes; the weekly window does not.** A refreshed 5-hour window is a reasonable thing to start back up on. A spent weekly quota is yours to decide about, so that pauses, pings, and waits.
+
+Three things make it actually work:
+
+- **The state file has to stand alone.** By the time anything resumes, the context may be compacted and the session closed, so anything living only in the conversation is gone. The decision ledger is inlined as text rather than referenced by path, because it lives in the session scratchpad and the OS reaps that.
+- **The run journals as it goes.** The moment you need to pause is the moment you have least budget to do it with, and a half-written state file reads as resumable while being useless. So the step, the next action and the ledger are appended at every step boundary, and the pause itself is one atomic write.
+- **Resume re-verifies the world; it never replays intentions.** Hours passed. The change request may have merged, CI finished, the reviewer commented, someone pushed, the branch gone. Every recorded value is an input to a diff, never a substitute for looking. Recorded *authority* still stands — a `--merge true` from before the pause still merges — but recorded *evidence* does not, so approvals, pipelines and infrastructure apply markers are all re-read.
+
+Some states are not safe to park in, and the skill either finishes them or unwinds first: a half-applied refactor, a conflicted rebase, an armed auto-merge (it fires on green while you are away), a dangling question whose answer a paused session would swallow, and a merge whose deploy is not yet verified — where a ping saying "paused" would read as "nothing is wrong" while production may be broken. A running infrastructure apply is the exception: it can outlast a window on its own, so pausing is allowed there but the hazard is recorded and leads the ping.
+
+**Swarms come back from cache rather than being re-run.** `/workflow-resume` does that part, and it is cumulative: `workflow-runs.py merge` unions several partial runs' journals, so if a resumed swarm dies again the earlier generation's agents still count. One caveat that decides the cost — a swarm's cache is keyed on each agent's whole prompt and the diff is embedded in it, so if the branch moved while you were paused the cache is void and the swarm re-runs in full. That is deliberate: the cached findings describe code that no longer exists, and a partial review is not a review.
+
 ### Worktrees
 
 `fix-linear` and `fix-freeform` both default to `--branch new`, which sets each fix up in its own **git worktree**, so you can work several non-blocking fixes in parallel (one terminal/session per worktree) without branch checkouts colliding. `--branch default` is the other value: no feature branch, no worktree, no change request — the commit lands on the branch every other checkout is cut from, and an autopilot run pushes it and ends. Three conditions force `new` whatever the flag said: the change touches Terraform, the default branch is protected, or the tree is dirty. `fix-feedback` makes a worktree for the branch under review, and `autopilot` creates none of its own and inherits whichever one the fix skill set up.
