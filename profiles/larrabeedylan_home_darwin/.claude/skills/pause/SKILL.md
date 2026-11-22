@@ -31,7 +31,7 @@ A run parked on a watcher is consuming nothing. **It does not need to pause at a
 | **Mid-file-edit, mid-multi-file refactor** | A half-applied refactor does not survive a handoff. Finish the edit or revert it. |
 | **Mid-merge or mid-rebase with conflicts** | The index is in a state only this session understands. |
 | **Auto-merge armed, merge not landed** | It fires on green while you are paused. The run would merge unattended with nobody verifying the deploy. **Disarm it**, then pause. |
-| **An unanswered `AskUserQuestion` is dangling** | The question lives only in the transcript. A paused session swallows the answer the user is about to give. Get the answer first. |
+| **An unanswered `AskUserQuestion` is dangling** | The question lives only in the transcript. A paused session swallows the answer the user is about to give — and `autopilot` now asks mid-run on purpose, answerable from the user's phone, so the answer may already be on its way. Get the answer first. |
 | **Merged, deploy not yet verified** | Do not park here. Finish the verification, or take its "merged, unverified" terminal state: say what landed, that nobody confirmed it came up, and name the check a human should run. Parking silently after a merge is the failure where a ping saying "paused" reads as "nothing is wrong" while production may be broken. |
 | **Mid-`fix-feedback` posting** | Its posting step comments every finding *before* fixing any of them. Pausing between leaves threads you authored and never addressed. Let the posting finish. |
 

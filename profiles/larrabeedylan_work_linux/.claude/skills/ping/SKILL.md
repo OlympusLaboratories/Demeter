@@ -201,6 +201,18 @@ What that means in practice:
 
 A ping is therefore never only a message. Sending one commits this session to notifying the user until they say stop, which is another reason the body has to say what the session is doing: it is the first of a series, not a one-off.
 
+## Answering From the Phone
+
+A ping tells the user something. **Remote Control** is what lets them do something about it: it forwards the live session to claude.ai and the Claude app, where a blocking permission prompt or an `AskUserQuestion` can be answered from a phone instead of from the terminal. Every session here connects at startup — `remoteControlAtStartup` is `true` in the profile's `settings.json` — so by the time a ping goes out, the session is normally already reachable.
+
+**This skill does not arm that, and cannot.** Remote Control is established by the `/remote-control` slash command or at startup, and a slash command is typed by the user: an agent has no way to run one in its own session. Nor can it read the connection state back. Three rules follow:
+
+- **Never claim the session is answerable from the phone.** The startup setting is the reason it usually is, not evidence that it is this time — a box with no claude.ai login, a gateway `ANTHROPIC_BASE_URL`, or an org policy toggle starts without it and says nothing.
+- **Never put "run `/remote-control`" in a ping.** The ping that matters most is the one a long `autopilot` run sends hours after the user walked away, where nothing printed in the terminal will be read. An instruction they cannot see is worse than none: in the run report it reads as though it had been followed.
+- **`/ping off` disconnects nothing.** Step 0 clears `armed_at` and stops the automatic notifications, and stops there. The connection was never this skill's to make, so it is not this skill's to break — and dropping it would cut off a session the user may still be driving from their phone. They toggle it with `/remote-control` when they want it gone.
+
+The two channels are separate on purpose. The notification says *come and look*; the connection is *how you act on it*. Nothing about a ping depends on the connection being up, and nothing about the connection depends on a ping having been sent.
+
 ## Step 5: Say What Happened
 
 Report in chat, in one line: the level, and that it went out. If the send failed, print the exact stderr from `notify-send.sh` — do not paraphrase it and do not swallow it. The usual cause is `~/.claude/notify.json` being absent or still full of `REPLACE_ME`, and the message says so. A ping the user never receives is worse than an error, because they will keep waiting for it.
@@ -211,7 +223,7 @@ Other skills reach this one through the `Skill` tool rather than by re-implement
 
 - **The calling skill supplies the context.** It knows what it was doing; this skill does not. Pass the level and a body that already answers "what about, and what's needed" — for example `/ping blocked the review pipeline needs a manual approval on the deploy stage`.
 - A bare invocation with no context from a calling skill produces a vague ping. If you are the caller and cannot say what the ping is about, you are not ready to send one.
-- This skill sends exactly one notification per invocation and returns. It never loops, waits, or polls for a reply — notifications here are one-way by design, and nothing the user does on their phone comes back into this session.
+- This skill sends exactly one notification per invocation and returns. It never loops, waits, or polls for a reply — the notification is one-way by design and nothing comes back through it. The user answers by taking the session over from their phone, which arrives here as an ordinary prompt over Remote Control rather than as a reply to the ping.
 
 ## Important Rules
 

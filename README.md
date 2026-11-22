@@ -540,9 +540,10 @@ Each flag has a defined catch-up when it arrives late: `--diagram true` publishe
 
 It composes the ordinary skills (`fix-linear` or `fix-freeform`, `commit-msg`, `changes-description`, `review-code`, `fix-feedback --autonomous`, `changes-diagram`, `ping`) rather than reimplementing them.
 
-Six things make it safe to walk away from:
+What makes it safe to walk away from:
 
 - **It arms your phone as it takes over.** Notifications are opt-in per session and the opt-in is a sent ping, so an unarmed session stays silent through every permission prompt, question and failure. Autopilot sends one ping as it picks the work up — saying what it took over and where it will stop — which both tells you the hand-off happened and switches the automatic notifications on for everything that follows. Pinging only at the end would arm the session at the exact moment it stopped mattering. Every route in arms, including a mid-run `/autopilot --merge` on work that was never a fix-skill run, which is the route that needs it most.
+- **It can ask you something, and you can answer from your phone.** Remote Control is armed when a session starts, so a question raised mid-run is a real option rather than a dead end — which is why the run asks instead of guessing for the calls that are expensive to get wrong: anything irreversible, anything that spends money, a product decision a review thread needs, a merge conflict whose intent is unclear. The last two used to end the run; now they pause it until you tap an answer. Most calls are still made alone and written down, because a question stalls the run until you answer it — asking does not replace the ledger, it just means fewer entries in it.
 - **It waits with the `Monitor` tool, never a sleep loop.** A watcher wakes the session when something happens, so the prompt stays free and several runs can be in flight at once. A monitor that only reports success would stay silent through a crashloop, so every terminal state emits a line.
 - **Review comments outrank CI, always.** Fixing comments means pushing, and a push restarts the pipeline — waiting on a red or running pipeline first throws away a whole CI run.
 - **It overrides nothing you asked for.** Every flag but `--merge` and `--max-rounds` was decided by the fix skill, `--branch` included — so a run that stays on the default branch is pushed and ends there, with no change request to review or merge. That is safe to honour because the fix skill has already escalated to a feature branch if the change touched Terraform, if the default branch was protected, or if the tree was dirty. An amendment you type is the one thing that moves a flag mid-run, and that is an instruction rather than an override.
@@ -554,7 +555,7 @@ On infrastructure repositories it merges directly rather than enabling auto-merg
 
 - **The merge is not the finish line.** Before the merge gate it works out how this repository actually ships — which jobs fire on a push to the default branch, what they change, and what observable thing would prove the new code is running — and after the merge it watches for exactly that. "Nothing deploys" is a valid answer it will tell you plainly, and so is "merged, could not verify".
 
-It pings you when it finishes, and when it is genuinely stuck — a product decision, a failed apply, a failed or unverifiable deploy, a conflict needing judgment, or the same thread reopening three times.
+It pings you when it finishes, and when it is genuinely stuck — a failed apply, a failed or unverifiable deploy, an unexplained test failure, or the same thread reopening three times. Where what it needs is one decision rather than a pair of eyes, it asks instead of stopping, and carries on the moment you answer.
 
 #### Verifying the deploy
 
@@ -649,6 +650,8 @@ The reason it works this way round rather than notifying by default: a hook that
 ```
 
 Nothing else clears it — not your next prompt, not `back`, not time passing, not the session going idle. Replying in chat and then walking away again is the normal way to use this, so a prompt arriving is not evidence you are back for the rest of the run. Anything that guessed otherwise would go quiet exactly when you were relying on it, and would not tell you it had.
+
+It stops the notifications and nothing else. In particular it does not disconnect Remote Control, which is a separate channel armed when the session starts — see [Replies](#replies).
 
 From the shell, `notify.py --disarm <session-id>` does the same thing, and `--disarm all` clears every session.
 
@@ -777,7 +780,13 @@ The hook never fails a session: every error path logs and exits 0, and a dead Sl
 
 #### Replies
 
-This is one-way. You cannot answer from Slack or Telegram — a permission prompt and an `AskUserQuestion` are blocking UI that only the session's own terminal can clear. Claude Code's [Remote Control](https://code.claude.com/docs/en/remote-control.md) is the supported way to answer from a phone; all three profiles currently leave `remoteControlAtStartup` off.
+The notification itself is one-way. You cannot answer from Slack or Telegram — a permission prompt and an `AskUserQuestion` are blocking UI that only the session can clear.
+
+Answering from a phone is Claude Code's [Remote Control](https://code.claude.com/docs/en/remote-control.md), which forwards the live session to claude.ai and the Claude app and *can* clear both. Every profile that ships a `settings.json` sets `remoteControlAtStartup` to `true`, so a session is reachable from the moment it starts. The Pi profile ships none, and needs none — its sessions are spawned by a `claude remote-control` server and are reachable by construction.
+
+It is armed at startup rather than when a ping goes out because there is no other way: Remote Control is established by the `/remote-control` slash command, a slash command is typed by you, and the agent sending the ping has no way to run one in its own session. Writing the setting reaches only sessions started afterwards. The alternative — a line in the ping telling you to run `/remote-control` — fails in exactly the case the feature exists for, because the ping that matters most arrives hours after you left the terminal, where nothing printed in it will be read.
+
+So the two halves stay separate. The notification tells you to come and look; Remote Control is how you act on it without walking back to the desk. Neither depends on the other, and `/ping off` does not disconnect anything — toggle that with `/remote-control`.
 
 
 ### Claude Usage Extension

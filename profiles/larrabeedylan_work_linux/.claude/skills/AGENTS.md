@@ -19,7 +19,7 @@ Each skill is a subdirectory containing a `SKILL.md` file that defines the skill
 | `fix-feedback` | Work through review feedback — MR/PR threads or a local review agent's output |
 | `fix-freeform` | `fix-linear` without a ticket — implements a freeform problem statement. Defaults to the repo's default branch, a one-shot description, no diagram and no review swarm (`--review true` opts in); escalates to a feature branch on its own when the change touches Terraform, the default branch is protected, or the tree has unrelated uncommitted work |
 | `fix-linear` | Linear ticket implementation. After the description it defaults to both a call-flow diagram and a `review-code` swarm over the branch (`--diagram false` / `--review false` to skip either) |
-| `ping` | Send yourself a push notification carrying what this session is doing and what it needs. Invoked directly, or by another skill handing over a status, a question, a blocker or a finished run |
+| `ping` | Send yourself a push notification carrying what this session is doing and what it needs. Invoked directly, or by another skill handing over a status, a question, a blocker or a finished run. The notification is one-way — answering from a phone is Remote Control, which is armed at session startup because no skill can run a slash command, and which `/ping off` therefore does not disconnect |
 | `plan-initiative` | Sequence a Linear initiative's subtasks and delegate them across named engineers — dependency graph, parallelism verdict, swimlane chart, per-person work orders |
 | `plan-subtasks` | Turn a design doc + implementation breakdown into a Linear ticket tree — one parent, one MR-sized subtask per reviewable slice, both doc links on every ticket; confirms team/project/assignee and writes to Linear only after the plan is approved |
 | `reflect-peer` | Peer assessment generator (stub) |
@@ -89,7 +89,7 @@ against nothing, and `/autopilot <ticket or statement>` still routes through `fi
 or `fix-freeform` and inherits that skill's defaults. It composes the ordinary skills
 rather than reimplementing them: the fix skill, then `commit-msg`,
 `changes-description`, `review-code`, `fix-feedback --autonomous`, `changes-diagram` and
-`ping`. Five invariants it must never lose:
+`ping`. Six invariants it must never lose:
 
 - **It waits with the `Monitor` tool, never a sleep or a poll loop.** Several runs may be
   live at once and each blocking one costs a session. Every terminal state must emit a
@@ -114,6 +114,12 @@ rather than reimplementing them: the fix skill, then `commit-msg`,
 - **It supersedes `fix-linear`/`fix-freeform` Important Rule 1** (never push, never open a
   change request) for the one branch it created, and for nothing else. That carve-out is
   written into `autopilot` explicitly; it is not something an agent may infer.
+- **It may ask, but asking is the exception.** Remote Control makes a mid-run
+  `AskUserQuestion` answerable from a phone, so the calls that are expensive to get wrong
+  — anything irreversible or chargeable, a product decision a thread needs — get asked
+  rather than guessed, and an escalation the run could act on immediately no longer has to
+  end it. Everything else still gets the most defensible option and a ledger line, because
+  a question stalls the run until somebody answers it.
 
 `fix-feedback --autonomous` is the only sanctioned relaxation of that skill's "never write
 unasked" rule. It still never pushes — committing and pushing belong to the caller — and it

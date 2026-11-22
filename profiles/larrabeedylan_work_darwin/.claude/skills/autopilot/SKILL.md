@@ -11,7 +11,7 @@ description: The automated tail of fix-linear and fix-freeform — it commits, p
 
 The name is the contract, and it is worth taking literally. An autopilot holds a course somebody else set: it does not re-decide the destination, and it has no opinion about why the route was chosen. Everything from the branch to the description to whether a review swarm runs was settled before this skill was reached — it flies the plan it was handed, and the whole of its judgment goes into the part the fix skills leave undone.
 
-**The standing instruction, scoped precisely: trust your judgment for everything after the code is written, and pull the user in only if absolutely needed.** That scope is the whole of it. Autopilot automates the *tail*; it does not close the fix skill's own gates. A vague ticket still gets a question, an ambiguous requirement still gets `AskUserQuestion`, and a plan worth seeing still gets shown — those happen in the fix skill, before this one is reached, and being unattended later is not a reason to guess earlier. From the commit onwards there is nobody to ask, so every judgment call you make alone gets written down, because the record is what replaces the conversation you would otherwise have had. **Where it gets written down is fixed and narrow** — see **The decision record** below. It is never a comment.
+**The standing instruction, scoped precisely: trust your judgment for everything after the code is written, and pull the user in only if absolutely needed.** That scope is the whole of it. Autopilot automates the *tail*; it does not close the fix skill's own gates. A vague ticket still gets a question, an ambiguous requirement still gets `AskUserQuestion`, and a plan worth seeing still gets shown — those happen in the fix skill, before this one is reached, and being unattended later is not a reason to guess earlier. From the commit onwards the user is away from the terminal but **not out of reach** — Remote Control is armed when the session starts and Step 0d arms the notifications, so a question raised mid-run reaches their phone and can be answered from it. Asking is therefore a real option rather than a dead end, and in a few places it is the right one; see **Asking mid-run** below. It is still not the default, because a question stalls the run until somebody answers it, so every judgment call you do make alone gets written down, because the record is what replaces the conversation you would otherwise have had. **Where it gets written down is fixed and narrow** — see **The decision record** below. It is never a comment.
 
 **Parameter:** `$ARGUMENTS` — on a direct invocation, a Linear ticket identifier or a freeform problem statement, plus optional flags. On a mid-run amendment, flags only.
 
@@ -69,6 +69,27 @@ Three rules govern every amendment:
 | `--branch default` | after a feature branch has commits | Refuse, in one line. Escalation is one-way within a run, and the commits live on a branch created for a reason. |
 | `--autopilot false` | any time | Stop the automation where it stands and report. Leave the branch, the merge request and the threads exactly as they are — **never delete a pushed branch or close a merge request** to honour this. It means *stop driving*, not *undo*. |
 | `--autopilot true` | on a run that had it off | Engage from Step 2: commit if needed, push, and carry on as normal. **Arm the notifications first** (Step 0d) — the tail was off, so nothing has armed them. |
+
+### Asking mid-run
+
+The premise this skill was written on was that from the commit onwards there is nobody to ask. That is no longer true. Remote Control is armed when the session starts, Step 0d arms the notifications, and `notify.py` fires on `PreToolUse` for `AskUserQuestion` — so a question raised mid-run lights up the user's phone and can be answered from it, as can a permission prompt. **Asking is a real option now, and in a few places it is the right one.**
+
+It is still not the default. A question **stalls the run** until somebody answers it, and the user may be asleep, in a meeting or at dinner — the thing that makes autopilot worth having is that it finishes. So most calls still get the most defensible option and a ledger line. Ask where getting it wrong is the expensive outcome, not where the answer would merely be interesting:
+
+- **Anything irreversible or chargeable.** The Step 10c hazards: a step that interrupts other people, a one-way data migration, anything that spends money, a target the change request never mentioned.
+- **A fork where both ways are defensible and one is expensive to undo.** A ledger entry explains a wrong turn; it does not undo one.
+- **A decision from the Step 11 escalation list that the run could act on immediately** — a product or policy call, a merge conflict whose intent is unclear. Asking keeps the run alive where stopping would have killed it.
+- **The quota gate**, which already worked this way — see **At an interactive gate, just ask**.
+
+Three rules keep the ask usable from a phone rather than theatrical:
+
+- **The question has to stand alone.** It is read on a lock screen and answered in an app, with no diff, no terminal and no scrollback. An option that says "as discussed above", names a file the user would have to open, or needs two paragraphs of context weighed against each other is unanswerable. Restate what is needed inside the question and keep each option to a line.
+- **Ask before starting, never halfway through.** A question raised once an apply has begun or a migration is part-done has nothing useful to offer either answer.
+- **Never ping alongside it.** The hook already notifies on the question itself. A `ping` on top is the same message twice, and the second one trains the user to stop reading both.
+
+**A question that was asked and answered earns no ledger entry.** That decision was the user's, made on the record, in the session. The ledger is for the calls made alone.
+
+**Never ask and then proceed as though it had been answered.** If the question is worth the stall it is worth the wait; if it is not worth the stall, decide it and record it.
 
 ### The decision record
 
@@ -175,7 +196,7 @@ Do this **contextually, from the repository in front of you.** There is no list 
 
 Then establish two facts about your own position, because both change what you are allowed to claim later:
 
-- **Can this session observe that signal at all?** Credentials, a cluster context, a VPN, a registry token — any of them may be missing. Probe it now, read-only, rather than finding out after the merge. A session that cannot reach the deploy target can still merge; it just cannot afterwards say the deploy worked.
+- **Can this session observe that signal at all?** Credentials, a cluster context, a VPN, a registry token — any of them may be missing. Probe it now, read-only, rather than finding out after the merge. A session that cannot reach the deploy target can still merge; it just cannot afterwards say the deploy worked. Probe **every** tool the signal needs, not the first one: one expired credential often disables several commands at once, and a session that proves `gcloud` is dead still learns nothing about `kubectl` until it tries it. Probing one and assuming the rest pushes the discovery into Step 10b, which is exactly where it is too late to pick a different signal.
 - **How long does it normally take?** Read that off the repository's own recent successful default-branch runs rather than inventing it. That number becomes the verification budget in Step 10b, and a budget guessed from nothing is either a false alarm or a watch that never ends.
 
 Record all of it with the run state, and **say it in one line before the merge gate**:
@@ -253,6 +274,8 @@ Notifications are **opt-in per session** and the opt-in is a sent ping: `notify.
 > `Taking PLAT-3276 from here: open the MR, work the review, stop before the merge. Nothing needed unless I get stuck.`
 
 That single send does both jobs — it tells them the hand-off happened, and it arms the session for every automatic notification that follows.
+
+**It is also what makes asking possible at all.** An `AskUserQuestion` raised later in the run notifies the phone only because the hook is armed here — `notify.py` is registered on `PreToolUse` for `AskUserQuestion`. Unarmed, the run stalls on a question nothing ever told the user about, which is the worst of both behaviours.
 
 **Skip it when the session is already armed.** Read `~/.claude/notify-state/sessions/<session-id>.json`; an `armed_at` already present means the user has pinged this session before and the automatic notifications are live. Say so in one line and move on rather than sending a second announcement.
 
@@ -353,7 +376,7 @@ The swarm's completion notification wakes you exactly as the monitor's does. Whe
 
 **Never report a change request as ready while a review you commissioned is still running.** The user reads "green, mergeable, no reviewer configured" as "this is waiting on me" — and on a repository with no reviewer of its own they are right to read it that way. So they merge it, and the review's findings land afterwards with nowhere to go.
 
-That is not a hypothetical. A run reported an MR as `MERGEABLE/CLEAN`, said the forge's reviewer could not run in that repository, and then yielded the turn with the substitute review still in flight. The user merged it, which was the correct reading of what they had been told, and the findings then needed a second change request. **The run caused that, not the user.**
+That is not a hypothetical. A run reported a merge request as `MERGEABLE/CLEAN`, said the forge's reviewer could not run in that repository, and then yielded the turn with the substitute review still in flight. The user merged it, which was the correct reading of what they had been told, and the findings then needed a second change request. **The run caused that, not the user.**
 
 So while a review is outstanding: either say nothing about mergeability, or say in the same breath that it is not ready and why. One line is enough — *"holding this until the review I started comes back."* And never describe an absent reviewer without naming what is standing in for it and when that will report.
 
@@ -502,7 +525,7 @@ Run it when all of these hold, which is the normal case:
 
 Then verify per Step 10b, and report what you **ran** rather than what they should run.
 
-**Ask first only for the specific hazards**, and ask by pinging rather than parking silently: a step that interrupts other people, a one-way data migration, anything that spends money, or a target the change request never mentioned. Even then, say what you intend to run and ask for a yes — do not hand over the commands and call it a hand-off.
+**Ask first only for the specific hazards**: a step that interrupts other people, a one-way data migration, anything that spends money, or a target the change request never mentioned. **Ask with `AskUserQuestion` and wait for the answer.** This used to say to ask by pinging, which was incoherent — a notification cannot carry a yes, so the run either stalled on an answer that had nowhere to arrive or pushed on having merely announced itself. Say exactly what you intend to run, inside the question. Never hand over the commands and call it a hand-off.
 
 **Report the side effects, because they are the part the diff does not show.** A restarted service and what it dropped, a cache cleared, a window where something was unavailable. "Restarted the server; no sessions were live" is the sentence that makes a deploy auditable.
 
@@ -530,7 +553,11 @@ Escalate — ping with a level of `question` or `blocked`, saying precisely what
 - A test fails for a reason you cannot explain, and retrying has not settled it.
 - `require_human_approval` is true and no human has approved after the pipeline has been green for a long time.
 
-Stopping is reserved for these. Everything else — surprising test failures, undecidable details, awkward trade-offs — gets the most defensible option, recorded, and the run continues.
+**Three of those are a question now, not an end.** Where you need one decision and the run could carry straight on with the answer — a product or policy call from a thread, a merge conflict whose intent is unclear, an apply that *would* destroy something — raise an `AskUserQuestion` and wait, per **Asking mid-run**. An answer given in thirty seconds from a phone beats a run that stopped and has to be restarted from a cold session.
+
+**The rest genuinely end the run**, because asking does not help: a failed deploy, a failed apply, a test failing for a reason nobody can explain, a thread that has reopened `--max-rounds` times, a repository this run cannot reach. Each of those needs the user to *look* at something rather than choose between two options, and a question pretending otherwise stalls on a worse surface than a ping. Ping and stop. `require_human_approval` with nobody having approved yet is neither — it is a wait, and Step 9 governs it.
+
+Stopping and asking are both reserved for this list. Everything else — surprising test failures, undecidable details, awkward trade-offs — gets the most defensible option, recorded, and the run continues.
 
 ## Important Rules
 

@@ -21,7 +21,7 @@
       "Bash(~/.claude/scripts/skill-env.sh:*)"
     ]
   },
-  "remoteControlAtStartup": false,
+  "remoteControlAtStartup": true,
   "hooks": {
     "PreToolUse": [
       {
