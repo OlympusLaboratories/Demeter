@@ -20,6 +20,13 @@ DEFAULTS = {
     "artifact_store": "auto",
     "default_remote": "origin",
     "require_human_approval": False,
+    "fix_autopilot": True,
+    "fix_branch": "new",
+    "fix_quick_description": True,
+    "fix_diagram": False,
+    "fix_review": False,
+    "fix_merge": True,
+    "fix_max_rounds": 3,
 }
 
 LIST_KEYS = ("review_bots", "operational_bots")

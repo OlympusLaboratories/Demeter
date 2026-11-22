@@ -7,9 +7,17 @@ This skill runs in one of two **modes**, chosen automatically from the argument:
 - **Mode A — Merge request:** `$ARGUMENTS` is a GitLab merge request URL. Fetch the review discussion threads from that MR.
 - **Mode B — Feedback already in the conversation:** no argument is given. Pull the feedback from **every unaddressed source already in this conversation** — the `review-code` swarm's confirmed findings, any code review produced in the chat, *and* any MR threads fetched by an earlier Mode A run that the user has not yet worked through. Nothing new is fetched from GitLab; the changes are already local. Findings that are not already on the MR are posted to it as comments (**Step 3b**) before any of them are fixed, so the swarm's work outlives the conversation.
 
-**Parameter:** `$ARGUMENTS` — optionally, the full URL of a GitLab merge request (e.g., `https://gitlab.com/group/project/-/merge_requests/123`). Omit it to use Mode B.
+**Parameter:** `$ARGUMENTS` — optionally, the full URL of a GitLab merge request (e.g., `https://gitlab.com/group/project/-/merge_requests/123`), plus optional flags. Omit the URL to use Mode B.
 
-**Flag:** `--autonomous` (default **off**) — anywhere in `$ARGUMENTS`, with or without a URL. It says, in the user's own words, that **they trust the agent's judgment and want to be pulled in only if absolutely necessary.** It composes with Mode A, with Mode B, and with the `in place` / `--here` / `no worktree` escape hatch. See **Autonomous Mode** below for exactly which gates it opens, which it leaves shut, and when it stops anyway.
+| Argument | Default | Effect |
+|---|---|---|
+| A GitLab merge request URL | — | Selects **Mode A**. Omit it for Mode B. |
+| `--autonomous [true\|false]` | **`false`** | The user trusts the agent's judgment and wants to be pulled in only if absolutely necessary. Bare `--autonomous` means `true`. |
+| `in place`, `--here`, `no worktree` | off | Work in the current checkout instead of cutting a worktree for the branch under review (**Step 2c**). Matched case-insensitively. |
+
+`--autonomous` composes with Mode A, with Mode B, and with the in-place tokens. See **Autonomous Mode** below for exactly which gates it opens, which it leaves shut, and when it stops anyway.
+
+**This skill has no `--branch` flag, and that is not an inconsistency with `fix-linear` and `fix-freeform`.** Those two decide *which branch the work lands on*, which is a question only an unstarted change has. Here the branch is already chosen — it is whatever the merge request under review was opened from — so the only question left is whether to check it out in a worktree or in place, which is what the tokens above answer.
 
 **Selecting the mode:**
 - `$ARGUMENTS` looks like a GitLab MR URL → **Mode A**: do Steps 1, 2, 2c, then continue from Step 3. (`--autonomous` in the same argument string does not change the mode; strip the flag before parsing the URL.)

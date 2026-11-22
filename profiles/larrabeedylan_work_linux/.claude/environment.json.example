@@ -13,5 +13,14 @@
   "iac_apply_marker": "Apply complete!",
 
   "artifact_store": "claude",
-  "require_human_approval": true
+  "require_human_approval": true,
+
+  "_fix_defaults": "Defaults for every /fix-linear and /fix-freeform run on this machine. A flag in the invocation always wins; these only decide what an unflagged run does. Autopilot is on by default, so a run goes all the way to a ready change request — this profile stops short of the merge so a human presses the button.",
+  "fix_autopilot": true,
+  "fix_branch": "new",
+  "fix_quick_description": false,
+  "fix_diagram": true,
+  "fix_review": true,
+  "fix_merge": false,
+  "fix_max_rounds": 3
 }

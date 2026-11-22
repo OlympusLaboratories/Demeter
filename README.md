@@ -445,9 +445,27 @@ So they are configuration. `~/.claude/scripts/skill-env.sh` holds the per-profil
 ~/.claude/scripts/skill-env.sh get forge    # one value
 ```
 
-The installer seeds `environment.json` from the profile's committed `environment.json.example` and never overwrites it. The keys cover the forge and its API helper, what to call a change (`MR` vs `PR`), the AI reviewer usernames and the CI job that re-runs them, the operational bots whose comments are plumbing rather than review, the infrastructure bot and the markers of a finished apply, where diagrams get published, and whether a human approval is required to merge.
+The installer seeds `environment.json` from the profile's committed `environment.json.example` and never overwrites it. The keys cover the forge and its API helper, what to call a change (`MR` vs `PR`), the AI reviewer usernames and the CI job that re-runs them, the operational bots whose comments are plumbing rather than review, the infrastructure bot and the markers of a finished apply, where diagrams get published, whether a human approval is required to merge, and the `fix_*` defaults below.
 
 **An empty value means the machine does not have that thing, never "guess".** No `review_bots` means treat every non-operational bot thread as real feedback. No `iac_bot` disables the apply-before-merge gate outright. No `review_job` means a review cannot be re-triggered, and the skill says so instead of retrying something that is not there.
+
+#### What an unflagged fix run does
+
+`/fix-linear` and `/fix-freeform` take the **same flags with the same meanings** — they differ in where the work comes from, a ticket or a sentence, and in nothing else. Their defaults differ by machine rather than by skill, and they live in `skill-env.sh` for the same reason every other per-machine fact does: written into the skill text they would make the two profiles' copies stop being transforms of each other, and drift would go back to being invisible.
+
+| Key | Flag | Work | Home |
+|---|---|---|---|
+| `fix_autopilot` | `--autopilot` | `true` | `true` |
+| `fix_branch` | `--branch` | `new` | `new` |
+| `fix_quick_description` | `--quick-description` | `false` — full panel | `true` — one-shot |
+| `fix_diagram` | `--diagram` | `true` | `false` |
+| `fix_review` | `--review` | `true` | `false` |
+| `fix_merge` | `--merge` | `false` — stop at ready | `true` — merge it |
+| `fix_max_rounds` | `--max-rounds` | `3` | `3` |
+
+The split is about who else is going to look at the change. At work, three people and two bots will: the full description panel, the diagram and the review swarm all exist to be read by somebody, and the run deliberately stops one step short of the merge so a human presses the button. At home nobody else is going to read any of it, so the ceremony comes off — a one-shot description, no diagram, no swarm — and the run merges itself, because there is nobody to wait for.
+
+Any flag in the invocation wins, a bare flag means `true`, and `~/.claude/scripts/skill-env.sh check` prints what an unflagged run will actually do on the machine you are sitting at.
 
 ### Change diagrams
 
@@ -463,33 +481,52 @@ The published page embeds the diff of every changed function, so anyone it is sh
 
 `/review-code` runs an adversarial review swarm over a diff — a fleet of reviewers working from independent angles, then a panel of skeptics attacking every candidate finding, so only what survives refutation is reported. It catches things a single-shot reviewer misses, which is the reason it is wired into the fix flow rather than left to be remembered by hand.
 
-| Skill | `--review` default | Runs it |
+`--review` comes from `fix_review` — on at work, off at home — and **where** the swarm runs depends on whether the run has a change request to post findings to:
+
+| Run | Who fires the swarm | When |
 |---|---|---|
-| `/fix-linear` | **`true`** | After the description and the diagram |
-| `/fix-freeform` | `false` | Step 5e, when opted in |
-| `/autopilot` | *inherited* | Step 5b, in the turn that arms the watcher |
+| Autopilot on, `--branch new` | `autopilot`, Step 5b | In the turn that arms the pipeline watcher, after the push |
+| `--autopilot false` | the fix skill itself | After the description and the commit message |
+| `--branch default` | the fix skill itself | After the description — there is never a change request |
 
-`/autopilot` has no default of its own — it takes whichever fix skill handles the work, so a ticket gets a swarm and a freeform statement does not. It is a modifier on a fix skill rather than a peer: the only flags it owns are `--merge` and `--max-rounds`, which describe how far the automation goes, and it overrides none of the rest. Being unattended is not a reason to spend a fleet you did not ask for.
+The reason the swarm moves rather than always running in the fix skill is `fix-feedback`: it posts every confirmed finding to the change request as an anchored comment, so a swarm that fires before the push has nowhere to put what it found. Where there is going to be a change request, the swarm waits for it. Where there is not, it runs where it is.
 
-The defaults follow the same logic as `--diagram`: a ticket exists because somebody judged the work big enough to write down first, while a freeform fix usually goes straight onto the default branch where there is no review gate to feed. `--review false` and `--review true` move either way.
-
-In `fix-linear` the swarm runs **after** `changes-description` rather than beside it. Both read the same diff, but only one can invalidate the other — a confirmed finding means a code change, and a description written against a diff that is about to move is what goes stale. `autopilot` is the exception: there the diff is already pushed and the forge's own reviewer is running on it, so the swarm starts alongside the watcher and its findings enter the same review loop a bot's threads do.
+Within the fix skill the swarm runs **after** `changes-description` rather than beside it. Both read the same diff, but only one can invalidate the other — a confirmed finding means a code change, and a description written against a diff that is about to move is what goes stale. In `autopilot` the order inverts because the diff is already pushed and the forge's own reviewer is already running on it, so neither gates the other and serialising them would add a full swarm's latency to a run whose whole point is to need nothing from anybody.
 
 Findings do not stop at the transcript. `/fix-feedback` reads the swarm's confirmed findings out of the conversation and posts each one the change request does not already carry as an anchored comment, before fixing any of them.
 
 ### Autonomous runs
 
-`/autopilot` is a **mode, not a task**: it switches on top of `fix-linear` or `fix-freeform` and says *do not stop to ask me anything*. Those skills do the work; autopilot adds the part they deliberately refuse to do — push, open the change request, work the review until it is clean, apply any infrastructure plan, and merge.
+`/autopilot` is a **mode, not a task**, and it is **on by default** — `fix_autopilot` is `true` on every profile. An ordinary `/fix-linear PLAT-123` ends at a change request, not at a commit message: the fix skill implements, writes the commit message and the description, then hands the run over, and autopilot pushes, opens the change request, works the review until it is clean, applies any infrastructure plan, and merges if `--merge` says so.
 
-Write it either way. `/autopilot PLAT-123` picks the fix skill for you (`fix-linear` for a ticket id, `fix-freeform` otherwise) and takes that skill's defaults; `/fix-freeform --branch new /autopilot <statement>` makes the choice explicit and lets you set that skill's flags at the same time. Neither route is the real one, and both behave identically.
+So you rarely type it. There are three ways in and they converge:
+
+- **By hand-off** — the normal one. You typed a fix skill; autopilot takes the tail.
+- **Directly** — `/autopilot PLAT-123` picks the fix skill for you (`fix-linear` for a ticket id, `fix-freeform` otherwise) and that skill's flow governs the run exactly as if you had typed it.
+- **As an amendment** — `/autopilot <flags>` *while a run is in flight*, which changes that run's settings from there on. This is the one worth remembering.
+
+**Automating the tail is not the same as going silent.** The fix skill's own gates stay open: a vague ticket still gets a question, an ambiguous requirement still gets `AskUserQuestion`, and the plan still gets shown. What you asked not to be interrupted for is the pipeline, the review and the merge — the hours of waiting, not the five minutes of deciding. `--autopilot false` turns the tail off entirely and gets you implementation, a commit message and a description with nothing leaving the machine; it is the flag for a spike.
+
+#### Changing your mind mid-run
+
+`/autopilot <flags>` during a run amends it. Only the flags you name change — everything else keeps its *current* value, not the machine default, so an amendment never quietly reverts an earlier one.
+
+```
+/autopilot --merge                  # got the go-ahead: merge it when it is green
+/autopilot --diagram --merge false  # actually, draw me the diagram and hold the merge
+/autopilot --review                 # run the swarm over what is pushed
+/autopilot --autopilot false        # stop driving — leave the branch and MR as they are
+```
+
+Each flag has a defined catch-up when it arrives late: `--diagram true` publishes one now (even after a merge — it is still worth having), `--review true` runs the swarm against what is pushed and feeds the findings into a fresh review round, `--quick-description false` regenerates the description with the full panel and replaces it on the change request, and `--merge false` **disarms an auto-merge that is already armed**, since an armed auto-merge fires on green and would otherwise beat the instruction. `--autopilot false` means *stop driving*, never *undo*: nothing pushed gets deleted and no change request gets closed.
 
 It composes the ordinary skills (`fix-linear` or `fix-freeform`, `commit-msg`, `changes-description`, `review-code`, `fix-feedback --autonomous`, `changes-diagram`, `ping`) rather than reimplementing them.
 
-Five things make it safe to walk away from:
+Six things make it safe to walk away from:
 
 - **It waits with the `Monitor` tool, never a sleep loop.** A watcher wakes the session when something happens, so the prompt stays free and several runs can be in flight at once. A monitor that only reports success would stay silent through a crashloop, so every terminal state emits a line.
 - **Review comments outrank CI, always.** Fixing comments means pushing, and a push restarts the pipeline — waiting on a red or running pipeline first throws away a whole CI run.
-- **It overrides nothing you asked for.** Every flag but `--merge` and `--max-rounds` was decided by the fix skill it sits on top of, `--branch` included — so a freeform run that stays on the default branch is pushed and ends there, with no change request to review or merge. That is safe to honour because `fix-freeform` has already escalated to a feature branch if the change touched Terraform, if the default branch was protected, or if the tree was dirty.
+- **It overrides nothing you asked for.** Every flag but `--merge` and `--max-rounds` was decided by the fix skill, `--branch` included — so a run that stays on the default branch is pushed and ends there, with no change request to review or merge. That is safe to honour because the fix skill has already escalated to a feature branch if the change touched Terraform, if the default branch was protected, or if the tree was dirty. An amendment you type is the one thing that moves a flag mid-run, and that is an instruction rather than an override.
 - **It gets two reviews, not one.** The forge's AI reviewer makes a single pass over the finished diff; the `review-code` swarm attacks it from independent angles and then has a panel of skeptics try to refute each finding, so only what survives refutation is reported. Interactively the swarm is a nice-to-have because a human reads the diff before it lands — on an unattended run there is no such human, and the review is the only thing between the run and the default branch. Both start in the turn that arms the watcher, since neither gates the other.
 - **The human approval gate is never waived.** Where `require_human_approval` is set, a bot's approval does not merge the change. Everything else in the skill is a judgment call; this one is not.
 - **Every decision made alone is written down** — on the ticket, or in the description — at the time it is made. The record is what replaces the conversation that did not happen.
@@ -500,7 +537,9 @@ It pings you when it finishes, and when it is genuinely stuck — a product deci
 
 ### Worktrees
 
-The `fix-linear` and `fix-feedback` skills set up each fix in its own **git worktree** by default, so you can work several non-blocking fixes in parallel (one terminal/session per worktree) without branch checkouts colliding. `fix-freeform` does the same, but only when it escalates to `--branch new` — its default works in place. `autopilot` creates none of its own and inherits whichever worktree its fix skill set up. See **[WORKTREES.md](WORKTREES.md)** for the full guide — the mental model, switching between worktrees, dependency setup, and cleanup. Pass `in place` to a skill (e.g. `/fix-linear ENG-123 in place`) to fall back to a plain in-place checkout.
+`fix-linear` and `fix-freeform` both default to `--branch new`, which sets each fix up in its own **git worktree**, so you can work several non-blocking fixes in parallel (one terminal/session per worktree) without branch checkouts colliding. `--branch default` is the other value: no feature branch, no worktree, no change request — the commit lands on the branch every other checkout is cut from, and an autopilot run pushes it and ends. Three conditions force `new` whatever the flag said: the change touches Terraform, the default branch is protected, or the tree is dirty. `fix-feedback` makes a worktree for the branch under review, and `autopilot` creates none of its own and inherits whichever one the fix skill set up.
+
+There is no third branch value and no in-place flag. A repo that cannot host worktrees falls back to a plain checkout automatically, which is a capability fallback rather than something you select. See **[WORKTREES.md](WORKTREES.md)** for the full guide — the mental model, switching between worktrees, dependency setup, and cleanup.
 
 Each profile's shell config also defines `go` (worktree-aware `git checkout` — `cd`s into the worktree when one holds that branch, checks out normally when it doesn't, and passes anything else like `go -b new` or `go .` straight to git), `wt` (jump to the worktree for a branch, creating it if needed), `wtl` (list worktrees with age, upstream state, and dirty flag), and `wtclean` (remove worktrees whose branch is gone from the remote or untouched for 90+ days — dry run unless `-y`).
 

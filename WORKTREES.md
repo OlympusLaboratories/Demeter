@@ -27,16 +27,23 @@ index that matters.
 
 | Skill | Behaviour |
 |---|---|
-| `fix-linear` | A worktree per ticket, by default. |
-| `fix-freeform` | Only when it escalates to `--branch new`. Its default (`--branch default`) works in place on the default branch and makes no worktree. |
+| `fix-linear` | A worktree per ticket, on `--branch new` — the default on every profile. |
+| `fix-freeform` | The same, on the same default. `--branch new` is where the flag starts in both skills; they resolve it identically. |
 | `fix-feedback` | A worktree for the branch under review, in its merge/pull-request mode. |
 | `autopilot` | Creates none of its own — it inherits whichever worktree the fix skill it delegated to set up, and owns that one branch for the whole run. |
 | `review-code` | In incoming mode only, a **detached** worktree at `.claude/worktrees/review/<branch>`. It never checks somebody else's branch out over yours. |
 | `commit-msg`, `changes-description`, `changes-diagram`, `docs-humanize` | None. They read the current directory. |
 
-Pass `in place`, `--here`, or `no worktree` in the skill argument to skip the worktree and
-use a plain checkout instead. A repository that cannot host worktrees falls back to that
-automatically.
+`--branch default` is the way to not get a worktree: it commits onto the repository's
+default branch, so there is no feature branch to isolate and no change request at the end
+of it. There is no separate in-place flag and no third `--branch` value — a repository
+that cannot host worktrees falls back to a plain checkout of the feature branch on its own,
+which is a capability fallback rather than a mode anybody selects.
+
+Three conditions force `--branch new` whatever the flag said: the change touches Terraform
+or other infrastructure-as-code, the default branch is protected, or the working tree is
+dirty. Escalation is one-way within a run — once a check has fired, the commits live on a
+branch created for exactly that reason.
 
 Skills enter a worktree with the `EnterWorktree` tool rather than by `cd`-ing, because the
 session's working directory has to move with it. A fresh worktree has no installed
@@ -109,5 +116,8 @@ while running commands in another. It pairs them by absolute worktree path, neve
 
 A worktree is overhead when the change is small and you are not running anything else: a
 fresh checkout with no `node_modules`, no `.venv`, and no build cache can cost more to set
-up than the fix takes. That is why `fix-freeform` defaults to working in place and only
-escalates when the change genuinely needs isolation — and why every skill takes `in place`.
+up than the fix takes. `--branch default` is the escape, and it costs more than the
+worktree: no feature branch means no change request, which means nobody reviews the change
+before it is on the branch every other checkout is cut from. That trade is worth making
+for a typo and almost never otherwise, which is why `new` is the default on both skills and
+the three escalation checks can take `default` away but never hand it back.

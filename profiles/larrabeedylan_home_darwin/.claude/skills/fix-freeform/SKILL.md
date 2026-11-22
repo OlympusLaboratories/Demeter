@@ -1,41 +1,58 @@
 ---
 name: fix-freeform
-description: Implement a change the user described in their own words, with no ticket behind it — "fix this bug", "make this change", "implement X", "can you clean up Y". Interrogates the problem statement against the code before planning, picks the branch mode (straight onto the default branch for small local fixes, a feature branch and worktree when the change touches Terraform, when the default branch is protected, or when the tree is dirty), implements it, and hands back a commit message. Use it whenever there is work to do and nothing to look the work up in; use fix-linear instead when a ticket identifier exists.
+description: Implement a change the user described in their own words, with no ticket behind it — "fix this bug", "make this change", "implement X", "can you clean up Y". Interrogates the problem statement against the code before planning, cuts a feature branch and worktree, implements it, and — unless autopilot is switched off — pushes, opens the pull request, works the review and merges. Use it whenever there is work to do and nothing to look the work up in; use fix-linear instead when a ticket identifier exists.
 ---
 
 # Fix Freeform — Implement a Change From a Problem Statement
 
-Implement a change the user described in plain words. This is `fix-linear` with the ticket taken away: nothing to fetch, no parent initiative, no linked spec — and nothing to check the request against except the code itself.
+Implement a change the user described in plain words, and — unless you are told otherwise — take it all the way to a change request that is ready to merge. This is `fix-linear` with the ticket taken away: nothing to fetch, no parent initiative, no linked spec, and nothing to check the request against except the code itself.
 
 **Parameter:** `$ARGUMENTS` — optional flags, then the problem statement.
 
-| Argument | Effect |
-|---|---|
-| *(everything left after the flags)* | The problem statement — what to fix, change, or build. Required: if nothing is left over, ask the user what they want done and stop. |
-| `--branch default` | Work on the repository's **default branch** directly — no feature branch, no worktree, no pull request. The default, and the reason this skill exists apart from `fix-linear`. |
-| `--branch new` | Cut `<FIRST_NAME>/<slug>` off the default branch and set up a worktree, exactly as `fix-linear` does. |
-| `--quick-description [true\|false]` | Default `true`. Passed through to `changes-description` as `--one-shot`: one writer plus the measured word budget and the fact-check — 4–6 agents instead of 20. `false` runs the full four-persona debate. |
-| `--diagram [true\|false]` | Default `false`. `true` adds a call-flow diagram of the change (Step 5c). |
-| `--review [true\|false]` | Default `false`. `true` runs the `review-code` adversarial swarm over the change once the description is away (Step 5e). |
-| `in place` / `--here` / `no worktree` | Only meaningful once the run is on `--branch new`: take the branch in the current working tree instead of a worktree (Step 2-INPLACE). |
-| `/autopilot` (anywhere in the arguments) | A delegation directive, never part of the problem statement. Hand the whole invocation to `autopilot`. See **Delegation** below. |
+| Argument | Env key | Effect |
+|---|---|---|
+| *(everything left after the flags)* | — | The problem statement — what to fix, change, or build. Required: if nothing is left over, ask the user what they want done and stop. |
+| `--branch new\|default` | `fix_branch` | `new` cuts `<FIRST_NAME>/<slug>` off the default branch in its own git worktree. `default` commits onto the repository's default branch — no feature branch, no worktree, no pull request. **Step 2** owns this, and three conditions can force `new` whatever the flag said. |
+| `--quick-description [true\|false]` | `fix_quick_description` | `true` passes `--one-shot` to `changes-description`: one writer instead of the four-persona debate, 4–6 agents instead of 20, with the mechanical word budget and the fact-check kept. `false` runs the full debate. |
+| `--diagram [true\|false]` | `fix_diagram` | Run `changes-diagram` and attach the published page to the pull request. |
+| `--review [true\|false]` | `fix_review` | Run the `review-code` adversarial swarm over this branch's diff, and feed its confirmed findings through `fix-feedback`. |
+| `--autopilot [true\|false]` | `fix_autopilot` | `true` hands the finished implementation to `autopilot`, which pushes, opens the pull request, works the review and merges. `false` stops at the commit message and the description, and nothing leaves this machine. |
+| `--merge [true\|false]` | `fix_merge` | `autopilot`'s flag, forwarded. `false` drives the run to a green pipeline, a clean review and a ready pull request, then stops without merging. |
+| `--max-rounds N` | `fix_max_rounds` | `autopilot`'s flag, forwarded. Review rounds with the same reviewer before escalating. |
 
-Parse the flags out of `$ARGUMENTS` **first**; whatever remains is the problem statement. A bare `--quick-description` or `--diagram` means `true`. Leaving a flag unparsed hands it to the planner as part of the request, which produces a plan to implement the words "branch new".
+**No default is written in this file.** Every one of them differs between machines, so **Step 0** reads them out of `skill-env.sh` and a flag in the invocation overrides whatever came back. A bare flag means `true` — `--diagram` and `--diagram true` are the same thing. Run `~/.claude/scripts/skill-env.sh check` to see what an unflagged run does here.
 
-### Delegation: `/autopilot` in the arguments
+**The flag surface is identical to `fix-linear`'s, and so are the defaults on any given machine.** The two skills differ in where the work comes from — a ticket, or a sentence — and in nothing else. A flag that meant one thing in one and something else in the other would be a trap, because the user types them interchangeably.
 
-A `/autopilot` or `autopilot` token anywhere in `$ARGUMENTS` is a **delegation directive, not part of the problem statement and not a question to put back to the user**. They are composing two skills, which is what naming one skill inside another's invocation means everywhere in this family: *do this freeform request, and drive it the whole way without checking in.* Strip the token, invoke `autopilot` with the `Skill` tool, pass the remaining flags and the problem statement through verbatim, and let it call back into this skill from its own Step 1.
+Parse the flags out of `$ARGUMENTS` **first**; whatever remains is the problem statement. Leaving a flag unparsed hands it to the planner as part of the request, which produces a plan to implement the words "branch new".
 
-**Do not ask how far the run should go.** The token already answered that, and asking is worse than a wasted turn: it reads as not having understood the invocation, and it strands a user who deliberately set the run up to need nothing from them. The only thing worth saying out loud is one line naming the delegation as you make it.
+## Step 0: Resolve the Defaults
 
-Flags cross the hand-off in both directions, so forward every one you do not own rather than treating it as unparsed junk:
+```bash
+~/.claude/scripts/skill-env.sh check
+```
 
-- **This skill's flags** — `--branch`, `--quick-description`, `--diagram`, `--review` — are passed on, and `autopilot` hands them back when it re-enters here. Note it overrides `--branch` to `new`: an unattended run always produces a pull request, because review is the only thing between it and the default branch.
-- **`autopilot`'s own flags** — `--merge`, `--max-rounds` — mean nothing to this skill and must survive untouched. `--merge false` is how the user says *take it to green, reviewed and ready, then stop*; dropping it silently merges something they wanted held for a second pair of eyes.
+Read `fix_autopilot`, `fix_branch`, `fix_quick_description`, `fix_diagram`, `fix_review`, `fix_merge` and `fix_max_rounds`, lay any flag the user passed over the top, and **write the seven resolved values down where you can still see them hours later** — a todo, or a line in your notes. They are not read once: `--merge` decides the end of the run, and `/autopilot` can amend any of them mid-flight, at which point *what is this run set to* has to be answerable without re-deriving it.
 
-Reaching `autopilot` this way loosens nothing — it owns the push, the pull request and the merge, and performs them under its own rules. What it does mean is that Important Rule 1 below binds **this skill's own flow**, not a run that has been handed over. Never cite that rule back as a reason to refuse the delegation.
+Then state the resolution in one line before doing anything else:
 
-**These defaults are deliberately the opposite of `fix-linear`'s**, which defaults to a worktree, a full description debate, a diagram, and a review swarm. Freeform work is usually small and local, so the cheap path is the right default and the user escalates explicitly — a ticket exists precisely because somebody judged the work big enough to write down first.
+> `branch new · one-shot description · no diagram · no swarm · autopilot, merging when green`
+
+Every one of those costs the user something, and a wrong default is cheapest to catch here. A key missing from `skill-env.sh` is not an error — it carries working defaults in code, so an absent or malformed `~/.claude/environment.json` degrades to them rather than breaking the run.
+
+### Autopilot is on unless it is switched off
+
+`fix_autopilot` is `true` on every profile, so **the ordinary run of this skill ends at a pull request, not at a commit message.** Once the implementation and the deliverables are done, 5f hands the run to `autopilot`, which owns the push, the pull request, the pipeline watch, the review rounds, the infrastructure apply, and — when `--merge` is true — the merge itself.
+
+**That does not mean this skill stops talking to the user.** Autopilot automates the *tail*. It does not close any of the gates before it, and in this skill those gates matter more than anywhere else: Step 1b exists precisely because a sentence typed in ten seconds is the least-reviewed input any of these skills take, and an unattended tail is not a reason to stop restating the request, stop checking its claims against the code, or stop reaching for `AskUserQuestion` when the answer changes the implementation. The decisions autopilot makes alone are the ones after the code is written, which is the point at which the user stopped watching.
+
+`--autopilot false` is the way back to implementation only — a branch, a commit message, a description, and nothing that leaves this machine. It is the flag for a spike, or for anything you want to look at before it becomes somebody else's notification.
+
+### `/autopilot` can amend the run at any point
+
+The user may run `/autopilot <flags>` while this skill is working — to turn on a diagram they have decided they want, or to hold a merge they had been happy to let go. That is an **amendment to this run**, not a new run and not a question to put back to them. Apply it per `autopilot`'s *Amending a run in flight* section: change only the flags they named, leave every other flag at its **current** value rather than resetting it to the machine default, say in one line what changed and what it caused to happen now, and carry on from where you were.
+
+A bare `/autopilot` token inside the *initial* invocation is now redundant rather than wrong — autopilot is already on. Strip it, apply any flags it carries, and say nothing further about it.
 
 ## Step 1: Understand What Is Being Asked
 
@@ -78,7 +95,11 @@ If it is taken, append a distinguishing word rather than reusing someone else's 
 
 ## Step 2: Choose the Branch Mode
 
-This is the step that matters, and it is the one thing this skill has that `fix-linear` does not. `--branch default` commits onto the branch every other checkout is cut from; `--branch new` does what `fix-linear` does. **The mode is not purely the user's choice — three conditions force `new`, and all three are checked before the first edit.**
+`--branch` decides where the work lands, and it has exactly two values. `new` cuts a feature branch in its own worktree; `default` commits onto the branch every other checkout is cut from, which means no pull request and nothing to review. **The mode is not purely the user's choice — three conditions force `new`, and all three are checked before the first edit.**
+
+`fix-linear` resolves this flag with the same two values and the same three checks. Neither skill has a branch mode the other lacks.
+
+**No-worktree fallback.** If the repo cannot host worktrees (`git worktree list` errors), `--branch new` uses **Step 2-FALLBACK**, which takes the branch in the current checkout. That is a capability fallback, not a mode anybody selects — there is no flag for it, and `--branch` has no third value.
 
 ### 2a. Determine the default branch
 
@@ -145,9 +166,7 @@ Then go to Step 3. Everything after this runs in the current working tree.
 
 ### 2d. `--branch new` — branch and worktree
 
-By default this path isolates the work in its own **git worktree** — a separate working directory on its own branch that shares the repo's `.git`. This lets several fixes run in parallel (one terminal/session per worktree) without branch checkouts colliding in a single working tree.
-
-**Escape hatch (in-place checkout):** if `$ARGUMENTS` contains `in place`, `--here`, or `no worktree` (case-insensitive), skip the worktree setup and use **Step 2-INPLACE** instead. Also fall back to Step 2-INPLACE if the repo cannot host worktrees (e.g. `git worktree list` errors).
+This path isolates the work in its own **git worktree** — a separate working directory on its own branch that shares the repo's `.git`. This lets several fixes run in parallel (one terminal/session per worktree) without branch checkouts colliding in a single working tree. If the repo cannot host worktrees, fall back to **Step 2-FALLBACK**.
 
 1. Check whether you are already there:
    ```bash
@@ -168,7 +187,7 @@ By default this path isolates the work in its own **git worktree** — a separat
    git worktree list --porcelain
    ```
    If `BRANCH_NAME` (or `WORKTREE_PATH`) is already listed, **enter it** with the `EnterWorktree` tool (`path:` = that worktree's path), merge `origin/<DEFAULT_BRANCH>` (`--no-edit`), then skip to Step 3 — its dependencies are already installed, so skip the install offer below too.
-   **A worktree that already exists may also already have an open pull request** — a previous run can be interrupted after it pushed and opened one (an API rate limit, a killed session). Before re-planning anything, check for one: run `~/.claude/scripts/github-api.sh` with no arguments and use whichever of its subcommands lists pull requests for a branch head. If one is open, its diff, its description and its CI state are the record of what that run completed, and they are read *first* — the work already done is established by reading the pull request, not by re-deriving it from the problem statement. Do not re-implement a change the diff already contains, do not open a second pull request, and do not cut a new branch. Nothing in Step 2d assumes this, which is exactly why it has to be checked here.
+   **A worktree that already exists may also already have an open pull request** — a previous run can be interrupted after it pushed and opened one (an API rate limit, a killed session). Before re-planning anything, check for one: run `~/.claude/scripts/github-api.sh` with no arguments and use whichever of its subcommands lists pull requests for a branch head. If one is open, its diff, its description and its CI state are the record of what that run completed, and they are read *first* — the work already done is established by reading the pull request, not by re-deriving it from the problem statement. Do not re-implement a change the diff already contains, do not open a second pull request, and do not cut a new branch. Nothing else in 2d assumes this, which is exactly why it has to be checked here.
 4. **If the branch exists** (locally or remotely) but has no worktree, add a worktree on it:
    ```bash
    git worktree add <WORKTREE_PATH> <BRANCH_NAME>
@@ -231,9 +250,9 @@ git switch <BRANCH_NAME>
 
 `--keep` refuses rather than destroying uncommitted work, which is the behaviour you want here. Do not run this on a branch carrying commits you did not make without naming them first.
 
-## Step 2-INPLACE: In-Place Branch Checkout (escape hatch only)
+## Step 2-FALLBACK: Branch Checkout Without a Worktree
 
-Use this **only** when the escape hatch in Step 2d applies — it is the original single-working-tree behavior. Compute `DEFAULT_BRANCH` as in Step 2a first.
+Use this **only** when `--branch new` is in force and the repo cannot host worktrees — it is the original single-working-tree behavior, kept as a capability fallback. Nobody selects it with a flag. Compute `DEFAULT_BRANCH` as in 2a and run the 2b checks first.
 
 ```bash
 git rev-parse --abbrev-ref HEAD
@@ -310,11 +329,11 @@ Execute the approved plan:
 
 After implementation is complete, give the user a summary of what was changed, which branch it is on, and whether any Step 2b check escalated the run.
 
-## Step 5: Commit Message and Description
+## Step 5: Commit Message, Description, and the Hand-off
 
 Immediately after implementation is complete — do not wait for the user to commit or ask for these.
 
-**What these are for depends on the branch mode, and the difference is worth stating plainly.** On `--branch new` (or any escalated run) this is the `fix-linear` path: a commit message and a description the user pastes into the PR they open later. On `--branch default` **there is no pull request** — nothing is opened, nothing is reviewed, nothing has a description field. So the description is a change summary for the commit body and for the user's own reference, and `--diagram` defaults to `false` precisely because there is nothing to attach a diagram to.
+**What these are for depends on the branch mode, and the difference is worth stating plainly.** On `--branch new` — the normal path — the description fills the pull request that 5f is about to open. On `--branch default` **there is no pull request**: nothing is opened, nothing is reviewed, nothing has a description field, so the description is a change summary for the commit body, for the user's own reference, and for the one-line report an autopilot run ends with. Write it as carefully either way; a summary nobody reads on a pull request is still the only account of the change that will exist.
 
 ### 5a. Commit message
 
@@ -324,23 +343,23 @@ Invoke the `commit-msg` skill using the `Skill` tool.
 
 **Immediately** invoke the `changes-description` skill using the `Skill` tool. Do NOT wait for the user to respond to the commit message first — invoke it in the same turn, back-to-back with the commit message, so the work is already running while they read the commit message. The `commit-msg` skill ends with a suggestion to run `/commit`, but you must continue and invoke `changes-description` before yielding to the user.
 
-**`--quick-description` is this skill's flag; `--one-shot` is what `changes-description` is actually handed.** The names do not line up — that skill also has a `--quick`, which is its *middle* setting and not what this maps to. Pass `--one-shot` unless `--quick-description false` was given: a single writer plus the measured word budget and the fact-check, which is the right shape for a change small enough to have gone to the default branch. Pass nothing (the full debate) when the flag is `false` or the user asked for a thorough description.
+**`--quick-description` is this skill's flag; `--one-shot` is what `changes-description` is actually handed.** The names do not line up — that skill also has a `--quick`, which is its *middle* setting and not what this maps to. `--quick-description true` → pass `--one-shot` and nothing else: a single writer plus the measured word budget and the fact-check. `--quick-description false` → pass **no flag at all** and let the full four-persona panel sit. Never pass both: `--one-shot` already forces the round count to zero, so `--quick` alongside it reads as a request for the panel it just dismissed. That skill's middle `--quick` setting is not reachable from here on purpose, because this flag is a boolean; invoke `/changes-description --quick` by hand on the rare run that wants it. `fix-linear` maps the same flag the same way.
 
 If `changes-description` launches its debate as a background workflow, it prints a run ID and yields the turn — that is correct, not a stall. Yield with it: the description arrives when the completion notification does, and blocking on it (`TaskOutput`, `Monitor`, a poll loop) only takes the user's prompt line away for the length of the run.
 
-### 5c. Call-flow diagram (`--diagram true` only)
+### 5c. Call-flow diagram — `--diagram true` and `--autopilot false` only
 
-Skipped entirely by default. When the flag is `true`, invoke the `changes-diagram` skill using the `Skill` tool once the description is away — it diffs the branch against its base and publishes one self-contained page: a call-flow chart of the changed functions, or a file-and-import map when the change is Terraform, Go or TypeScript. Pass the base explicitly on the `--branch default` path (`origin/<DEFAULT_BRANCH>`), since there is no feature branch for it to infer one from. If the skill is not installed on this machine, say so rather than hand-rolling a diagram.
+**On an autopilot run this step is autopilot's, not yours.** It attaches the diagram at its final step, once the code has stopped moving, because a diagram of a branch that changed three more times is worse than none. Run it here only when `--autopilot false` has taken the tail away — then it is the only chance the change gets at one. When both conditions hold, invoke the `changes-diagram` skill using the `Skill` tool once the description is away — it diffs the branch against its base and publishes one self-contained page: a call-flow chart of the changed functions, or a file-and-import map when the change is Terraform, Go or TypeScript. Pass the base explicitly on the `--branch default` path (`origin/<DEFAULT_BRANCH>`), since there is no feature branch for it to infer one from. If the skill is not installed on this machine, say so rather than hand-rolling a diagram.
 
 ### 5d. Re-print the commit message, verbatim
 
 The description output is long, so by the time it finishes the commit message from 5a has scrolled far up the terminal. In the turn that presents the description, close by repeating it — unchanged from what `commit-msg` produced, no re-generation, no re-wording, no summary of it — in its own fenced block under a `Commit message` heading, so both blocks the user copies sit next to each other at the bottom. If the user corrected the commit message in between, repeat the corrected version.
 
-### 5e. Review swarm (`--review true` only)
+### 5e. Review swarm — `--review true` and `--autopilot false` only
 
-Skipped entirely by default, for the same reason `--diagram` is: the default path here puts a small change straight onto the default branch, where there is no review gate to feed and an adversarial swarm is more machinery than the work is worth. `fix-linear` defaults the flag the other way round, because a ticket exists precisely because somebody judged the work big enough to write down first.
+**On an autopilot run this step is autopilot's, not yours.** It runs the swarm in the turn that arms its pipeline watcher, *after* the push, because `fix-feedback` posts each confirmed finding to the pull request as an anchored comment and there is no pull request to post to before the push. Running it here on an autopilot run would mean doing the work twice and losing the posting target the first time. Run it here only when `--autopilot false` has taken the tail away.
 
-When the flag is `true`, invoke the `review-code` skill using the `Skill` tool once the commit message has been re-printed. It prints only its run-ID block before yielding, so the two blocks the user copies stay within a screen of the prompt.
+When both conditions hold, invoke the `review-code` skill using the `Skill` tool once the commit message has been re-printed. It prints only its run-ID block before yielding, so the two blocks the user copies stay within a screen of the prompt.
 
 **Pass the base explicitly on the `--branch default` path** — `--base <DEFAULT_BRANCH>`, the bare branch name rather than `origin/<DEFAULT_BRANCH>`, since `review-code` prepends the remote itself when it computes the merge-base. On an escalated `--branch new` run pass no argument at all and let it infer the base from the branch, which is what it does best.
 
@@ -350,9 +369,19 @@ It launches as a background workflow and yields the turn with a `wf_…` run ID.
 
 **On `--branch default` the findings land on code that is already on the default branch**, and that is the one thing worth saying out loud when you present them: there was no review gate between this change and every other checkout, so a confirmed finding is a follow-up commit rather than a comment on a pull request. That asymmetry is also the argument for passing `--review true` on anything that turned out bigger than it looked.
 
+### 5f. Hand the run to `autopilot`, unless `--autopilot false` was passed
+
+In the same turn that the description and the re-printed commit message go out, invoke the `autopilot` skill using the `Skill` tool and pass it the resolved flag state from Step 0 — `--branch`, `--diagram`, `--review`, `--merge`, `--max-rounds` — as **values, not as the user's original argument string**, so an amendment made mid-run is not silently rolled back to a machine default.
+
+**The hand-off is not a question.** Autopilot is on because this machine's `fix_autopilot` says so, or because the user said so; either way the decision is already made. Say in one line that you are handing over and what the run will do when it gets there — "Handing to autopilot: push, open the PR, work the review, merge when it is green" — then hand over.
+
+What crosses the hand-off is the *state*, not the invocation: the branch, the worktree, the commits, the commit message and the description all already exist, and autopilot starts at its Step 2 rather than re-entering this skill.
+
+**On `--branch default` the hand-off still happens, and it is short.** There is no pull request to open, so autopilot pushes the default branch at its Step 4a, records the commit, and ends with a report saying the change is live and nobody reviewed it. That is the trade `--branch default` makes; it is the user's to make, and it is the one fact they need back from a run they were not watching.
+
 ## Important Rules
 
-1. **NEVER push, NEVER open a pull request, and never modify external state.** Local git is yours: creating a branch, creating a worktree, and — when the user asks for it — committing are all fine. **`--branch default` means the commit lands on the default branch, not that it leaves this machine.** That distinction matters more here than anywhere else in these skills: a stray push of a feature branch creates a branch nobody asked for, while a stray push of the default branch is a direct write to the branch every other checkout, every CI pipeline, and (with Atlantis) every apply is cut from. So do not run `git push` in any form — not with `-u`, not as a `--dry-run` "check", not because "it would be rejected anyway" — and do not create a pull request. Pushing is the user's explicit action, always. Never remove a worktree the user didn't ask you to — cleanup is the user's call. **This rule scopes to this skill's own flow.** Naming `/autopilot` in the arguments *is* the user's explicit action, and it hands the run to a skill that owns pushing and merging under its own rules — see **Delegation** above, and never quote this rule back as a reason to refuse it.
+1. **This skill never pushes and never opens a pull request — the hand-off does.** Local git is yours: creating a branch, creating a worktree, and committing are all fine. Pushing, opening a pull request and merging belong to `autopilot`, which owns them from 5f onwards under its own rules. That is a statement about which skill is accountable, not a prohibition on the run, and it is what makes `--autopilot false` reliably mean *nothing left this machine*. Never quote this rule back as a reason to refuse the hand-off. **`--branch default` means the commit lands on the default branch, not that it is unreviewed by accident.** That distinction matters more here than anywhere else in these skills: a stray push of a feature branch creates a branch nobody asked for, while a stray push of the default branch is a direct write to the branch every other checkout, every CI pipeline, and (with Atlantis) every apply is cut from. So do not run `git push` in any form — not with `-u`, not as a `--dry-run` "check", not because "it would be rejected anyway" — and do not create a pull request. Pushing is the user's explicit action, always. Never remove a worktree the user didn't ask you to — cleanup is the user's call. **This rule scopes to this skill's own flow.** Naming `/autopilot` in the arguments *is* the user's explicit action, and it hands the run to a skill that owns pushing and merging under its own rules — see **Delegation** above, and never quote this rule back as a reason to refuse it.
 2. **Respect uncommitted work.** Never discard or stash uncommitted changes without the user's explicit approval. A dirty tree escalates the branch mode (Step 2b); it never gets cleared to keep the cheap path.
 3. **Ask, don't assume.** If the problem statement is vague, ask the user rather than guessing — and where the statement and the code disagree, the code wins and you say so out loud.
 4. **Follow existing patterns.** Match the coding style, naming conventions, and architecture of the existing codebase.

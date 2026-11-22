@@ -1,50 +1,78 @@
 ---
 name: autopilot
-description: A modifier on fix-linear or fix-freeform that takes their work all the way to a merged pull request without stopping to ask. Use when the user says autopilot, put it on autopilot, auto mode, one-shot this ticket, take this end to end, handle it autonomously, ship this without checking in, drive it to merge, or invokes /autopilot — on its own or inside another fix skill's invocation. It overrides none of that skill's flags: it commits, opens the PR, watches the pipeline and the review bot, addresses every comment, applies infrastructure plans, merges in the right order across stacked PRs, and pings the user only when finished or genuinely stuck.
+description: The automated tail of fix-linear and fix-freeform — it commits, pushes, opens the PR, watches the pipeline and the review bot, addresses every comment, applies infrastructure plans, merges in the right order across stacked PRs, and pings the user only when finished or genuinely stuck. It is on by default in every fix run, so it is usually reached by hand-off rather than invoked. Invoke it directly when the user says autopilot, put it on autopilot, auto mode, one-shot this ticket, take this end to end, handle it autonomously, ship this without checking in, drive it to merge, or runs /autopilot — including mid-run, where /autopilot with flags amends the run already in flight (take over the merge, turn on a diagram, hold a merge that was about to happen).
 ---
 
-# Autopilot — Take a Fix Skill's Work All the Way, Unattended
+# Autopilot — The Automated Tail of a Fix Run
 
-**This is a mode, not a task.** `fix-linear` and `fix-freeform` do the work; engaging autopilot says *and do not stop to ask me anything.* It adds the part those two deliberately refuse to do — push, open the pull request, work the review until it is clean, and merge it at the first moment that is actually safe — and changes nothing else about the run.
+**This is a mode, not a task.** `fix-linear` and `fix-freeform` do the work; this skill adds the part they deliberately refuse to do — commit, push, open the pull request, work the review until it is clean, and merge it at the first moment that is actually safe — and changes nothing else about the run.
 
-The name is the contract, and it is worth taking literally. An autopilot holds a course somebody else set: it cannot be engaged against nothing, it does not re-decide the destination, and it has no opinion about why the route was chosen. Everything from the branch to the description to whether a review swarm runs was settled before autopilot was engaged — this skill flies the plan it was handed, and the whole of its judgment goes into the part the fix skills leave undone.
+**It is on by default.** `fix_autopilot` is `true` on every profile, so the ordinary way to reach this skill is not for a user to type it: a fix skill hands the run over once the implementation, the commit message and the description are done. Being typed is the exception, and there are two of those — a direct `/autopilot <ticket or statement>`, and an `/autopilot <flags>` arriving mid-run to amend what is already happening.
 
-The user's standing instruction when autopilot is on is: **trust your judgment, and pull me in only if absolutely needed.** That is a licence to decide, not a licence to guess. Every judgment call you make alone gets written down somewhere durable — the ticket, the PR description, or a thread reply — because the record is what replaces the conversation you would otherwise have had.
+The name is the contract, and it is worth taking literally. An autopilot holds a course somebody else set: it does not re-decide the destination, and it has no opinion about why the route was chosen. Everything from the branch to the description to whether a review swarm runs was settled before this skill was reached — it flies the plan it was handed, and the whole of its judgment goes into the part the fix skills leave undone.
 
-**Parameter:** `$ARGUMENTS` — a Linear ticket identifier, or a freeform problem statement, plus optional flags.
+**The standing instruction, scoped precisely: trust your judgment for everything after the code is written, and pull the user in only if absolutely needed.** That scope is the whole of it. Autopilot automates the *tail*; it does not close the fix skill's own gates. A vague ticket still gets a question, an ambiguous requirement still gets `AskUserQuestion`, and a plan worth seeing still gets shown — those happen in the fix skill, before this one is reached, and being unattended later is not a reason to guess earlier. From the commit onwards there is nobody to ask, so every judgment call you make alone gets written down somewhere durable — the ticket, the PR description, or a thread reply — because the record is what replaces the conversation you would otherwise have had.
 
-| Argument | Default | Effect |
+**Parameter:** `$ARGUMENTS` — on a direct invocation, a Linear ticket identifier or a freeform problem statement, plus optional flags. On a mid-run amendment, flags only.
+
+| Argument | Env key | Effect |
 |---|---|---|
 | A ticket id (`PLAT-123`) | — | Implement via `fix-linear`. |
 | Anything else | — | Implement via `fix-freeform`. |
-| `--merge true\|false` | `true` | `false` stops after the review is clean and the PR is ready, without merging. |
-| `--max-rounds N` | `3` | Review rounds with the same reviewer before escalating. |
+| `--merge [true\|false]` | `fix_merge` | `false` stops after the review is clean and the pull request is ready, without merging. |
+| `--max-rounds N` | `fix_max_rounds` | Review rounds with the same reviewer before escalating. |
+| `--autopilot [true\|false]` | `fix_autopilot` | `false` arriving here means the user has switched the tail off. See **Amending a run in flight**. |
+| `--branch`, `--quick-description`, `--diagram`, `--review` | `fix_*` | The fix skill's. Forward them; do not restate a default for them here. |
 
-Those two are the only flags this skill owns, and the test is that no fix skill has an opinion on either: they describe **how far the automation goes**, not what the change is. Every other flag in the invocation — `--quick-description`, `--diagram`, `--review`, `--branch`, the in-place escape hatch — belongs to the fix skill. Forward them untouched, read their effect off that skill's defaults, and do not restate a default for them here.
-
-Parse the flags out of `$ARGUMENTS` first; whatever remains is the ticket id or the problem statement. A bare `--quick-description` means `true`.
+**No default is written in this file.** Step 0 reads every one of them out of `skill-env.sh`, and a flag in the invocation wins. A bare flag means `true` — `/autopilot --merge` is `--merge true`, which is exactly how a user releases a merge they had been holding. `--merge` and `--max-rounds` are the two flags this skill owns, and the test is that no fix skill has an opinion on either: they describe **how far the automation goes**, not what the change is.
 
 ### What the mode owns, and what it inherits
 
-Autopilot never does the meat of the work. A fix skill does — `fix-linear` or `fix-freeform` — and by the time either of them has parsed the invocation, every decision a parameter expresses has already been made there.
+Autopilot never does the meat of the work. A fix skill does, and by the time either of them has parsed the invocation, every decision a parameter expresses has already been made there.
 
-So **it owns the automation and inherits the change.** It carries no defaults of its own beyond `--merge` and `--max-rounds`, and it never re-decides a question the fix skill already answered. That rule has teeth in the direction that costs the user money: reaching for `fix-freeform` is reaching for the cheap path — a one-shot description, no diagram, no review swarm — and being unattended is not a reason to spend a fleet on any of them. A default this skill restates is a default it will eventually contradict, so it restates none.
+So **it owns the automation and inherits the change.** It carries no defaults of its own — they all live in `skill-env.sh` alongside the fix skills' — and it never re-decides a question the fix skill already answered. A default this skill restated would be a default it eventually contradicted, so it restates none.
 
-**There are no exceptions to this, including the ones that look like safety.** It is tempting to force `--branch new` on a freeform run so that a pull request exists to review — but that judgment was already made, and made better, inside `fix-freeform`: its escalation checks force a feature branch when the change touches Terraform, when the default branch is protected, or when the tree is dirty. If `--branch default` survives those checks, it survived them on this repository's own terms, and this skill is not better placed to overrule it than the skill holding the checks. "I would have chosen differently" is never sufficient, and neither is "I would have felt safer".
+**`--branch` is the fix skill's, and there are no exceptions, including the ones that look like safety.** It is tempting to force `new` on a freeform run so that a pull request exists to review — and it is wrong, because that judgment was already made, and made better, inside the fix skill: its escalation checks force a feature branch when the change touches Terraform, when the default branch is protected, or when the tree is dirty. If `default` survived those checks, it survived them on this repository's own terms, and this skill is not better placed to overrule it than the skill holding the checks. "I would have chosen differently" is never sufficient, and neither is "I would have felt safer". A `default` run is a short run: Step 4a pushes and ends.
 
-### Two ways in, one behaviour
+### Three ways in
 
-Autopilot is reached either **directly** (`/autopilot <ticket or statement>`) or **by delegation**, when the user names it inside another fix skill's invocation — `/fix-linear --merge false /autopilot PLAT-123`, or `/fix-freeform --branch new /autopilot <statement>`.
+1. **By hand-off — the normal one.** A fix skill finishes its implementation, its commit message and its description, and invokes this skill with the run's resolved flag values. The branch, the worktree and the commits already exist. **Start at Step 2**; do not invoke a fix skill, because the one that just handed over is where you came from.
+2. **Directly** — `/autopilot <ticket or statement>`, with no fix skill run yet. A mode has nothing to qualify on its own, so **Step 1** picks `fix-linear` for a ticket id and `fix-freeform` for anything else, and that skill's flow then governs the run exactly as if the user had typed it themselves — including its interactive gates. It will hand back here at Step 2 by itself.
+3. **As an amendment** — `/autopilot <flags>` while a fix run is already in flight. See the next section. This is the only route that changes a decision rather than acting on one.
 
-Those look like different things and are not. A mode has nothing to qualify on its own, so the direct form still runs a fix skill — Step 1 picks `fix-linear` for a ticket id and `fix-freeform` for anything else, and that skill's defaults then govern the run exactly as if the user had typed it themselves. The delegated form only makes the choice explicit, and lets the user set that skill's flags while they are at it. Neither route is the "real" one.
+Routes 1 and 2 converge on identical behaviour from Step 2 onwards, and neither is the "real" one. A user who types `/fix-linear PLAT-123 /autopilot` has written a redundancy, not a mistake: autopilot was already on. Strip the token, apply any flags it carries, and say nothing further about it.
 
-The delegated form is a composition, not a mistake and not an ambiguity: it says *run that skill's flow, and take it all the way.* `fix-linear` and `fix-freeform` each strip the token and hand the invocation here with their own flags and the ticket or statement intact, so by the time you are reading this there is nothing left to clarify. Behave identically on both routes, and never re-ask a question the delegating skill was told not to ask.
+### Amending a run in flight
+
+`/autopilot <flags>` during a fix run is an **amendment to that run**. It is not a new run, not a restart, and not a question to put back to the user — they have told you something, and the only thing owed back is one line saying what changed and what it caused to happen now.
+
+Three rules govern every amendment:
+
+- **Only the flags they named change.** Every other flag keeps its **current run value**, not the machine default. This is the one thing an amendment gets wrong most easily: re-reading `skill-env.sh` and starting from its values would silently revert an earlier amendment, which is worse than ignoring the new one.
+- **An amendment never re-does a completed step for its own sake.** It changes what happens from here, plus the specific catch-up each flag names below.
+- **Record the new value next to the run state**, the same way Step 0 did. `--merge` in particular is read hours later, at Step 9.
+
+| Flag | Arriving late | What to do |
+|---|---|---|
+| `--merge true` | any time before the merge | The common case: the user has got their go-ahead. Re-check the Step 9 gates and merge as soon as they pass. If the run has already parked at "ready", resume it — do not wait for anything else. |
+| `--merge false` | before the merge | Hold. Do not arm auto-merge, and if it is already armed, **disarm it** — an armed auto-merge fires on green and will beat this instruction. After the merge has landed, say plainly that it is already merged and do not revert it. |
+| `--max-rounds N` | any time | Applies to rounds from here. A run already past the new cap escalates at the next round rather than retroactively. |
+| `--diagram true` | any time | Generate and attach it now if the code has settled, otherwise at Step 11 as usual. If the pull request is already merged, publish it anyway and put the link in the ticket and the report — a diagram is still worth having after the fact. |
+| `--diagram false` | any time | Skip the Step 11 attach. Never delete one already attached. |
+| `--review true` | before the merge | Run the swarm now against what is pushed (Step 5b), and feed its confirmed findings through `fix-feedback` as a fresh round. This is the amendment most likely to arrive with `--merge false` beside it, and the pair means *hold on, let me see it reviewed first*. |
+| `--review false` | before the merge | Stop starting new swarm rounds. Never discard findings already posted to the pull request — they are the reviewer's now. |
+| `--quick-description false` | after the description exists | The user wants the thorough version. Re-run `changes-description` with no flag and replace the description on the pull request. |
+| `--quick-description true` | after the description exists | A no-op. Nobody wants a cheaper rewrite of text that already exists; say so in one line. |
+| `--branch new` | before the push | This is the fix skill's own escalation path and it is always available: cut the branch, move the commits (its "escalating after work has already started" step), and carry on. |
+| `--branch default` | after a feature branch has commits | Refuse, in one line. Escalation is one-way within a run, and the commits live on a branch created for a reason. |
+| `--autopilot false` | any time | Stop the automation where it stands and report. Leave the branch, the pull request and the threads exactly as they are — **never delete a pushed branch or close a pull request** to honour this. It means *stop driving*, not *undo*. |
+| `--autopilot true` | on a run that had it off | Engage from Step 2: commit if needed, push, and carry on as normal. |
 
 ### `--merge false` is the flag to actually honour
 
-`--merge` decides where the run stops, and it is the one flag whose default does something irreversible. `true` (the default) means this run merges as soon as it is genuinely safe. `false` means the user has already decided this change wants a human's eyes before it lands: drive it to a green pipeline, a clean review and a ready change request, then **stop and hand them the link**. Do not arm auto-merge, do not merge because the review came back clean, and do not treat a quiet reviewer as consent. A run that merges under `--merge false` has done the one thing the user explicitly reached for a flag to prevent.
+`--merge` decides where the run stops, and it is the one flag whose `true` value does something irreversible. `true` means this run merges as soon as it is genuinely safe. `false` means the change wants a human's eyes before it lands: drive it to a green pipeline, a clean review and a ready change request, then **stop and hand them the link**. Do not arm auto-merge, do not merge because the review came back clean, and do not treat a quiet reviewer as consent. A run that merges under `--merge false` has done the one thing the user explicitly reached for a flag to prevent.
 
-Read it early and record it next to the run state, not just at parse time — the merge decision is made hours later, in Step 9, by which point the flag is easy to have forgotten.
+On the work profile `fix_merge` is `false` by default, which means the ordinary run there *always* stops at a ready pull request, and `/autopilot --merge` is how the user releases it. Read the flag early and record it next to the run state, not just at parse time — the merge decision is made hours later, in Step 9, by which point it is easy to have forgotten.
 
 ## Step 0: Resolve the Environment — do this before anything else
 
@@ -66,28 +94,29 @@ The values that matter here:
 | `iac_bot`, `iac_plan_marker`, `iac_apply_marker` | The infrastructure apply gate. |
 | `require_human_approval` | Whether a bot approval alone may merge. |
 | `artifact_store` | Where the diagram goes. |
+| `fix_merge`, `fix_max_rounds` | This skill's two flags, when the invocation did not set them. |
+| `fix_branch`, `fix_quick_description`, `fix_diagram`, `fix_review`, `fix_autopilot` | The fix skill's flags. **On a hand-off, take these from the values the fix skill passed, not from here** — it already resolved them and the user may have amended one since. Read them here only on a direct invocation.
 
 **Every one of these may be empty, and empty means "this machine does not have that".** An empty `review_bots` does not mean there is no review — it means you cannot identify the reviewer by name, so treat every unresolved thread that is not from an `operational_bots` account as real feedback. An empty `iac_bot` disables the apply gate entirely. An empty `review_job` means you cannot re-trigger a review and must say so rather than retrying something that does not exist.
 
 Use `$(~/.claude/scripts/skill-env.sh get api_script)` for the helper path throughout. Read that script's usage before calling a subcommand — **do not assume a subcommand exists on both forges**, because the two helpers are not symmetric and the GitHub one is thinner.
 
-## Step 1: Implement
+## Step 1: Implement — direct invocations only
 
-Invoke `fix-linear` (ticket) or `fix-freeform` (statement) with the `Skill` tool, passing `--quick-description` through.
+**Skip this step entirely when you were reached by hand-off.** A fix skill that invokes this skill has already done everything in it, and invoking one back would restart the work that just finished. Go to Step 2.
 
-Those skills have interactive gates. Resolve them yourself, as follows, and **write down every call you make**:
+On a direct invocation, invoke `fix-linear` (ticket id) or `fix-freeform` (anything else) with the `Skill` tool, forwarding every flag from the invocation. That skill resolves the defaults, sets up the branch, plans, implements, produces the commit message and the description, and hands the run back here. You do not re-do any of it.
 
-- **Ambiguity in the ticket or statement.** Do not ask. Earn the right to decide: read the callers, the tests, the adjacent modules, and the git history of the change sites. Check the ticket's linked issues and recent comments, sibling tickets, and recent pull requests touching the same code. Reproduce the bug or run the failing test where that is cheap. If it is still genuinely undecidable, pick the most defensible option and record the decision with its reasoning.
-- **Plan approval.** Self-approved — but hold the plan to the same standard the interactive flow would. Autonomy is not an excuse for a thinner plan. Post the locked plan, every judgment call, and its rationale as a comment on the Linear ticket **before implementation starts**. For a freeform run there is no ticket, so the record goes in as a **comment on the PR** — not the description, which `changes-description` deliberately keeps free of design notes — and it must go in before you request any review. Write it as engineering rationale: the alternative considered and why it lost, the constraint that forced a choice, the risk you want looked at. Never narrate the process that produced it, and never open with who or what wrote it. If a discovery later forces a change of plan, record the revision and the reason **before** you resume.
-- **The no-comments rule still applies.** The code you write carries no explanatory comments, no banners, no docstrings that were not already there, no TODOs, no ticket references. The fix skills restate this in full; do not let an autonomous run quietly relax it. Explanation goes in the commit message and the PR description.
+**Its interactive gates stay open, and that is deliberate.** This is the part of the old behaviour that changed: autopilot no longer self-resolves the fix skill's questions. The automation starts after the code is written, so a vague ticket gets a question, an ambiguous requirement gets `AskUserQuestion`, and the plan gets shown — because the user who typed `/autopilot` is, at that moment, still at the keyboard. What they asked not to be interrupted for is the pipeline, the review and the merge, which is hours of waiting they should not have to sit through. Suppressing the questions as well would buy nothing and cost a whole implementation when a reading was wrong.
 
-**`--branch` is the fix skill's too — do not force `new`.** A freeform run that stays on the default branch produces no pull request, and that is a coherent thing to have asked for: the automation this skill adds to it is the push, and Steps 5 through 10 have nothing to drive. Step 4 has both paths. The safety argument for overriding does not survive contact with `fix-freeform`'s Step 2b, which has already escalated the run to a feature branch if the change touched Terraform, if the default branch was protected, or if the tree was dirty — so a `--branch default` that reaches this skill is one those checks deliberately let through.
+Two things hold on every route:
 
-**Every flag but `--merge` and `--max-rounds` is the fix skill's, so forward the invocation and read the result.** `--quick-description`, `--diagram` and `--review` are decided there and this skill does not second-guess any of them. In particular `--review` resolves to `true` through `fix-linear` and `false` through `fix-freeform`, and an unattended run is not grounds to turn a swarm on that the user left off — the forge's own reviewer runs either way, so inheriting a `false` degrades the review rather than removing it, and a fleet of agents is a cost the user notices.
+- **Post the locked plan and every judgment call somewhere durable** once the implementation is done — a comment on the ticket on a ticket run, the pull request description on a freeform one. From the commit onwards there is nobody to ask, so the record is what replaces the conversation.
+- **The no-comments rule still applies.** The code carries no explanatory comments, no banners, no docstrings that were not already there, no TODOs, no ticket references. The fix skills restate this in full; do not let an unattended run be the reason it slips.
 
-**`--review false` is then passed down — but only on a run that will open a pull request.** This is about *where* the swarm runs, not whether. The delegated skill would otherwise fire it at the end of its own flow, before the push, and `fix-feedback`'s posting step needs a pull request that does not exist yet at that point, so those findings would have nowhere to land. This skill owns the swarm at Step 5b instead, the same way it owns the commit and the description.
+**Every flag but `--merge` and `--max-rounds` belongs to the fix skill.** `--branch`, `--quick-description`, `--diagram` and `--review` are resolved there, against this machine's defaults, and this skill does not second-guess any of them. In particular, an unattended run is not grounds to turn a swarm on that the machine's default left off, nor to spend the full description panel where it left the one-shot.
 
-On a `--branch default` run there is never going to be a pull request, so that reasoning inverts: leave `--review` alone, let `fix-freeform` run its own Step 5e, and skip Step 5b. Taking the swarm away from the skill that can still act on its findings, to run it later in a place that cannot, is strictly worse than not moving it.
+**The swarm and the diagram are this skill's to run, and that is about *where*, not whether.** The fix skill deliberately does not run either on an autopilot run. `review-code` fires at **Step 5b**, in the turn that arms the watcher, because the branch is pushed by then and `fix-feedback` needs a pull request to anchor each confirmed finding to — fired before the push, those findings would have nowhere to land. `changes-diagram` runs at **Step 11**, once the code has stopped moving. On a `--branch default` run neither reasoning survives, because there is never going to be a pull request: the fix skill runs its own diagram and its own swarm there, and Steps 5b and 11's attach are skipped.
 
 ## Step 2: Commit
 
@@ -95,7 +124,9 @@ Invoke `commit-msg` with the `Skill` tool and commit with the message it produce
 
 ## Step 3: Describe
 
-Invoke `changes-description` with the `Skill` tool. Pass `--one-shot` when `--quick-description` is true.
+**On a hand-off the description already exists** — the fix skill produced it before handing over. Use it as it stands; do not regenerate it, and do not run a second panel over the same diff. Regenerate only on an explicit `--quick-description false` amendment (see **Amending a run in flight**).
+
+On a direct invocation the fix skill you called in Step 1 produced it, the same way. If for any reason there is no description in hand, invoke `changes-description` with the `Skill` tool, passing `--one-shot` when `--quick-description` is true and no flag at all when it is false.
 
 **On a `--branch default` run there is no description field to fill**, so the text is the change summary that goes into the Step 11 report and, where it is short enough to belong there, the commit body. Everything below still governs it: a summary nobody will read on a pull request is not licence to write it carelessly, because it is the only account of the change a reader will ever get.
 
@@ -139,7 +170,7 @@ When the monitor's notification arrives, continue from Step 6. Between arming it
 
 ## Step 5b: The Review Swarm — launched with the watcher, not after it
 
-When `--review` resolved to `true` — off the fix skill, so `fix-linear` runs it and `fix-freeform` does not — invoke the `review-code` skill using the `Skill` tool **in the same turn that arms the monitor**, with no arguments — the branch is pushed, so its Local mode diffs exactly what the pull request contains.
+When `--review` resolved to `true` — off this machine's `fix_review`, or off the invocation, or off a mid-run amendment — invoke the `review-code` skill using the `Skill` tool **in the same turn that arms the monitor**, with no arguments — the branch is pushed, so its Local mode diffs exactly what the pull request contains.
 
 Arm the monitor first and launch the swarm second, then yield once for both. Neither is a precondition for the other: CI and the forge's reviewer are already running on the push, and the swarm reads the diff from disk. Waiting for one before starting the other adds a full swarm's latency to a run whose entire purpose is to need nothing from anybody.
 
@@ -171,7 +202,7 @@ Two facts that look like failures and are not:
 - **A push revokes approval and re-triggers the review.** That is the loop working.
 - **Replies alone do not trigger a fresh review.** If a round produced only replies and no commits, there is nothing to push and therefore no new pipeline. Re-run the `review_job` to request a new verdict. Assigning the bot as a reviewer in the forge UI does nothing when the review runs as a CI job. If `review_job` is empty, say so and wait for a human instead.
 
-**Cap the loop at `--max-rounds` (default 3) rounds with the same thread.** Ping-ponging with a bot past that point is a sign the disagreement is real; escalate per Step 10 rather than continuing.
+**Cap the loop at `--max-rounds` rounds with the same thread** — the value Step 0 resolved, which an amendment may have moved since. Ping-ponging with a bot past that point is a sign the disagreement is real; escalate per Step 10 rather than continuing.
 
 ## Step 7: CI Failures
 
@@ -247,7 +278,7 @@ The principle: a step is armed the instant its precondition is genuinely satisfi
 When the PR merges, when a `--branch default` run has pushed, or when you stop for any reason:
 
 1. **Record it where the work lives.** On a ticket run, comment the PR URL, what shipped, and anything noteworthy. A `--branch default` run has no PR, so record the pushed commit SHA and its forge URL instead. Work you deliberately did not do becomes its own ticket, linked back — never a buried bullet in a closing comment. Check whether the forge integration already moved the ticket before moving it by hand; that integration is asynchronous.
-2. **Attach the diagram** when `--diagram` is true. Invoke `changes-diagram` with the `Skill` tool and append its link to the PR description — or, on a `--branch default` run, carry the link in the report and the ticket comment, since there is no description to append to. Do this once the code has settled — a diagram of a branch that changed three more times is worse than none. **A failed or unavailable diagram never fails the run**: say so in one line and carry on.
+2. **Attach the diagram** when `--diagram` is true and the run opened a pull request. On a `--branch default` run the fix skill already produced it at its own diagram step, so do not produce a second one — carry the link it gave you into the report and the ticket comment. Invoke `changes-diagram` with the `Skill` tool and append its link to the PR description — or, on a `--branch default` run, carry the link in the report and the ticket comment, since there is no description to append to. Do this once the code has settled — a diagram of a branch that changed three more times is worse than none. **A failed or unavailable diagram never fails the run**: say so in one line and carry on.
 3. **Ping the user.** Invoke the `ping` skill with the `Skill` tool. This is the only message the user may see, so it carries what happened and whether anything is needed — a ping that says "done" wastes it. **A `--branch default` run says so in the ping**: the change is on the default branch, unreviewed, and already live. That is what the user chose, and it is also the single fact most worth knowing on a phone.
 
 ### When to stop and ping instead of continuing
@@ -271,7 +302,7 @@ Stopping is reserved for these. Everything else — surprising test failures, un
 3. **Never blind-retry a failing job.** Read the log and classify it first. Twice the same way is a real failure.
 4. **Comments before CI.** Always.
 5. **This run owns exactly one branch** (or one named stack) — including when that branch is the default one. Never force-push, never amend a pushed commit, never act on a pull request this run did not open.
-6. **Never override the fix skill's flags.** `--merge` and `--max-rounds` are this skill's; every other flag was decided before this skill was reached, `--branch` included. Automation is what this skill adds, not a second opinion on what the change should be.
+6. **Never override the fix skill's flags — but always honour an amendment.** `--merge` and `--max-rounds` are this skill's; every other flag was decided before this skill was reached, `--branch` included, and automation is what this skill adds rather than a second opinion on what the change should be. The one thing that does change a flag mid-run is the user saying so with `/autopilot <flags>`, and that is not an override, it is an instruction. When one arrives, change only what they named and leave the rest at its current run value.
 7. **Record every decision you made alone**, at the time you made it — on the ticket, as a PR comment on a freeform run, or in the Step 11 report when the run produced neither. The record is what replaces the conversation, so it carries the reasoning and nothing about the process that produced it.
 8. **No comments in the code.** Autonomy does not relax it.
 9. **An empty config value means the capability is absent, not that you should guess at it.** Never substitute a name you saw in an example for one the machine did not supply.

@@ -18,5 +18,14 @@
 
   "_artifact_store": "auto | mnemosyne | claude | local. auto probes mnemosyne, then the Claude Artifact tool, then writes the file locally.",
   "artifact_store": "auto",
-  "require_human_approval": false
+  "require_human_approval": false,
+
+  "_fix_defaults": "Defaults for every /fix-linear and /fix-freeform run on this machine. A flag in the invocation always wins; these only decide what an unflagged run does. Autopilot is on by default, so an unflagged run goes all the way to a merged change request — there is nobody else to press the button.",
+  "fix_autopilot": true,
+  "fix_branch": "new",
+  "fix_quick_description": true,
+  "fix_diagram": false,
+  "fix_review": false,
+  "fix_merge": true,
+  "fix_max_rounds": 3
 }
