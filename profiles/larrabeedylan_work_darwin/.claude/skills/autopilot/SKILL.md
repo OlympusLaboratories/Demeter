@@ -1,6 +1,6 @@
 ---
 name: autopilot
-description: The automated tail of fix-linear and fix-freeform — it commits, pushes, opens the MR, watches the pipeline and the review bot, addresses every comment, applies infrastructure plans, merges in the right order across stacked MRs, verifies the change actually deployed after the merge, pauses itself gracefully when the session quota runs low and comes back when it resets, and pings the user only when finished or genuinely stuck. It is on by default in every fix run, so it is usually reached by hand-off rather than invoked. Invoke it directly when the user says autopilot, put it on autopilot, auto mode, one-shot this ticket, take this end to end, handle it autonomously, ship this without checking in, drive it to merge, or runs /autopilot — including mid-run, where /autopilot with flags amends the run already in flight (take over the merge, turn on a diagram, hold a merge that was about to happen).
+description: The automated tail of fix-linear and fix-freeform — it commits, pushes, opens the MR, watches the pipeline and the review bot, addresses every comment, applies infrastructure plans, merges in the right order across stacked MRs, verifies the change actually deployed after the merge, pauses itself gracefully when the session quota runs low and comes back when it resets, and arms the user's phone notifications as it takes over so it can reach them while they are away. It is on by default in every fix run, so it is usually reached by hand-off rather than invoked. Invoke it directly when the user says autopilot, put it on autopilot, auto mode, one-shot this ticket, take this end to end, handle it autonomously, ship this without checking in, drive it to merge, or runs /autopilot — including mid-run, where /autopilot with flags amends the run already in flight (take over the merge, turn on a diagram, hold a merge that was about to happen).
 ---
 
 # Autopilot — The Automated Tail of a Fix Run
@@ -46,6 +46,8 @@ Routes 1 and 2 converge on identical behaviour from Step 2 onwards, and neither 
 
 `/autopilot <flags>` during a fix run is an **amendment to that run**. It is not a new run, not a restart, and not a question to put back to the user — they have told you something, and the only thing owed back is one line saying what changed and what it caused to happen now.
 
+Three rules govern every amendment, and a fourth that is easy to forget: **arm the notifications if they are not armed yet** (Step 0d). An amendment is often the first moment the run became unattended, so it is often the first moment arming is owed.
+
 Three rules govern every amendment:
 
 - **Only the flags they named change.** Every other flag keeps its **current run value**, not the machine default. This is the one thing an amendment gets wrong most easily: re-reading `skill-env.sh` and starting from its values would silently revert an earlier amendment, which is worse than ignoring the new one.
@@ -66,7 +68,7 @@ Three rules govern every amendment:
 | `--branch new` | before the push | This is the fix skill's own escalation path and it is always available: cut the branch, move the commits (its "escalating after work has already started" step), and carry on. |
 | `--branch default` | after a feature branch has commits | Refuse, in one line. Escalation is one-way within a run, and the commits live on a branch created for a reason. |
 | `--autopilot false` | any time | Stop the automation where it stands and report. Leave the branch, the merge request and the threads exactly as they are — **never delete a pushed branch or close a merge request** to honour this. It means *stop driving*, not *undo*. |
-| `--autopilot true` | on a run that had it off | Engage from Step 2: commit if needed, push, and carry on as normal. |
+| `--autopilot true` | on a run that had it off | Engage from Step 2: commit if needed, push, and carry on as normal. **Arm the notifications first** (Step 0d) — the tail was off, so nothing has armed them. |
 
 ### The decision record
 
@@ -237,6 +239,32 @@ Everything else is read from the forge or from `git` at pause time, which is aff
 A blocked `AskUserQuestion` spends nothing while it waits, so the threshold cannot be crossed during the wait. The real case is that the answer arrives and the window has gone in the meantime — and at that exact moment the user is demonstrably at the keyboard. **That is the one point where asking is both cheap and correct**: say the window is nearly out and ask whether to pause here or push on. Deciding it silently from a threshold throws away the only moment the question is free.
 
 **Never pause with an unanswered question dangling.** The question exists only in the transcript, and a paused session swallows the answer the user is in the middle of giving.
+
+## Step 0d: Arm the Notifications — before the first unattended step
+
+**Engaging autopilot is the gesture that says the user is walking away, so it is what arms their phone.**
+
+Notifications are **opt-in per session** and the opt-in is a sent ping: `notify.py` writes `armed_at` only on a successful send, and until then it logs `skip: session not armed` and stays silent however long the turn runs or however stuck the run gets. So an autopilot run that only pings at Step 11 arms the session *after the run is over*, which is the one moment the arming is worth nothing. Everything in between — a permission prompt, an `AskUserQuestion`, a failure — happens into a session that cannot speak.
+
+**So send one ping here, before Step 1**, via the `ping` skill with the `Skill` tool. Level `progress`: the work is starting and continues. The body says what is being taken over and where the run will stop, because that is the thing the user wants to confirm as they leave:
+
+> `Taking PLAT-3276 from here: open the MR, work the review, stop before the merge. Nothing needed unless I get stuck.`
+
+That single send does both jobs — it tells them the hand-off happened, and it arms the session for every automatic notification that follows.
+
+**Skip it when the session is already armed.** Read `~/.claude/notify-state/sessions/<session-id>.json`; an `armed_at` already present means the user has pinged this session before and the automatic notifications are live. Say so in one line and move on rather than sending a second announcement.
+
+**Never arm when `--autopilot false`.** There is no unattended tail to notify about, and the user is at the keyboard by definition.
+
+**A failed send never fails the run.** A missing or unconfigured `~/.claude/notify.json` makes the ping a no-op, and the `ping` skill deliberately does not write `armed_at` on a failed send. Report what it said in one line and carry on — the work is not contingent on the notification.
+
+### Every route in arms, including the amendment
+
+All three ways into this skill mean the same thing, so all three arm:
+
+- **By hand-off** from a fix skill — arm here, before Step 1.
+- **Directly** (`/autopilot <ticket>`) — same.
+- **As a mid-run amendment** (`/autopilot --merge` on work that was never a fix-skill run) — **arm at the moment the amendment lands.** This is the route that most needs it and the easiest to miss: the run is already in flight, Step 0d is behind it, and the user has just said *take it from here* in the clearest possible terms. Check `armed_at` and send the opening ping if it is absent, before acting on the flags.
 
 ## Step 1: Implement — direct invocations only
 
@@ -454,7 +482,7 @@ When the MR merges, when a `--branch default` run has pushed, or when you stop f
 1. **Record it where the work lives.** On a ticket run, comment the MR URL and what shipped — **not the decision ledger**, which belongs in the description fold at 11.3 and must not be duplicated as a wall of text on the ticket as well. Anything noteworthy beyond those two is a line, not a section. A `--branch default` run has no MR, so record the pushed commit SHA and its forge URL instead. Work you deliberately did not do becomes its own ticket, linked back — never a buried bullet in a closing comment. Check whether the forge integration already moved the ticket before moving it by hand; that integration is asynchronous.
 2. **Attach the diagram** when `--diagram` is true and the run opened a merge request. On a `--branch default` run the fix skill already produced it at its own diagram step, so do not produce a second one — carry the link it gave you into the report and the ticket comment. Invoke `changes-diagram` with the `Skill` tool and append its link to the MR description — or, on a `--branch default` run, carry the link in the report and the ticket comment, since there is no description to append to. Do this once the code has settled — a diagram of a branch that changed three more times is worse than none. **A failed or unavailable diagram never fails the run**: say so in one line and carry on.
 3. **Append the decision record.** Take the scratchpad ledger, apply the filter and the budget from **The decision record**, and append it to the end of the change request description inside the collapsed `<details>` fold — one edit, after the diagram link. An empty ledger publishes nothing. **Never post it as a comment**: if the description edit fails, say so in one line and carry the ledger in the report instead.
-4. **Ping the user.** Invoke the `ping` skill with the `Skill` tool. This is the only message the user may see, so it carries what happened and whether anything is needed — a ping that says "done" wastes it. **It carries Step 10b's verdict in Step 10b's own words**: deployed and verified, deploy failed, waiting on a human, or merged and unverified. "Merged" alone is the one word that reads as finished while leaving out whether the change is actually running. **A `--branch default` run says so in the ping**: the change is on the default branch, unreviewed, and already live. That is what the user chose, and it is also the single fact most worth knowing on a phone.
+4. **Ping the user.** Invoke the `ping` skill with the `Skill` tool. This is the **closing** ping — Step 0d already sent the opening one and armed the session, so this is a report rather than an announcement. It is the only message the user is guaranteed to read, so it carries what happened and whether anything is needed — a ping that says "done" wastes it. **It carries Step 10b's verdict in Step 10b's own words**: deployed and verified, deploy failed, waiting on a human, or merged and unverified. "Merged" alone is the one word that reads as finished while leaving out whether the change is actually running. **A `--branch default` run says so in the ping**: the change is on the default branch, unreviewed, and already live. That is what the user chose, and it is also the single fact most worth knowing on a phone.
 
 ### When to stop and ping instead of continuing
 
@@ -483,8 +511,9 @@ Stopping is reserved for these. Everything else — surprising test failures, un
 8. **No comments in the code.** Autonomy does not relax it.
 9. **An empty config value means the capability is absent, not that you should guess at it.** Never substitute a name you saw in an example for one the machine did not supply.
 10. **The merge is not the finish line, and "merged" is not "deployed".** Step 0b works out how the change reaches production and Step 10b confirms it got there, tied to the commit that landed rather than to a job going green. Unverified is a reportable outcome — **never** upgrade cannot-observe or timed-out into success.
-11. **Pause on purpose; never run out mid-flight.** Read the quota from the `claude-usage` cache at step boundaries, never from the API, and pause at 85% of the session window. Journal the step, the next action and the ledger as you go, so the pause costs one write. A weekly, scoped or spend limit pauses and pings and **never** arms its own return — that window is the user's to spend.
-12. **A broken deploy is warned about, never fixed.** No rollback, no revert, no re-run of a deploy job, no touching the runtime. Gather the evidence, ping immediately, and stop. An unattended agent reverting production at 2am is worse than a bad deploy somebody has been told about.
+11. **Arm the notifications before the first unattended step.** A ping is the only thing that writes `armed_at`, and an unarmed session is silent through every permission prompt, question and failure in the run. Step 0d sends it once, on every route in — hand-off, direct, or a mid-run `/autopilot` amendment. Pinging only at the end arms the session at the exact moment it stops mattering.
+12. **Pause on purpose; never run out mid-flight.** Read the quota from the `claude-usage` cache at step boundaries, never from the API, and pause at 85% of the session window. Journal the step, the next action and the ledger as you go, so the pause costs one write. A weekly, scoped or spend limit pauses and pings and **never** arms its own return — that window is the user's to spend.
+13. **A broken deploy is warned about, never fixed.** No rollback, no revert, no re-run of a deploy job, no touching the runtime. Gather the evidence, ping immediately, and stop. An unattended agent reverting production at 2am is worse than a bad deploy somebody has been told about.
 
 ## Step 12: Self-Improvement
 
