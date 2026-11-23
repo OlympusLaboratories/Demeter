@@ -36,7 +36,7 @@ Then pick the scope from `$ARGUMENTS`:
 ```bash
 # Aggregate changed-line churn per top-level-ish directory over the window.
 git log --since="30 days ago" --numstat --pretty=tformat: -- . \
-  | awk 'NF==3 { added=$1; deleted=$2; path=$3;
+  | awk 'NF==3 { added=$(NF-2); deleted=$(NF-1); path=$NF;
                  n=split(path, p, "/"); dir=(n>=2 ? p[1]"/"p[2] : p[1]);
                  if (added=="-") added=0; if (deleted=="-") deleted=0;
                  churn[dir]+=added+deleted }
@@ -65,7 +65,7 @@ Briefly tell the user the areas you'll review before launching.
 
 Size the swarm to the scope:
 
-| Scope | `scale` | Critique votes per proposal |
+| Scope | `scale` | Skeptics on the critique panel |
 |---|---|---|
 | Small (1–2 areas) | `1` | 3 |
 | Medium (3–5 areas) | `2` | 3 |
@@ -78,6 +78,10 @@ Call the **Workflow** tool with the script below, passing `args` as a JSON objec
 ```
 
 Use this script verbatim. The one barrier (pattern synthesis) is deliberate — distilling the emergent architecture and merging cross-cutting duplicates genuinely needs every area's findings at once.
+
+**The critique panel is batched, not per-proposal.** Each skeptic votes on every consolidated proposal, so a run costs `areas + 1 + VOTES` agents rather than `areas + 1 + proposals × VOTES`. The saving is not the main reason. A skeptic holding the whole list is the only one that can see that two proposals contradict each other, collide in the same file, or are the same refactor described twice — a skeptic handed one proposal in isolation cannot, however many of them there are. Each gets a distinct emphasis, because identical prompts over an identical list produce one opinion counted several times.
+
+`review-code`'s per-finding panel is the deliberate exception rather than an inconsistency to tidy up: a point defect at one `file:line` is confirmed by tracing a single code path, so isolating each skeptic there is what stops cross-contamination between unrelated findings. A refactor proposal is the opposite — it is only judgeable against the whole set.
 
 **Always pass the script inline via `script`** — never the `scriptPath` a previous run snapshotted, which replays whatever version of this pipeline was current then. To rescue a run killed by a spend limit, use `/workflow-resume`: it pairs `resumeFromRunId` with the script re-read from this file.
 
@@ -99,7 +103,7 @@ const areas = (args && args.areas) || []
 
 if (!areas.length) {
   log('review-kludge: no feature areas provided — nothing to review')
-  return { proposals: [], patterns: [], areas: [], raw: 0 }
+  return { proposals: [], patterns: [], areas: [], raw: 0, skeptics: 0, underVoted: 0 }
 }
 
 const LENSES = [
@@ -110,6 +114,14 @@ const LENSES = [
   'Leaky or wrong abstractions: wrong layering, modules reaching across boundaries, abstractions that leak their internals.',
   'AI-slop signatures: redundant restating comments, defensive checks that can never fire, boilerplate that should be shared or generated, inconsistent naming.',
   'Config / flag sprawl: proliferating options, feature flags, or env toggles that could be consolidated or retired.',
+]
+
+const EMPHASES = [
+  { key: 'dead-code', text: 'Grep rigor on dead code. Where a proposal calls something unused, vestigial or unreachable, prove it with your own search before you accept it. The usual miss is a caller behind a test helper, a string-keyed lookup, a reflective call, or another copy of the same file elsewhere in the tree.' },
+  { key: 'payoff', text: 'Effort against payoff. Weigh the churn, the review burden and the regression risk against what the change actually buys. A restructure that nets ten fewer lines has not earned a reviewer reading it.' },
+  { key: 'layering', text: 'Layering and correctness. Whether the proposed shape puts the logic at the right level, and whether it quietly alters error handling, ordering, or who owns a piece of state.' },
+  { key: 'convention', text: 'Whole-codebase convention. Whether the ideal_pattern is genuinely what this codebase is converging toward, or an invention imported from elsewhere. What already exists here wins.' },
+  { key: 'behavior', text: 'Behavior preservation. Hunt the proposals that cannot be done without changing what callers observe and do not say so. A refactor whose risk is understated is worse than one that is honestly risky.' },
 ]
 
 const PROPOSAL_ITEM = {
@@ -162,10 +174,21 @@ const SYNTHESIS_SCHEMA = {
 const CRITIQUE_SCHEMA = {
   type: 'object',
   properties: {
-    keep: { type: 'boolean' },
-    reason: { type: 'string' },
+    votes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          keep: { type: 'boolean' },
+          reason: { type: 'string' },
+        },
+        required: ['id', 'keep', 'reason'],
+        additionalProperties: false,
+      },
+    },
   },
-  required: ['keep', 'reason'],
+  required: ['votes'],
   additionalProperties: false,
 }
 
@@ -185,7 +208,7 @@ const rawProposals = perArea.filter(Boolean).flatMap((x) =>
 
 if (!rawProposals.length) {
   log('review-kludge: no kludge surfaced across the reviewed areas')
-  return { proposals: [], patterns: [], areas: areas.map((a) => a.name), raw: 0 }
+  return { proposals: [], patterns: [], areas: areas.map((a) => a.name), raw: 0, skeptics: 0, underVoted: 0 }
 }
 
 // Stage 2 (barrier — needs ALL areas): distill emergent patterns + cross-cutting refactors, dedupe.
@@ -197,36 +220,58 @@ const synthesis = await agent(
 const consolidated = (synthesis && synthesis.proposals && synthesis.proposals.length) ? synthesis.proposals : rawProposals
 const patterns = (synthesis && synthesis.patterns) || []
 
-// Stage 3 (parallel): adversarially critique every consolidated proposal.
-const judged = await parallel(consolidated.map((p) => () =>
-  parallel(Array.from({ length: VOTES }, (_unused, i) => () =>
-    agent(
-      `You are skeptic #${i + 1} on a refactor-critique panel. Challenge the proposal below. Default to keep=false unless it clearly earns its place.\n\nInspect the real code with Read/Grep before judging. Set keep=false if ANY of these hold: it does not actually reduce complexity; it changes observable behavior without the proposal acknowledging it; it is over-engineering / premature abstraction / speculative generality; the churn and risk outweigh the benefit; or it contradicts a pattern the codebase already follows. Set keep=true only if it is a real simplification, behavior-preserving (or with risk honestly scoped), and worth doing.\n\nProposal: ${p.title}\nArea: ${p.area} | category: ${p.category} | impact: ${p.impact} | risk: ${p.risk} | effort: ${p.effort}\nLocations: ${(p.locations || []).join(', ')}\nProblem: ${p.problem}\nIdeal pattern: ${p.ideal_pattern}\nRefactor: ${p.refactor}\n\nScope: ${args.scopeDescription}`,
-      { label: `critique:${p.area}`, phase: 'Critique', schema: CRITIQUE_SCHEMA }
-    )
-  )).then((votes) => {
-    const clean = votes.filter(Boolean)
-    const keeps = clean.filter((v) => v.keep).length
-    return {
-      ...p,
-      kept: keeps > clean.length / 2,
-      votes_keep: keeps,
-      votes_total: clean.length,
-      concerns: clean.filter((v) => !v.keep).map((v) => v.reason).slice(0, 3),
-    }
-  })
-))
+const withIds = consolidated.map((p, i) => ({ ...p, id: `P${String(i + 1).padStart(2, '0')}` }))
+
+const proposalText = withIds.map((p) => [
+  `${p.id} — ${p.title}`,
+  `area: ${p.area} | category: ${p.category} | impact: ${p.impact} | risk: ${p.risk} | effort: ${p.effort}`,
+  `locations: ${(p.locations || []).join(', ')}`,
+  `problem: ${p.problem}`,
+  `ideal pattern: ${p.ideal_pattern}`,
+  `refactor: ${p.refactor}`,
+].join('\n')).join('\n\n')
+
+// Stage 3 (parallel): one skeptic per emphasis, each voting on every consolidated proposal.
+const ballots = await parallel(Array.from({ length: VOTES }, (_unused, i) => () => {
+  const emphasis = EMPHASES[i % EMPHASES.length]
+  return agent(
+    `You are skeptic #${i + 1} of ${VOTES} on a refactor-critique panel, and you hold the WHOLE consolidated proposal list at once. Vote keep/drop on EVERY proposal below. Default to keep=false unless a proposal clearly earns its place.\n\nYour emphasis — apply it on top of the shared bar, do not substitute it for the bar:\n${emphasis.text}\n\nShared bar. Inspect the real code with Read/Grep before judging; these proposals were written by other agents and may be wrong about the code. Set keep=false if ANY of these hold: it does not actually reduce complexity; it changes observable behavior without the proposal acknowledging it; it is over-engineering / premature abstraction / speculative generality; the churn and risk outweigh the benefit; or it contradicts a pattern the codebase already follows. Set keep=true only if it is a real simplification, behavior-preserving (or with risk honestly scoped), and worth doing.\n\nBecause you hold every proposal at once, you can see what a reviewer judging one in isolation cannot: two proposals that contradict each other, that would collide in the same file, or that are the same refactor described twice. When that is why you drop one, name the other proposal's id in your reason.\n\nReturn exactly one vote for each of the ${withIds.length} ids below — no omissions, no duplicates, and no ids that are not listed.\n\n${proposalText}\n\nScope: ${args.scopeDescription}`,
+    { label: `critique:${emphasis.key}`, phase: 'Critique', schema: CRITIQUE_SCHEMA }
+  )
+}))
+
+const panel = ballots.filter(Boolean).map((b) => {
+  const byId = new Map()
+  for (const v of (b.votes || [])) {
+    if (v && typeof v.id === 'string' && !byId.has(v.id)) byId.set(v.id, v)
+  }
+  return byId
+})
+
+const judged = withIds.map((p) => {
+  const cast = panel.map((b) => b.get(p.id)).filter(Boolean)
+  const keeps = cast.filter((v) => v.keep).length
+  return {
+    ...p,
+    kept: cast.length > 0 && keeps > cast.length / 2,
+    votes_keep: keeps,
+    votes_total: cast.length,
+    concerns: cast.filter((v) => !v.keep).map((v) => v.reason).slice(0, 3),
+  }
+})
+
+const underVoted = judged.filter((p) => p.votes_total < panel.length).length
 
 // Rank survivors: highest impact first, then lowest risk, then lowest effort.
 const IMP = { critical: 0, high: 1, medium: 2, low: 3 }
 const RISK = { low: 0, medium: 1, high: 2 }
 const EFF = { small: 0, medium: 1, large: 2 }
-const survivors = judged.filter(Boolean).filter((p) => p.kept)
+const survivors = judged.filter((p) => p.kept)
   .sort((a, b) => (IMP[a.impact] - IMP[b.impact]) || (RISK[a.risk] - RISK[b.risk]) || (EFF[a.effort] - EFF[b.effort]))
 
-log(`review-kludge: ${areas.length} areas, ${rawProposals.length} raw -> ${consolidated.length} consolidated -> ${survivors.length} survived ${VOTES}-vote critique`)
+log(`review-kludge: ${areas.length} areas, ${rawProposals.length} raw -> ${withIds.length} consolidated -> ${survivors.length} survived a ${panel.length}-skeptic panel${underVoted ? `; ${underVoted} proposal(s) drew fewer than ${panel.length} votes` : ''}`)
 
-return { proposals: survivors, patterns, areas: areas.map((a) => a.name), raw: rawProposals.length }
+return { proposals: survivors, patterns, areas: areas.map((a) => a.name), raw: rawProposals.length, skeptics: panel.length, underVoted }
 ````
 
 ## Step 3b: Surface the Run ID for `wfwatch`
@@ -247,13 +292,13 @@ Use the **actual** `runId` string from the Workflow tool result verbatim (do not
 
 ## Step 3c: Fallback when the Workflow tool isn't available
 
-If the preflight found no `Workflow` tool, run the **same** Analyze → Patterns → Critique pipeline manually with the **Agent** tool. This is a supported path, not a degraded guess — it produces the same report; it only loses the harness's structured schema-enforcement and true live-streaming. Do **not** ask permission first: the user already opted in by invoking the skill.
+If the preflight found no `Workflow` tool, run the **same** Analyze → Patterns → Critique pipeline manually with the **Agent** tool. This is a supported path, not a degraded guess: the three phases, the agent counts and the batched critique panel are the same ones the script runs, so what it loses is the harness's structured schema-enforcement and true live-streaming and nothing else. Do **not** ask permission first: the user already opted in by invoking the skill.
 
 **Phase 1 — Analyze (parallel):** launch one background `Agent` per feature area (subagent_type `general-purpose`, a cheap model like `sonnet` for the fan-out). Give each the Step-3 analysis prompt for its area (the `LENSES`, the "prefer a pattern already in THIS codebase", the "don't pad / return empty if clean" rules) and ask it to return a JSON array of proposal objects with the `PROPOSAL_ITEM` fields plus concrete `file:line` locations. Collect each result on its completion notification.
 
 **Phase 2 — Patterns (you do it):** you have every area's findings, so synthesize yourself — describe the emergent patterns and produce **one consolidated list**, merging duplicate/overlapping proposals that multiple areas raised (e.g. the same helper reinvented in three places) and keeping each proposal's fields intact. Write the consolidated list to a scratch JSON file (ids `P01…`) so the critique agents can read it without you re-pasting it N times.
 
-**Phase 3 — Critique (parallel):** the harness's "VOTES-per-proposal" fan-out (5 × N agents) is infeasible by hand. Instead launch **`VOTES` skeptic agents** (5 for scale 3, else 3), each of which reads the whole consolidated file and votes keep/drop **on every proposal**, returning a JSON array of `{id, keep, reason}`. Give them the Step-3 skeptic prompt (default keep=false; kill over-engineering/premature-abstraction/behavior-changing/churn; verify claims against real code with Read/Grep — the proposals were written by other agents and may be wrong). Vary each skeptic's emphasis (dead-code grep rigor, effort-vs-payoff, layering/correctness, whole-codebase-convention) so they aren't redundant. Tally per proposal: **majority keeps** (e.g. ≥3/5). Rank survivors by impact → risk → effort, exactly as the script does.
+**Phase 3 — Critique (parallel):** launch **`VOTES` skeptic agents** (5 for scale 3, else 3) — the same panel the script runs. Each reads the whole consolidated file and votes keep/drop **on every proposal**, returning a JSON array of `{id, keep, reason}`. Give them the Step-3 skeptic prompt (default keep=false; kill over-engineering/premature-abstraction/behavior-changing/churn; verify claims against real code with Read/Grep — the proposals were written by other agents and may be wrong), including the contradiction check: a proposal dropped because another one conflicts with it, collides in the same file, or duplicates it must name that other id. Give each skeptic one of the script's five emphases (dead-code grep rigor, effort-vs-payoff, layering/correctness, whole-codebase convention, behavior preservation) so they aren't redundant. Tally each proposal over the ballots that actually name it: **majority keeps**. Count the proposals that drew fewer votes than there were skeptics and report that in Step 4 — a batched skeptic can skip a proposal, and a proposal dropped for want of a vote must not read as one the panel rejected. Rank survivors by impact → risk → effort, exactly as the script does.
 
 **Emit a `wfwatch`-compatible journal** so the user can still watch progress. Create `~/.claude/projects/<project-slug>/<session-id>/subagents/workflows/<runId>/journal.jsonl` (any `runId` of the form `wf_…`; the `*/*` in `wfwatch`'s glob matches the project/session dirs). Append one JSONL event per phase step — `{"type":"started","agentId":"<short-label>","phase":"Analyze","label":"…"}` when you launch each area/skeptic, and `{"type":"result","agentId":"<same-label>","phase":"…","label":"…","result":"<short summary string>"}` when it returns. `wfwatch` counts `started` vs `result` and previews the `result` string, so use readable `agentId` labels (e.g. `eng-quests`, `skeptic-3`), keep `started`/`result` counts paired, and print the run id + `wfwatch <runId>` to the user right after Phase 1 launches. Note honestly that it advances **stepwise** (each time you regain control on a completion), not truly live mid-agent.
 
@@ -268,13 +313,15 @@ When the workflow returns, present its results — do **not** invent proposals.
 Lead with the **emergent patterns** the synthesizer found (a short paragraph or bullet list): the conventions the code is converging toward, and where it diverges. This frames the refactors.
 
 Then list the surviving **refactor proposals**, ranked highest-impact/lowest-risk first. For each:
-- A header: `[IMPACT · risk · effort] Title — area`.
+- A header: `P<nn> [IMPACT · risk · effort] Title — area`. Keep the id: a skeptic's concern may drop one proposal by naming another, and the reference is unreadable if the ids are stripped.
 - **Problem** — the kludge and why it costs maintainers.
 - **Move toward** — the ideal pattern.
 - **Refactor** — the concrete steps, with `file:line` locations as clickable links.
 - The critique vote (e.g. "kept 3/3").
 
 Close with a one-line summary: areas reviewed, raw proposals raised, how many survived adversarial critique (the churn-for-churn and over-engineering the panel filtered out is a feature — say so). If nothing survived, say so plainly and note the areas reviewed — clean code is a valid result.
+
+**If `underVoted` came back above zero, name it in that line.** Those proposals were dropped because part of the panel never voted on them, which is a skeptic running out of attention rather than a verdict on the proposal — and it is the one way this pipeline can report a thin result that looks like a clean codebase.
 
 Do not refactor anything in this step — this skill reviews and proposes, it does not edit.
 
