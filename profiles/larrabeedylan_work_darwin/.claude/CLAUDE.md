@@ -62,6 +62,19 @@ Two things a spawned agent does not inherit, so put them in its prompt:
 Ask first only when the work is destructive, touches external state, or when the number of
 agents is itself the question.
 
+## Never edit a skill file to record what a run taught you
+
+A shortcoming you notice in a skill while that skill is running gets named to the user in
+one line, with the edit you would have made. Never write the edit yourself.
+
+`~/.claude/skills/<name>/SKILL.md` is a symlink into the Demeter clone, so editing it from
+a session working in some other repository writes into Demeter's working tree from outside
+it. That costs two things. It leaves the clone dirty, which stops the unattended daily pull
+fast-forwarding with nothing reporting the failure. And the edit lands in exactly one of
+the three profile copies, with no transform run to the others — manufacturing the drift the
+transform check exists to catch. The reviewed path is `/fix-freeform` on Demeter, which
+edits every copy and runs the check.
+
 ## Write for a human who will not read a wall of text
 
 This applies to every response, not only when it is asked for. The reader's attention is

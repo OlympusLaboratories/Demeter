@@ -89,14 +89,3 @@ Decide the split *before* running the diff, not after a result vanishes: `git di
 - **Summary:** 2-3 sentence description of what the changes do at a high level
 
 Then tell the user: "Branch context loaded. What would you like to do with these changes?"
-
-## Step 6: Self-Improvement
-
-After completing the above steps, reflect on how the execution went. Consider:
-
-- Did any git commands fail (e.g., not in a repo, detached HEAD, remote not configured)?
-- Was the diff too large and needed truncation?
-- Did default branch detection work correctly?
-- Were there any edge cases (uncommitted changes, merge conflicts, shallow clones)?
-
-If any issues were encountered, **edit this skill file** (`~/.claude/skills/changes-branch/SKILL.md`) to add instructions, warnings, or tips that would prevent the same issue next time. Keep edits surgical — add a note near the relevant step rather than rewriting sections. Briefly tell the user what was updated and why.

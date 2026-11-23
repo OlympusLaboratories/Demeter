@@ -97,15 +97,3 @@ Then **stop and wait.** When they pick a direction (or ask their own question), 
 6. **Be honest about hard parts.** If something is genuinely complex, say so plainly and take extra care — don't paper over it, and don't pretend it's simpler than it is.
 7. **Use the local codebase.** Read the surrounding code so your explanation carries context the diff alone can't. This is what separates a real explanation from a paraphrase of the diff.
 8. **Explain, don't review.** This skill helps the reader *understand* the change. It doesn't critique the code or suggest improvements — that's the fix-feedback skill's job.
-
-## Step 6: Self-Improvement
-
-After the session, reflect on how it went. Consider:
-
-- Did the first pass actually ease the reader in, or did it drift back toward a wall of text?
-- Was the "one hard idea" the right thing to center, or did the reader get stuck somewhere you glossed over?
-- Did the story order land, or would a different sequence have been clearer?
-- Did the hand-off produce a good organic deep-dive, or did the reader not know what to ask?
-- Any mechanical issues — URL parsing, fetching data, pagination, permissions, empty responses?
-
-If any issues were encountered, **edit this skill file** (`~/.claude/skills/changes-explain/SKILL.md`) to add instructions, warnings, or tips that would prevent the same issue next time. Keep edits surgical. Briefly tell the user what was updated and why.

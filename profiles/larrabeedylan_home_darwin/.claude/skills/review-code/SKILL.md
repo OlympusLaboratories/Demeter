@@ -497,7 +497,7 @@ If nothing was confirmed, the summary comment is the entire pack, and it says th
 
 After the report, offer (as plain text, not `AskUserQuestion`):
 - Address the top N findings (you can implement fixes if the user picks some — fix the code and add no comments; the explanation of a fix goes in your response, not into the source). **Incoming mode:** their branch is not yours to edit — offer instead to draft the change as a suggestion block in the relevant comment.
-- Re-run at a higher `scale` for an even deeper pass.
+- Re-run at a higher `scale` for an even deeper pass. **Say whether the scale actually fit this diff rather than offering the re-run blindly** — a swarm that returned nothing from a large change and one that returned nothing from a two-line fix are the same empty report and opposite recommendations. Step 2 sized the swarm off line and file counts, which cannot see a small diff that rewires something central, so name it when the coverage looked thin for what the change does.
 - Dive deeper into any single finding.
 - **Incoming mode:** re-run after the author pushes (a fetch and a re-checkout in the same worktree), or remove the review worktree with `git worktree remove <path>` now that the review is posted.
 
@@ -515,16 +515,3 @@ After the report, offer (as plain text, not `AskUserQuestion`):
 10. **Never post a comment.** The pack is printed in chat for the user to paste, edit, and prune. Posting to the PR is their action, not yours, and it stays that way even if a tool is available that could do it.
 11. **Never remove the review worktree unless asked.** Offer it in Step 6 and leave it alone otherwise — cleanup is the user's call, and a re-review after the author pushes wants that worktree still there.
 12. **Say which mode ran.** Every report and every pack opens by naming the branch and base it reviewed. A review of the wrong branch reads exactly like a review of the right one.
-
-## Step 7: Self-Improvement
-
-After the run, reflect on how it went:
-
-- Was the diff gathered correctly for this repo's branch setup (merge-base, default branch detection)?
-- Was the scale appropriate, or did the swarm over-/under-cover the change?
-- Did the adversarial panel wrongly kill real bugs, or let noise through? Tune the votes or the refute prompt if so.
-- Were the review lenses the right ones for this codebase's languages/frameworks?
-- **Incoming mode:** did Step 0 pick the right mode from the bare argument, or did the user have to correct it with `--base`/`--branch`? A wrong guess means the heuristic needs tightening here, not a note in the report.
-- **Incoming mode:** did any comment in the pack need its line anchor fixed by hand before posting? That is Step 4b failing, and it is the one defect in this skill the author of the change will see.
-
-If any issue was encountered, **edit this skill file** (`~/.claude/skills/review-code/SKILL.md`) with a surgical fix so the next run is better. Briefly tell the user what you changed and why.

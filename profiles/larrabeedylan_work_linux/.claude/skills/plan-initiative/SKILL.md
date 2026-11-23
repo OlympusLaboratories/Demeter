@@ -312,16 +312,3 @@ Do all, some, or none, exactly as the user answers. If they decline, stop cleanl
 5. **The chart must match the table.** If the two disagree, the chart is wrong — fix it before showing it.
 6. **Name people, not roles.** The output is a distribution plan for three specific humans; write it that way.
 7. **State assumptions inline.** Where Linear has no estimate and you sized it yourself, say so at the point of use, not in a footnote.
-
----
-
-## Step 10: Self-Improvement
-
-After the plan is delivered, reflect:
-
-- Did `team.md` have what was needed, or did you have to ask for profiles mid-run? If you learned something durable about a teammate, offer to append it.
-- Were Linear's stated relations trustworthy, or did the codebase probe overturn them? If a pattern shows up repeatedly (e.g. this team never records `blocks`), note it here.
-- Did the chart need several passes to align? If a layout rule would have prevented it, add it to Step 6.
-- Did the user push back on assignments? Capture the preference — it's usually a standing rule (e.g. "never give the new hire the migration").
-
-If anything would have gone better with different instructions, **edit this skill file** (`~/.claude/skills/plan-initiative/SKILL.md`) surgically — add the note near the relevant step rather than rewriting it. Tell the user what changed and why.

@@ -398,17 +398,3 @@ What crosses the hand-off is the *state*, not the invocation: the branch, the wo
 5. **Keep the user informed.** Summarize what you're doing at each major step, and announce every escalation in one line as it happens, with the reason.
 6. **No comments in the code.** Do not add explanatory comments, docstrings, or references to the request in code you write or modify — the full rule is in Step 4. Explanation goes in the commit message and MR description, never the source. Machine-read directives (linter suppressions, build pragmas, a doc-comment CI requires) are program input, not commentary, and stay allowed.
 7. **Escalation is one-way within a run.** Once the Terraform or protected-branch check has fired, `--branch default` is off the table for the rest of the run even if the user restates the flag — explain why rather than complying. The dirty-tree check is the one that can clear: if the user commits or stashes their own work themselves, re-run `git status --porcelain` and the default-branch path is available again.
-
-## Step 6: Self-Improvement
-
-After the full workflow is complete, reflect on how the execution went. Consider:
-
-- Was the problem statement specific enough to plan from, or did it take several rounds of clarification?
-- Did Step 1b's verification find anything the statement got wrong — and did saying so change the implementation?
-- Did an escalation fire, and did it fire at the right time (before the first edit, or late enough to need Step 2e)?
-- Was `--branch default` the right call in hindsight, or did the change turn out to deserve review?
-- Did the implementation plan hold up, or did unexpected codebase patterns force changes mid-implementation?
-- Were there test failures or linter issues that required rework?
-- Did `commit-msg` and `changes-description` produce accurate output on the first try, or did the user need to correct them?
-
-If any issues were encountered, **edit this skill file** (`~/.claude/skills/fix-freeform/SKILL.md`) to add instructions, warnings, or tips that would prevent the same issue next time. Keep edits surgical — add a note near the relevant step rather than rewriting sections. Briefly tell the user what was updated and why.

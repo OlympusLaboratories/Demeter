@@ -1193,16 +1193,3 @@ After all the runs in a set finish, before offering any write-back:
 8. **The limits are arithmetic, not taste.** They are measured in code and handed to the agents precisely because "make it concise" is satisfied by six 40-word sentences.
 9. **Shape is settled before prose.** The panel decides what the document is and what order it goes in; the composing editor decides how it reads and may not change what it claims. An editor allowed to do both trades facts for flow and calls it tightening.
 10. **A human voice outranks polish.** Where someone actually wrote something, this skill edits. It only writes free-hand over prose that a machine produced.
-
-## Step 6: Self-Improvement
-
-After the run, reflect:
-
-- Did the auditor catch invented claims? Each one traces to either a thin `purpose` digest or a persona charter that licensed invention. Fix whichever it was.
-- Did the same objection ping-pong between skimmer and newcomer? The tie-break rules need sharpening — that is a script edit, not a prompt tweak.
-- Did a persona block on something outside its veto list? Tighten that persona's veto wording.
-- Did the measured band fight the document — a dense human source compressed into mush, or a padded one let off easy? The bands are a table in the script; move the number rather than working around it.
-- Did the user still cut the result by hand? Whatever they cut is a missing veto condition. Add it.
-- Did a hard-slop pattern fire on a legitimate use? Move it to the soft list. One false positive teaches the whole panel to ignore the measure.
-
-If anything would have gone better with different instructions, **edit this skill file** (`~/.claude/skills/docs-humanize/SKILL.md`) surgically, and say briefly what changed and why.

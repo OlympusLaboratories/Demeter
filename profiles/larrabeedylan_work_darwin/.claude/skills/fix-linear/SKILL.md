@@ -467,17 +467,3 @@ With autopilot off, nothing is going to push this branch, so the diagram and the
 4. **Follow existing patterns.** Match the coding style, naming conventions, and architecture of the existing codebase.
 5. **Keep the user informed.** Summarize what you're doing at each major step so the user can course-correct early.
 6. **No comments in the code.** Do not add explanatory comments, docstrings, or ticket references to code you write or modify — the full rule is in Step 5. Explanation goes in the commit message and MR description, never the source. Machine-read directives (linter suppressions, build pragmas, a doc-comment CI requires) are program input, not commentary, and stay allowed.
-
-## Step 7: Self-Improvement
-
-After the full workflow is complete, reflect on how the execution went. Consider:
-
-- Did branch setup work smoothly, or were there edge cases (dirty working tree, missing remote, merge conflicts)?
-- Was the Linear ticket description clear enough to plan from, or were multiple rounds of clarification needed?
-- Did ticket comments contain critical context that changed the implementation approach?
-- Did the implementation plan hold up, or did unexpected codebase patterns force changes mid-implementation?
-- Were there test failures or linter issues that required rework?
-- Did the commit-msg and changes-description skills produce accurate output on the first try, or did the user need to correct them?
-- Did the `review-code` swarm surface anything the implementation should have caught earlier — and if so, is that a pattern worth writing into Step 5?
-
-If any issues were encountered, **edit this skill file** (`~/.claude/skills/fix-linear/SKILL.md`) to add instructions, warnings, or tips that would prevent the same issue next time. Keep edits surgical — add a note near the relevant step rather than rewriting sections. Briefly tell the user what was updated and why.

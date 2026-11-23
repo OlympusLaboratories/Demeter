@@ -1122,14 +1122,3 @@ If the workflow returns no usable `description`, say the debate failed and write
 8. **The budget is arithmetic, not taste.** It is measured in code and handed to the agents precisely because "1–3 sentences" was satisfied by three 50-word sentences. If the text cannot fit, say so — do not quietly widen the limit.
 9. **Ceilings, not targets.** The caps scale with the size of the diff for the opposite failure: a fixed cap of 7 bullets produced exactly 7 bullets for both a three-constant timeout fix and a new subsystem. If a run keeps landing on its ceiling, the tier is wrong; fix the tier rather than letting the number pick how much gets said.
 10. **Content is settled before shape.** The debate decides which facts appear; the composing editor decides how they read and may not change what is claimed. Keep those two jobs apart — an editor allowed to do both will trade away facts for flow and call it tightening.
-
-## Step 4: Self-Improvement
-
-After the run, reflect:
-
-- Did the packet have what the personas needed, or did the fact-checker catch invented claims that trace back to a thin `context` digest?
-- Did the debate converge, or did the same objection ping-pong between skimmer and novice? If so, the tie-break rules need sharpening — that is a script edit, not a prompt tweak.
-- Did a persona block on something outside its veto list? Tighten that persona's veto wording.
-- Did the user still have to cut the result? Whatever they cut is a missing veto condition — add it.
-
-If anything would have gone better with different instructions, **edit this skill file** (`~/.claude/skills/changes-description/SKILL.md`) surgically. Briefly tell the user what changed and why.
