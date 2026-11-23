@@ -400,15 +400,14 @@ Use the ticket title, description, comments, the parent/sibling/related context 
 **Publish the plan first, so the question can carry a link to the whole thing.** Render the plan as a self-contained HTML page and publish it:
 
 ```bash
-FOLDER=$(~/.claude/scripts/skill-env.sh get plan_folder)
 ~/.claude/scripts/publish-artifact.sh <plan>.html \
-  ${FOLDER:+--folder "$FOLDER"} \
+  --purpose plan \
   --expires 7d \
   --title '<the ticket id and the change in a few words>' \
   --description 'implementation plan'
 ```
 
-It prints the URL. `plan_folder` is empty on a machine with nowhere to file it, and the `${FOLDER:+…}` form then omits the flag rather than passing an empty one — **never substitute a folder name of your own**, since publishing refuses a folder that does not exist. `--expires 7d` is deliberate: a plan is worth reading while it is being approved and clutter a fortnight later.
+It prints the URL. `--purpose plan` makes the script look up `plan_folder` itself and omit the flag when that key is empty — **never pass `--folder` with a name of your own**, since publishing refuses a folder that does not exist. Resolving it inside the script is deliberate: the conditional form this replaced, `${FOLDER:+--folder "$FOLDER"}`, splits into two arguments in bash and stays **one** in zsh, so it shipped `--folder PRtifacts/Plans` as a single fused argument and every publish failed on the shell these commands actually run in. `--expires 7d` is deliberate: a plan is worth reading while it is being approved and clutter a fortnight later.
 
 **Exit status 3 means this machine has no self-hosted store.** That is the ordinary answer on most of them and not a failure — publish the same HTML with the **Artifact** tool instead and use the link it returns. Any other non-zero status is a real failure: say what it printed in one line, then ask the question with the summary alone. **Never hold the gate open waiting for a link.** A plan the user can only read in the terminal still gets approved; a question that never arrives strands the run.
 

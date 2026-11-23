@@ -12,6 +12,9 @@ usage: publish-artifact.sh <file.html> [options]
 Publish an HTML file to the self-hosted artifact store and print its URL.
 
 options:
+  --purpose KIND       file it where this machine keeps that kind of page:
+                       'plan' uses plan_folder, 'diagram' uses diagram_folder,
+                       and an empty key files it nowhere
   --folder PATH        file it in an existing folder, e.g. PRtifacts/Plans
   --expires WHEN       1h, 1d, 7d, 30d, 90d, 1y, a YYYY-MM-DD date, or never
   --title TEXT         overrides the page's <title>
@@ -43,6 +46,34 @@ case "${1:-}" in
     ;;
 esac
 
+PURPOSE=""
+PASSTHROUGH=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --purpose)
+      PURPOSE="${2:-}"
+      shift 2 || true
+      ;;
+    --purpose=*)
+      PURPOSE="${1#--purpose=}"
+      shift
+      ;;
+    *)
+      PASSTHROUGH+=("$1")
+      shift
+      ;;
+  esac
+done
+set -- "${PASSTHROUGH[@]+${PASSTHROUGH[@]}}"
+
+case "$PURPOSE" in
+  "" | plan | diagram) ;;
+  *)
+    echo "--purpose takes 'plan' or 'diagram', not '$PURPOSE'." >&2
+    exit 1
+    ;;
+esac
+
 STORE=$(env_get artifact_store)
 case "$STORE" in
   mnemosyne | auto) ;;
@@ -51,6 +82,14 @@ case "$STORE" in
     exit "$ABSENT"
     ;;
 esac
+
+FOLDER=""
+if [[ -n "$PURPOSE" ]]; then
+  FOLDER=$(env_get "${PURPOSE}_folder")
+fi
+if [[ -n "$FOLDER" ]]; then
+  set -- "$@" --folder "$FOLDER"
+fi
 
 if command -v publish-artifact >/dev/null 2>&1; then
   exec publish-artifact "$@"
