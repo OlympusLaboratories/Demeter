@@ -108,10 +108,10 @@ Escalate if the planned change will touch any `*.tf` or `*.tfvars` file, or if t
 **2. The default branch is protected.** Detect this **before** committing, rather than discovering it when a push is rejected. The forge knows; git does not.
 
 ```bash
-~/.claude/scripts/github-api.sh
+~/.claude/scripts/github-api.sh help
 ```
 
-Run with no arguments the script prints its usage line, which is the list of subcommands it actually has. If that list includes one reporting protected refs (`protected-refs`), call it with the project path URL-encoded (`group%2Fsubgroup%2Frepo`, derived from `git remote get-url origin`) and look for `DEFAULT_BRANCH` in the result. **If the script carries no such subcommand, the call fails, or no token is configured, you cannot answer the question from here — escalate rather than guess.** An unneeded feature branch costs one `git worktree remove`; a rejected push costs a commit stranded on the branch it was least welcome on.
+`help` prints every subcommand the script actually has, each with the arguments it takes. Both are generated from the script's own source, so neither can drift from what is implemented, and it needs no token — it works on a machine with nothing configured yet. If that list includes one reporting protected refs (`protected-refs`), call it with the project path URL-encoded (`group%2Fsubgroup%2Frepo`, derived from `git remote get-url origin`) and look for `DEFAULT_BRANCH` in the result. **If the script carries no such subcommand, the call fails, or no token is configured, you cannot answer the question from here — escalate rather than guess.** An unneeded feature branch costs one `git worktree remove`; a rejected push costs a commit stranded on the branch it was least welcome on.
 
 **3. The working tree already has unrelated uncommitted changes.**
 
