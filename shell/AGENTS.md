@@ -97,3 +97,30 @@ path when `~/.rdev-managed.json` claims it).
 Worth re-checking after an rdev image bump: the plugin list and paths in
 `FirstBootSteps()` (`internal/homedir/init.go`), and the zshrc's own ordering around
 `compinit` and syntax highlighting.
+
+---
+
+## The reasoning behind the fragment and the shell rcs
+
+The root `CLAUDE.md` states the invariants — fill gaps only, per-feature guards, the
+`source` line last. The full reasoning for each is below: the guard names that were gotten
+wrong, what rdev owns and how a profile customizes around it, and why `wtclean` sweeps
+branches rather than worktrees. The last of those lives in the rcs rather than in
+`terminal.zsh`, and the sections here repeat some of what is above in longer form, because
+this is the account the root file used to carry.
+
+### Shared terminal
+
+`shell/` holds one terminal experience for every machine — starship, zsh-autosuggestions/completions/syntax-highlighting, fzf, prefix history search — sourced as the **last** line of each profile's shell rc (`.zshrc` on Darwin, `.zshrc.local` on rdev). It **fills gaps only**: every block is guarded on whether the feature is already active (`$+functions[prompt_starship_precmd]` — that exact name; starship defines no `starship_precmd`, and the wrong guard loads starship then clobbers its prompt with the fallback, which reads as the config doing nothing — `$+functions[_zsh_autosuggest_start]`, `$+functions[compdef]`), verified against each tool's real init output rather than assumed, because rdev already builds this on its own boxes and owns the files it does it in. Per-feature guards, never one `is_rdev` switch — the half-configured machine is the common case. Three ordering rules are load-bearing and explained in `shell/AGENTS.md`: `fpath` before `compinit`, syntax highlighting from a one-shot `precmd` hook (after every widget, and after rdev's own load, so it can never double-load), and the `source` line staying last. Plugins live at `~/.local/share/zsh/<name>`, the same paths rdev clones to, which is what lets one code path serve both
+
+### rdev boxes
+
+rdev regenerates `~/.zshrc` and `~/.tmux.conf` from its image and lists them in `~/.rdev-managed.json`; `is_rdev_managed` keeps the installer from linking over them. The login shell there is zsh, so `.bashrc` is never read — a profile customizes rdev through `~/.zshrc.local` (sourced near the end of rdev's `.zshrc`, in login and non-login shells alike, unlike `~/.zlogin`), `~/.zshrc.pre` (before `compinit`), and `~/.tmux.conf.local`. `larrabeedylan_work_linux/.zshrc.local` is the zsh port of its `.bashrc`; it leaves history, completion, direnv, mise and the starship prompt to rdev
+
+### VS Code shell integration is manual
+
+`terminal.integrated.shellIntegration.enabled` is `false` (in both `vscode/settings.json` and `vscode/machine-settings.json`, since over Remote-SSH the user settings come from the client) and `shell/terminal.zsh` sources `shellIntegration-rc.zsh` itself (path derived from `$VSCODE_GIT_ASKPASS_MAIN`, `code --locate-shell-integration-path zsh` as fallback). Automatic injection breaks revived terminals: VS Code saves the injected `ZDOTDIR` into the terminal's launch environment and re-injects on revive with `USER_ZDOTDIR=$ZDOTDIR`, so its `.zshrc` sources itself and the user rc never runs — a revived terminal shows zsh's bare `host%` prompt. Source the script at top level, and unset `VSCODE_INJECTION`/`USER_ZDOTDIR` before it, or a stale saved environment re-sources `~/.zshrc` and moves `HISTFILE`
+
+### A cleanup command is only as complete as the thing it iterates
+
+`wtclean` walked `git worktree list`, so it could only ever see a branch some worktree had checked out — and a branch whose worktree was removed earlier, or that never had one, was invisible to it and survived every run. `dylan/pi-profile` sat merged and unreferenced that way. The sweep that fixes it must not use the two obvious tests, and the second one shipped broken for a day. `git branch -d` is wrong because it compares against **HEAD**, so it refuses a branch that is merged upstream whenever the local default is behind — the normal state after somebody else merges. And **ancestry** (`merge-base --is-ancestor`) is wrong because a **squash merge rewrites the commit**, so the branch tip is never an ancestor of the default branch: on a squash-only repo, which is every repo here, an ancestry test calls *every* merged branch unmerged and the sweep cleans nothing it was built for. The test that works is `git merge-tree --write-tree origin/<default> <branch>` compared against the default branch's own tree — merging in memory and asking whether the result differs, which sees a squash, a rebase and a plain merge alike. It needs git 2.38, so ancestry stays as the fallback and that machine degrades to the old behaviour rather than to a wrong answer. Only one shape is refused outright: a branch with **no upstream** that the default branch does not contain is work in progress, so it is left alone and unmentioned. A branch gone from the remote that is genuinely absent from the default branch *is* deleted, because that is the signal the whole feature is built on, but its line says so and names `git reflog` — verified that the commit and its file contents survive the `-D` and come back with `git branch <name> <sha>`. The block lives byte-identical in four shell rcs across three profiles, so an edit that patches three of them is a silent divergence; `md5` over the `_wt_in_repo`-to-`alias wtc=` span is the check, and one of the four is `.bashrc`, which is why nothing in it may be zsh-only

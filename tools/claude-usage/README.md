@@ -248,3 +248,37 @@ make link       # symlink into ~/.vscode/extensions for live iteration
 
 The repo installer offers `make install` for this directory automatically, so a
 fresh machine picks it up from `./install.sh`.
+
+---
+
+## Constraints an edit here must respect
+
+Four of these are not discoverable from the code: the credential is read-only because
+writing it would log the user out of Claude Code, the usage endpoint's rate limit is
+shared with the user's own CLI sessions, the status bar renders in the UI font rather
+than a monospace one, and the new-chat button drives another extension's contributed
+command rather than an API.
+
+### Claude credentials
+
+`tools/claude-usage/` reads the OAuth token Claude Code stores (macOS keychain item `Claude Code-credentials`, else `~/.claude/.credentials.json`) **read-only** — it must never write to or refresh that token, because a rotated refresh token there would log the user out of Claude Code. Anything needing a token it owns does its own PKCE login and keeps it in VS Code `SecretStorage`. Usage comes from `https://api.anthropic.com/api/oauth/usage` with an `anthropic-beta: oauth-2025-04-20` header; prefer the response's `limits[]` array over the older `five_hour`/`seven_day` fields
+
+### Shared rate limit on `/api/oauth/usage`
+
+the Claude Code CLI polls this endpoint from every running session, and the limit is per account — so anything else reading it (`tools/claude-usage/`) competes with the user's own CLI sessions and must be frugal, not merely cached. Poll adaptively: compare each reading with the last and ease off geometrically while the numbers are flat, snapping back when they move. A fixed interval spends nearly all its requests re-reading identical numbers. Two things must survive that easing off: `resets_at` is absolute, so countdowns are recomputed locally and need no fetch, and the next poll must never be scheduled past the soonest reset — that is the instant the quota frees up and the user is watching it
+
+### One extension, many windows
+
+every editor window loads its own copy of an extension, so anything polling a network endpoint must coordinate or it multiplies by the window count — `tools/claude-usage/` got rate limited this way. It now shares one reading through a lock file plus a JSON cache in the user's cache dir (`~/Library/Caches/claude-usage/`, `$XDG_CACHE_HOME/claude-usage/` on Linux), watched by every window so they update together. Keep that cache per-user rather than per-editor-installation, never put credentials in it, and share backoff state through it as well as data
+
+### Browser OAuth
+
+any login flow here opens the system browser via `vscode.env.openExternal`, never a webview or popup — Okta SSO misbehaves in embedded browsers. Pair it with a loopback `http://localhost:<ephemeral>/callback` listener, and keep the copy-paste fallback for when the redirect can't reach the machine
+
+### Status bar glyphs
+
+the VS Code status bar renders in the **UI font** (SF Pro on macOS), not a monospace font, so a glyph the UI font lacks falls back per-character and neighbouring cells end up from different fonts at different widths — block elements (`█` U+2588, `░` U+2591) mismatch badly this way. Prefer geometric shapes UI fonts actually carry (`●○`, `■□`); when a look depends on the user's font, ship a picker that previews live rather than guessing
+
+### Driving another extension's commands
+
+`tools/claude-usage/`'s new-chat button runs the Claude Code extension's `claude-vscode.editor.open`, which is a contributed command and not API — it can be renamed or absent, and `executeCommand` on a missing id rejects with a raw `command 'x' not found`. Probe `vscode.commands.getCommands(true)` first and say something useful instead. Claude Code locks the new group **itself**, but only when that call created a new column *and* `claudeCode.lockEditorGroups` is on, so claude-usage locks unconditionally afterwards and tolerates the failure — `workbench.action.lockEditorGroup` sets the flag rather than toggling it, and its `activeEditorGroupLocked` precondition gates menus and keybindings, not `executeCommand`. The group it locks only ever holds Claude tabs, because Claude Code opens `ViewColumn.Beside` or reuses a column that already has one. Status bar priority is "higher sits further left" on **both** sides, so the button is `priority + 1` while the meters are `priority - index`

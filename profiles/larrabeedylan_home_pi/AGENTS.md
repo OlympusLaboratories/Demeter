@@ -155,3 +155,16 @@ which is the gate that actually matters.
   "back up and replace?", which under `-y` is answered yes — so a future Demeter
   skill named `publishing-artifacts` would move Gaia's aside to a `.bak` and warn
   rather than fail.
+
+---
+
+## The whole argument, in one place
+
+The sections above describe what this profile installs and what it deliberately omits.
+This is the reasoning behind the arrangement as a whole — why an identity transform is
+expressed as symlinks instead of a fourth copy, and what each absent file would break if
+it were added.
+
+### The Pi profile is an identity transform, so it is symlinks rather than a fourth copy
+
+`larrabeedylan_home_pi` installs as the `jarvis` service user on the Raspberry Pi, so the Claude Code Remote Control server spawns phone sessions carrying the same skills as a laptop session. Every other pair of profiles here differs by the nine-substitution work→home transform, and `cmp transform(work) home` is what makes drift in that pair detectable; home→pi is the **identity** transform — same forge, same change-request vocabulary, same reviewer arrangement — so a byte-identical fourth copy would add a drift surface with nothing to check it against. So `skills/`, `hooks/` and `scripts/` are symlinks into the home profile, and a divergence later means replacing a symlink with a real directory — a visible, deliberate act rather than an edit that happens to land in one of four places. `notify.json.example` is its own file, because the Pi already holds the bot's credential for its own alerting and references it with `bot_token_file`/`chat_id_file` rather than keeping a second copy. `environment.json.example` is its own file too, since `artifact_store` must be pinned to `mnemosyne` where a hook refuses the Artifact tool outright and claude.ai is therefore not a fallback. Three things are **deliberately absent**, and each would fail silently if added. **No `settings.json`**: the Pi's is owned by Gaia, which merges `permissions.defaultMode` and the Artifact-refusal hook into it key-by-key, and a wholesale symlink would both wipe those and redirect `/config` writes into the clone — dirtying the tree so `repos-sync` quietly stops fast-forwarding and the auto-update dies with nothing reporting it. **No user-level `CLAUDE.md`**: that slot is global to `jarvis`, which also runs the attacker-reachable voice agent and the nightly vault organize pass, so instructions meant for phone sessions belong in `remote-root/CLAUDE.md` where they are project-scoped. **No dotfiles**: the service user has no interactive shell. The Pi side — the HEAD-guarded daily timer that pulls Demeter and re-runs the installer, and the script that merges the hook registrations — lives in Gaia under `bare-metal/piserver/bootstrap/demeter/`, so changing what this profile installs may mean changing that too

@@ -41,7 +41,8 @@ TRANSFORM_EXEMPT = {
     'skills/changes-explain/SKILL.md':
         "documents the forge adapter's response shape, which is per-forge",
     'skills/AGENTS.md':
-        'documents the adapter contract and the per-profile skill inventory',
+        'documents the adapter contract, the per-profile skill inventory, and rationale '
+        'that contrasts the two forges by name',
     'skills/changes-diagram/SKILL.md':
         'the frontmatter trigger list is deliberately bilingual on both profiles',
     'skills/security-audit/resources/stages/stage1_recon.md':
