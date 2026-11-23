@@ -295,7 +295,11 @@ After this step, confirm to the user which branch they are now on.
 
 ## Step 3: Plan the Implementation
 
-Enter plan mode using `EnterPlanMode`. Carry Step 1b's findings in with you — the restatement, and anything the code already contradicted — and then:
+**Explore first, outside plan mode. Enter plan mode only to present.** Plan mode exists to stop edits, and exploration makes none — but its permission regime applies to every command run inside it, and that regime is stricter than the session's own mode. The part that cannot be worked around is that **`permissions.allow` cannot cover a shell construct**: a `for` loop or a pipeline has no single command head to match, so Claude Code cannot even offer to remember it — the prompt reads `Yes`/`No` with no "allow for this project" option, and an unattended run stops dead waiting for a human on a command that only reads files. Observed repeatedly, on runs whose whole purpose was to need nothing from anybody. Widening the allowlist does not fix it and never will; moving the reading out of plan mode does.
+
+**Nothing is created or modified before the plan is approved.** Plan mode used to enforce that and now it is a rule you keep yourself. Read, Glob, Grep and read-only shell are the whole toolkit of this step: no Edit, no Write, no `git` command that changes state, no install, no network write.
+
+Carry Step 1b's findings with you — the restatement, and anything the code already contradicted — and then:
 
 1. **Explore the codebase** — use Glob, Grep, and Read to understand the relevant files, existing patterns, and architecture. Step 1b checked the statement's claims; this step is where you find what it never mentioned, which on a freeform request is most of it. The statement names what the user noticed; the plan has to cover what the change actually touches.
 
@@ -305,7 +309,7 @@ Enter plan mode using `EnterPlanMode`. Carry Step 1b's findings in with you — 
 2. **Design an implementation approach** — identify which files need changes, what the changes are, and in what order.
 3. **Confirm the branch mode still holds.** If exploration shows the change reaches a `*.tf` file, or any other Step 2b condition, say so in the plan and escalate before implementing (Step 2e).
 4. **Ask clarifying questions** — if the problem statement is ambiguous or missing details, use `AskUserQuestion` to clarify with the user before finalizing the plan.
-5. **Present the plan** for user approval via `ExitPlanMode`. State the branch mode in the plan: which branch the work will land on, and whether an escalation fired.
+5. **Enter plan mode, then present the plan** — call `EnterPlanMode` and immediately hand the finished plan to `ExitPlanMode`. The approval gate is `ExitPlanMode`, not the time spent in the mode. State the branch mode in the plan: which branch the work will land on, and whether an escalation fired.
 
 Once the user approves the plan, implement the changes.
 

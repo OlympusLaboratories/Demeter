@@ -5,7 +5,7 @@
     "pr": ""
   },
   "permissions": {
-    "defaultMode": "bypassPermissions",
+    "defaultMode": "auto",
     "allow": [
       "WebSearch",
       "WebFetch",

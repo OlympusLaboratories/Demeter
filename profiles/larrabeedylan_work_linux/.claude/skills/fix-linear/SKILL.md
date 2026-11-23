@@ -376,9 +376,13 @@ Treat the Notion content as first-class context alongside the ticket description
 
 ## Step 4: Plan the Implementation
 
-**Gate: do not enter plan mode until the Step 3f and Step 3g checkpoints are satisfied** — you have stated the parent/sibling/related context (or confirmed no parent), *and* you have loaded any linked Notion pages (or confirmed none are linked / could not be fetched). If you cannot yet do either, return to the relevant step before continuing.
+**Gate: do not start planning until the Step 3f and Step 3g checkpoints are satisfied** — you have stated the parent/sibling/related context (or confirmed no parent), *and* you have loaded any linked Notion pages (or confirmed none are linked / could not be fetched). If you cannot yet do either, return to the relevant step before continuing.
 
-Now enter plan mode using `EnterPlanMode`. Use the ticket title, description, comments, the parent/sibling/related context from Step 3f, and any labels/context to:
+**Explore first, outside plan mode. Enter plan mode only to present.** Plan mode exists to stop edits, and exploration makes none — but its permission regime applies to every command run inside it, and that regime is stricter than the session's own mode. The part that cannot be worked around is that **`permissions.allow` cannot cover a shell construct**: a `for` loop or a pipeline has no single command head to match, so Claude Code cannot even offer to remember it — the prompt reads `Yes`/`No` with no "allow for this project" option, and an unattended run stops dead waiting for a human on a command that only reads files. Observed repeatedly, on runs whose whole purpose was to need nothing from anybody. Widening the allowlist does not fix it and never will; moving the reading out of plan mode does.
+
+**Nothing is created or modified before the plan is approved.** Plan mode used to enforce that and now it is a rule you keep yourself. Read, Glob, Grep and read-only shell are the whole toolkit of this step: no Edit, no Write, no `git` command that changes state, no install, no network write.
+
+Use the ticket title, description, comments, the parent/sibling/related context from Step 3f, and any labels/context to:
 
 1. **Explore the codebase** — use Glob, Grep, and Read to understand relevant files, existing patterns, and architecture. **Re-verify the ticket's own factual claims against the source rather than restating them.** A ticket written during research routinely overstates ("every row is wrong", "X carries no Y") or describes a pre-implementation design that shipped narrower. Both happened here: one table row was already correct, and a sibling MR shipped a stale-snapshot behavior the ticket described as absent. Restating an unchecked ticket claim puts it in the plan, the code, the commit message and the MR description, where a reviewer has to disprove it four times. Where ticket and code disagree, implement what the code says and say so explicitly.
 
@@ -389,7 +393,7 @@ Now enter plan mode using `EnterPlanMode`. Use the ticket title, description, co
    **`rg -r` is `--replace`, not "recursive".** `rg -rn 'foo-bar' .` silently rewrites every match to `n` in the output, which reads as a real but wrong result (it made a bucket named `ftl-local-dev` appear to be named `n`, sending me down a false trail). ripgrep is recursive by default; never pass `-r`.
 2. **Design an implementation approach** — identify which files need changes, what the changes are, and in what order.
 3. **Ask clarifying questions** — if the ticket description is ambiguous or missing details, use `AskUserQuestion` to clarify with the user before finalizing the plan.
-4. **Present the plan** for user approval via `ExitPlanMode`.
+4. **Enter plan mode, then present the plan** — call `EnterPlanMode` and immediately hand the finished plan to `ExitPlanMode`. The approval gate is `ExitPlanMode`, not the time spent in the mode, so entering it at the last moment costs the user nothing and keeps every read you just did out of its permission regime.
 
 Once the user approves the plan, implement the changes.
 
