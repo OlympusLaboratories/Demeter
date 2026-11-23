@@ -488,13 +488,13 @@ Five rules:
 - **Already gone is the goal, not a failure.** The forge may have done it first — a change request here is opened with its remove-source-branch flag set where the forge has one, and a repository may carry its own delete-on-merge setting. `remote ref does not exist` means the job is done; report it that way rather than as an error.
 - **Only this run's own branch.** Never the default branch, never a branch belonging to another change request, never a branch this run did not push. Rule 5's one-branch scope covers the delete exactly as it covers the push.
 - **In a stack, one member's branch is the next member's base.** Delete it only once no open change request targets it. Where one still does, retarget that change request at the default branch first: some forges do that themselves when a base branch is deleted and some leave the dependent change request pointing at nothing, and *some* is not a thing to rely on. Step 10 merges in order, so in the normal case the successor has already merged or been retargeted by the time this runs.
-- **The worktree and the local branch are not yours to remove.** This run is standing in that worktree, and no skill here removes one — it may hold work the user still wants. Deleting the remote branch is what lets `wtclean` see it, and that division of labour is the design: the run reports the work finished, the user's own command reclaims the disk.
+- **The worktree you are standing in is not yours to remove here.** Deleting the remote branch is what lets `wtclean` see it; **Step 10d** then runs that cleanup from the main working tree, where the finished worktree is no longer the one under your feet. Never remove it from inside it.
 
 **A human who merges mid-run leaves the same branch behind.** Where Step 4b finds the change request already merged by somebody else, delete the source branch the same way, under the same five rules.
 
 **On `--merge false` nothing is deleted**, because nothing was merged. Say in the Step 11 report that the branch stays until whoever merges it deletes it — and where the forge has no per-change-request flag for this, name its repository-level delete-on-merge setting as the fix, so the user changes one setting once rather than deleting a branch per change request.
 
-Then go to **Step 10b**. The merge is not the end of the run: the change has not reached anything yet.
+Then go to **Step 10b**. The merge is not the end of the run: the change has not reached anything yet, and the local checkout still holds the worktree and branch it was built on — Step 10d reclaims those once the deploy question is settled.
 
 ## Step 10: Several Pull Requests, In Order
 
@@ -576,6 +576,27 @@ Then verify per Step 10b, and report what you **ran** rather than what they shou
 
 If the command fails, that is Step 10b's **failed** state: gather the evidence, ping, and change nothing else. Never remediate.
 
+## Step 10d: Reclaim the Local Checkout
+
+**Runs only when `--merge` resolved true and the merge actually landed.** Nothing merged means nothing to reclaim: skip it in silence on `--merge false`, on a refused merge, and on a `--branch default` run that never had a change request.
+
+The merge deleted the source branch from the remote (Step 9a), which is the signal `wtclean` reads — but reading it is somebody's job, and leaving it to the user means the worktree, the local branch and the checkout sit there until they next think to look. So the run finishes the job it started:
+
+```bash
+zsh -ic 'cd "$(git -C <main-working-tree> rev-parse --show-toplevel)" && freshen'
+```
+
+`freshen` pulls the default branch up to date and then runs `wtclean --no-fetch -y`, which removes every worktree whose branch is gone from the remote and deletes the merged local branches. A branch that was never pushed and is not in the default branch is left alone, so work in progress is never collected.
+
+Four things about that command are load-bearing, and three of them are easy to get wrong:
+
+- **Run it from the main working tree, never from the run's own worktree.** `wtclean` deliberately skips the worktree you are standing in — and on this run that is precisely the finished one. Resolve the main root first (`git worktree list` names it first, or `_wt_main_root` in the shell config) and `cd` there.
+- **`freshen` is an interactive alias, so a plain `zsh -c` cannot see it.** `zsh -c 'freshen'` exits with `command not found`; it needs `zsh -ic` so the rc that defines it is read. An interactive zsh with no tty also prints `can't change option: zle` to stderr — that is noise, not a failure, and it is not worth suppressing the whole stream to hide.
+- **Your working directory can be deleted underneath you.** If this run worked in a worktree, that worktree is what gets removed. `cd` to the main root *before* running the cleanup and stay there for the rest of the run; never `cd` back to the path you started in, and do not read a file from it afterwards.
+- **It never fails the run.** A dirty worktree, a shell without the alias, a `freshen` that is not defined on this machine: report what happened in one line and go to Step 11. The change is already merged, so nothing here is on the critical path.
+
+**Report what it reclaimed, not that it ran.** "Removed 2 finished worktrees and their branches; main up to date" is the useful line; "ran cleanup" is not. Where it removed nothing, say so — on a run whose branch never had a worktree that is the correct and common outcome.
+
 ## Step 11: Close the Loop and Ping
 
 When the PR merges, when a `--branch default` run has pushed, or when you stop for any reason:
@@ -618,7 +639,7 @@ Stopping and asking are both reserved for this list. Everything else — surpris
 10. **The merge is not the finish line, and "merged" is not "deployed".** Step 0b works out how the change reaches production and Step 10b confirms it got there, tied to the commit that landed rather than to a job going green. Unverified is a reportable outcome — **never** upgrade cannot-observe or timed-out into success.
 11. **Arm the notifications before the first unattended step.** A ping is the only thing that writes `armed_at`, and an unarmed session is silent through every permission prompt, question and failure in the run. Step 0d sends it once, on every route in — hand-off, direct, or a mid-run `/autopilot` amendment. Pinging only at the end arms the session at the exact moment it stops mattering.
 12. **Pause on purpose; never run out mid-flight.** Read the quota from the `claude-usage` cache at step boundaries, never from the API, and pause at 85% of the session window. Journal the step, the next action and the ledger as you go, so the pause costs one write. A weekly, scoped or spend limit pauses and pings and **never** arms its own return — that window is the user's to spend.
-14. **Never hand the user a command you can run yourself.** If Step 0b found the deploy and this session can reach the target, Step 10c runs it. A run that finishes with a block of commands for the user to paste has failed at the one thing it was for, and it fails in the worst way — looking finished. The same goes for anything else in reach: pulling a repo, restarting a service, installing a file on a box you already have access to.
+14. **Never hand the user a command you can run yourself.** If Step 0b found the deploy and this session can reach the target, Step 10c runs it. A run that finishes with a block of commands for the user to paste has failed at the one thing it was for, and it fails in the worst way — looking finished. The same goes for anything else in reach: pulling a repo, restarting a service, installing a file on a box you already have access to, and reclaiming the worktree and branch the merge just finished with (**Step 10d**).
 13. **A broken deploy is warned about, never fixed.** No rollback, no revert, no re-run of a deploy job, no touching the runtime. Gather the evidence, ping immediately, and stop. An unattended agent reverting production at 2am is worse than a bad deploy somebody has been told about.
 
 ## Step 12: Self-Improvement
