@@ -5,6 +5,7 @@
     "pr": ""
   },
   "permissions": {
+    "defaultMode": "auto",
     "allow": [
       "WebSearch",
       "WebFetch",
@@ -17,7 +18,25 @@
       "mcp__claude_ai_Notion__notion-fetch",
       "mcp__claude_ai_Notion__notion-search",
       "Bash(~/.claude/scripts/notify-send.sh:*)",
-      "Bash(~/.claude/scripts/skill-env.sh:*)"
+      "Bash(~/.claude/scripts/skill-env.sh:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git show:*)",
+      "Bash(git status:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git merge-base:*)",
+      "Bash(git ls-files:*)",
+      "Bash(git ls-remote:*)",
+      "Bash(git blame:*)",
+      "Bash(git worktree list:*)",
+      "Bash(git symbolic-ref:*)",
+      "Bash(git for-each-ref:*)",
+      "Bash(git describe:*)",
+      "Bash(git config --get:*)",
+      "Bash(git fetch:*)",
+      "Bash(rg:*)",
+      "Bash(jq:*)",
+      "Bash(shellcheck:*)"
     ]
   },
   "remoteControlAtStartup": true,

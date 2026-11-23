@@ -55,6 +55,8 @@ The body is **one to three sentences, and never more than 68 words**. That is a 
 
 Take the context from the session, never from imagination. If the work cannot be described in 68 words, that is a signal the line is too vague, not that the budget is too small. Only the first ~140 characters reach a lock screen, so put the answer first and the detail second.
 
+**A change request gets its full URL, never just its number.** `PR #10` is unopenable from a lock screen; the URL is the only thing on that screen the user can act on. The same goes for a ticket, a pipeline or a published artifact — if the message names a thing that lives behind a link, the link goes in the body. Markdown link syntax is pointless here, so write the bare URL. A file path is the exception: it opens nothing on a phone, so name it without one.
+
 **Never paste your chat response into the body.** A turn's closing message is written for someone reading a terminal with the diff in front of them — it has headings, tables, file links and backticks, none of which survive a notification, and it is routinely twenty times the budget. Write the line from scratch, for someone holding a phone who cannot see any of that.
 
 Before sending, count. If the body is over 68 words, cut it rather than sending it long — drop the detail and keep the outcome and the ask, in that order. These are the things to cut first, in order: file paths and counts, tool and library names, anything about how the work was done, and every clause that would still be true if the work had gone differently.

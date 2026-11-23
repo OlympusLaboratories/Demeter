@@ -67,7 +67,10 @@ SUMMARY_PROMPT = (
     " Use at most %d words."
     " Lead with the outcome, naming concrete nouns from the actual work."
     " Then say what the user has to do, or state plainly that nothing is needed."
-    " Never invent a detail that is not in the text below.\n\n%s"
+    " Never invent a detail that is not in the text below."
+    " Keep any http or https URL exactly as it appears, in full — it is the only way the"
+    " user can open the thing you are naming from a phone, and a change request named"
+    " without its URL is not actionable.\n\n%s"
 )
 
 DEFAULTS = {
@@ -226,6 +229,24 @@ def git(cwd, *args):
     return done.stdout.strip() if done.returncode == 0 else None
 
 
+def repo_root(cwd):
+    # --show-toplevel answers the WORKTREE's own root, so a session in
+    # .claude/worktrees/dylan/OLY-17 labels itself "OLY-17" -- the branch, not
+    # the repo, and every worktree of one repo looks like a different project.
+    # --git-common-dir points at the main checkout's .git from anywhere,
+    # including a linked worktree, so its parent is the repository itself.
+    common = git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if not common:
+        common = git(cwd, "rev-parse", "--git-common-dir")
+        if common and not os.path.isabs(common):
+            common = os.path.join(cwd, common)
+    if common:
+        root = os.path.dirname(os.path.realpath(common))
+        if root and os.path.isdir(root):
+            return root
+    return git(cwd, "rev-parse", "--show-toplevel")
+
+
 def repo_label(cwd, host_label=""):
     # A session rooted outside a project has no repo to name. The directory
     # basename is what the field used to fall back to, and on a box whose
@@ -238,10 +259,18 @@ def repo_label(cwd, host_label=""):
     # label is the home directory's name and host_label is never reached.
     if not cwd or not os.path.isdir(cwd):
         return host_label or os.path.basename(cwd or "") or "?"
-    top = git(cwd, "rev-parse", "--show-toplevel")
+    top = repo_root(cwd)
     if top and os.path.realpath(top) != os.path.realpath(HOME):
         return os.path.basename(top) or "?"
-    return host_label or os.path.basename(cwd) or "?"
+    # Outside a project the directory is what names the session: a phone session
+    # spawned in remote-root should read "remote-root", which says what kind of
+    # session it is, where the machine name says only where every session runs.
+    # host_label answers the one case the directory cannot -- $HOME itself.
+    here = os.path.realpath(cwd)
+    name = os.path.basename(here)
+    if name and here != os.path.realpath(HOME):
+        return name
+    return host_label or name or "?"
 
 
 def branch_label(cwd):
@@ -597,10 +626,19 @@ def disarm_sessions():
     return cleared
 
 
+def keep_url(match):
+    bang, label, target = match.group(1), match.group(2), (match.group(3) or "").strip()
+    if bang or not re.match(r"https?://", target):
+        return label
+    if target in label:
+        return label
+    return ("%s %s" % (label, target)).strip()
+
+
 def strip_markdown(text):
     text = re.sub(r"```.*?```", " ", text or "", flags=re.S)
     text = re.sub(r"`([^`]*)`", r"\1", text)
-    text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"(!?)\[([^\]]*)\]\(([^)]*)\)", keep_url, text)
     text = re.sub(r"^\s{0,3}#{1,6}\s*", "", text, flags=re.M)
     text = re.sub(r"^\s*\|.*$", " ", text, flags=re.M)
     text = re.sub(r"^\s*[-*+]\s+", "", text, flags=re.M)
@@ -841,6 +879,23 @@ def handle(payload):
         "thread": state.get("thread"),
         "away": away,
     }
+
+    # A session's first notification becomes the thread root, and the root is
+    # the only message carrying the repo and the title. When that first event is
+    # a permission prompt the thread opens on a demand, with nothing saying which
+    # session is asking -- observed as a root reading only "Claude needs your
+    # permission to use Bash". So anchor the thread first: an empty body renders
+    # as the header alone, and the event follows as a reply beneath it.
+    if not envelope.get("thread"):
+        anchor = dict(envelope, body="")
+        anchor.pop("thread", None)
+        anchored, anchor_problem = send(anchor)
+        if anchored:
+            envelope["thread"] = anchored
+            state["thread"] = anchored
+            log("anchored thread %s for %s" % (anchored, repo))
+        else:
+            log("anchor failed (%s); sending as root" % anchor_problem)
 
     thread, problem = send(envelope)
     if problem:
