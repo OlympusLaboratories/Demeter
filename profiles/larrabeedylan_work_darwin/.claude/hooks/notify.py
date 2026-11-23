@@ -23,6 +23,14 @@ SEND_TIMEOUT = 30
 BODY_LIMIT = 1200
 TAIL_CHUNK = 262144
 TAIL_LIMIT = 8 * 1024 * 1024
+TITLE_MAX = 48
+TITLE_TIMEOUT = 25
+TITLE_PROMPT = (
+    "Write a 3-6 word title naming what this coding session is about, from the "
+    "opening request and the assistant's first reply below. Name the project or "
+    "component concretely, the way a tab label would. Output the title alone: no "
+    "quotes, no trailing punctuation, no preamble.\n\n%s"
+)
 SUMMARY_MODEL = "claude-haiku-4-5-20251001"
 SUMMARY_MAX_WORDS = 68
 SUMMARY_MIN_CHARS = 200
@@ -357,8 +365,179 @@ def title_in(chunk):
     return generated
 
 
-def session_title(transcript_path):
-    return scan_tail(transcript_path, title_in)
+def scan_head(transcript_path, finder):
+    if not transcript_path or not os.path.isfile(transcript_path):
+        return None
+    try:
+        with open(transcript_path, "rb") as handle:
+            size = os.fstat(handle.fileno()).st_size
+            window = TAIL_CHUNK
+            while True:
+                handle.seek(0)
+                chunk = handle.read(window).decode("utf-8", "replace")
+                if window < size:
+                    chunk = chunk.rsplit("\n", 1)[0]
+                found = finder(chunk)
+                if found is not None:
+                    return found
+                if window >= size or window >= TAIL_LIMIT:
+                    return None
+                window *= 4
+    except OSError:
+        return None
+
+
+def prompt_label(text):
+    named = re.search(r"<command-name>\s*(/?[\w:.-]+)\s*</command-name>", text)
+    if named:
+        args = re.search(r"<command-args>(.*?)</command-args>", text, re.S)
+        text = named.group(1) + (" " + args.group(1) if args else "")
+    for tag in ("system-reminder", "pasted_content", "ide_selection",
+                "command-message", "command-name", "command-args",
+                "local-command-stdout", "local-command-stderr"):
+        text = re.sub(r"<%s[^>]*>.*?</%s>" % (tag, tag), " ", text, flags=re.S)
+    text = re.sub(r"<[^>]{1,40}>", " ", text)
+    text = " ".join(text.split())
+    if not text:
+        return None
+    if len(text) > TITLE_MAX:
+        text = (text[:TITLE_MAX].rsplit(" ", 1)[0] or text[:TITLE_MAX]) + "\u2026"
+    return text
+
+
+def first_prompt_in(chunk):
+    for line in chunk.splitlines():
+        if '"last-prompt"' not in line and '"user"' not in line:
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        if record.get("type") == "last-prompt":
+            text = record.get("lastPrompt")
+            if isinstance(text, str) and text.strip():
+                found = prompt_label(text)
+                if found:
+                    return found
+        elif record.get("type") == "user" and not record.get("isMeta"):
+            content = (record.get("message") or {}).get("content")
+            if isinstance(content, str):
+                text = content
+            elif isinstance(content, list):
+                text = " ".join(
+                    block.get("text", "") for block in content
+                    if isinstance(block, dict) and block.get("type") == "text")
+            else:
+                continue
+            if text.strip():
+                found = prompt_label(text)
+                if found:
+                    return found
+    return None
+
+
+def opening_exchange_in(chunk):
+    prompt = None
+    reply = None
+    for line in chunk.splitlines():
+        if ('"last-prompt"' not in line and '"user"' not in line
+                and '"assistant"' not in line):
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        kind = record.get("type")
+        if prompt is None and kind == "last-prompt":
+            text = record.get("lastPrompt")
+            if isinstance(text, str) and text.strip():
+                prompt = text.strip()
+        elif kind in ("user", "assistant"):
+            if kind == "user" and record.get("isMeta"):
+                continue
+            content = (record.get("message") or {}).get("content")
+            if isinstance(content, str):
+                text = content
+            elif isinstance(content, list):
+                text = " ".join(
+                    block.get("text", "") for block in content
+                    if isinstance(block, dict) and block.get("type") == "text")
+            else:
+                continue
+            if not text.strip():
+                continue
+            if kind == "user" and prompt is None:
+                prompt = text.strip()
+            elif kind == "assistant" and reply is None:
+                reply = text.strip()
+        if prompt and reply:
+            break
+    return (prompt, reply) if prompt else None
+
+
+def generate_title(transcript_path, config):
+    if os.environ.get(SUMMARY_GUARD):
+        return None, "inside a summarizer"
+    settings = config.get("summarize") if isinstance(config, dict) else None
+    if not isinstance(settings, dict) or settings.get("enabled") is False:
+        return None, "summarize disabled"
+    binary = summarizer_path(settings)
+    if not binary:
+        return None, "no claude cli found"
+    found = scan_head(transcript_path, opening_exchange_in)
+    if not found:
+        return None, "no opening exchange"
+    prompt, reply = found
+    text = "Opening request: %s" % condense(prompt, 600)
+    if reply:
+        text += "\n\nAssistant's first reply: %s" % condense(reply, 600)
+    argv = [
+        binary, "-p",
+        "--model", settings.get("model") or SUMMARY_MODEL,
+        "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+    ]
+    bare = summarizer_settings()
+    if bare:
+        argv += ["--settings", bare]
+    argv.append(TITLE_PROMPT % text)
+    try:
+        done = subprocess.run(
+            argv, input="", capture_output=True, text=True,
+            env=summarizer_env(binary), cwd=summarizer_cwd(),
+            timeout=settings.get("title_timeout") or TITLE_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return None, "title timed out"
+    except (OSError, subprocess.SubprocessError) as error:
+        return None, "title failed: %r" % (error,)
+    if done.returncode != 0:
+        return None, "title exit %d" % done.returncode
+    line = " ".join((done.stdout or "").split()).strip().strip('"\u201c\u201d')
+    line = line.rstrip(".")
+    if not line or len(line) > 80:
+        return None, "title unusable"
+    return line, "generated"
+
+
+def session_title(transcript_path, config=None, state=None):
+    found = scan_tail(transcript_path, title_in)
+    if found:
+        return found
+    if isinstance(state, dict):
+        cached = state.get("title")
+        if isinstance(cached, str) and cached.strip():
+            return cached.strip()
+    if config is not None:
+        made, why = generate_title(transcript_path, config)
+        if made:
+            if isinstance(state, dict):
+                state["title"] = made
+            return made
+        log("title: %s" % why)
+    return scan_head(transcript_path, first_prompt_in)
 
 
 def transcript_for(session_id):
@@ -650,7 +829,8 @@ def handle(payload):
         "repo": repo,
         "branch": branch,
         "level": kind,
-        "session_label": session_title(payload.get("transcript_path")),
+        "session_label": session_title(
+            payload.get("transcript_path"), config, state),
         "cwd": cwd,
         "thread": state.get("thread"),
         "away": away,
@@ -770,7 +950,16 @@ def main():
     if args and args[0] == "--disarm":
         return cmd_disarm(args[1:])
     if args and args[0] == "--label":
-        print(session_title(transcript_for(args[1] if len(args) > 1 else "")) or "")
+        session_id = args[1] if len(args) > 1 else ""
+        config, _ = load_config()
+        path = session_path(session_id) if session_id else None
+        state = (read_json(path, {}) or {}) if path else {}
+        if not isinstance(state, dict):
+            state = {}
+        before = state.get("title")
+        print(session_title(transcript_for(session_id), config, state) or "")
+        if path and state.get("title") and state.get("title") != before:
+            write_json(path, state)
         return 0
     if args and args[0] == "--repo":
         # The ping skill resolves the same field for a message it sends itself.

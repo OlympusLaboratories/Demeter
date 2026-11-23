@@ -20,8 +20,9 @@
   "summarize": {
     "command": "",
     "model": "claude-haiku-4-5-20251001",
-    "max_words": 45,
-    "timeout": 180
+    "max_words": 68,
+    "timeout": 180,
+    "title_timeout": 25
   },
   "events": {
     "stop": true,
