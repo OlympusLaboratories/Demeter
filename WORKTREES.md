@@ -88,13 +88,24 @@ wtclean --keep-branches  # remove the worktrees, keep every local branch
 
 It then sweeps local branches **no worktree holds**, because the worktree pass can only
 ever see a branch some worktree has checked out — so a branch whose worktree went earlier,
-or that never had one, is invisible to it and survives every run. A branch goes when it is
-merged into the default branch (tested against `origin/<default>` by ancestry, not against
-your possibly-stale local copy), whether or not its remote branch is still there. Two cases
-are deliberately left alone: a branch **gone from the remote but never merged** is reported
-with the command to drop it rather than deleted, since its commits exist nowhere else, and a
-branch that was **never pushed** is untouched and unmentioned — that is work in progress.
-`--keep-branches` skips the sweep entirely.
+or that never had one, is invisible to it and survives every run. A branch goes when it is gone from the
+remote, or when the default branch already contains its changes — and "contains" is tested
+by merging it into `origin/<default>` in memory and seeing whether the result differs, not
+by asking whether its tip is an ancestor. That distinction is the whole thing on a repo that
+**squash-merges**: a squash rewrites the commit, so the branch tip is never an ancestor and an
+ancestry test calls every squash-merged branch unmerged. The one branch it never touches is
+one that was **never pushed** — no upstream and not in the default branch is work in
+progress, so it is left alone and not even mentioned. A branch that is gone from the remote
+but genuinely absent from the default branch is still deleted, because that is the signal you
+asked for, but the line says so and names `git reflog` — the commits survive the delete and
+`git branch <name> <sha>` brings them back. `--keep-branches` skips the sweep entirely.
+
+`f` (`freshen`) runs `wtclean --no-fetch -y` as its second-to-last step, so the ordinary
+"catch my branch up" command reclaims finished worktrees on its own and `git status` stays
+the last thing it prints. `--no-fetch` is deliberate: `update` has just fetched with
+`--prune`, which is what makes "gone" accurate, so a second fetch would only cost a round
+trip. It skips the worktree you are standing in, so running `f` inside a worktree never
+pulls the ground out from under your own shell.
 
 ## Cleanup is yours
 

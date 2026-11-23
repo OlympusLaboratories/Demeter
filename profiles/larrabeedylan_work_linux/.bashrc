@@ -31,16 +31,8 @@ alias hsit='hist '    # typo recovery
 alias h='hist -5'
 alias clean='git clean -i'
 
-# Detects main/master (or whatever the remote default is)
-_git_default_branch() {
-  git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null \
-    | sed 's@^refs/remotes/origin/@@' \
-    || git remote show origin 2>/dev/null \
-    | awk '/HEAD branch/ { print $NF }'
-}
-
 alias update='CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD) && git prune && git fetch origin --prune && git pull origin "$CURRENT_BRANCH" --rebase && git status'
-alias freshen='DEFAULT_BRANCH=$(_git_default_branch) && update && git rebase "origin/$DEFAULT_BRANCH" && git status'
+alias freshen='DEFAULT_BRANCH=$(_wt_default_branch) && update && git rebase "origin/$DEFAULT_BRANCH" && wtclean --no-fetch -y && git status'
 alias f='freshen'
 
 # Go (alias 'go' is git checkout, use 'gol' for Go lang)
@@ -73,6 +65,21 @@ _wt_default_branch() {
   [ -n "$d" ] || d=$(git branch -r 2>/dev/null | grep -E 'origin/(main|master)$' | head -1 | sed 's@.*origin/@@')
   [ -n "$d" ] || d=main
   printf '%s\n' "$d"
+}
+
+# 0 when merging $1 into $2 would change nothing -- $2 already holds every change
+# on $1, however it got there. A squash merge rewrites the commit, so the branch
+# tip is NOT an ancestor of the default branch and an ancestry test calls a
+# squash-merged branch unmerged; comparing the merge result's tree sees through
+# that. --write-tree needs git 2.38, so ancestry stays as the fallback.
+_wt_absorbed() {
+  local b="$1" base="$2" tree want
+  want=$(git rev-parse --verify --quiet "$base^{tree}") || return 1
+  tree=$(git merge-tree --write-tree "$base" "$b" 2>/dev/null) || {
+    git merge-base --is-ancestor "$b" "$base" 2>/dev/null
+    return $?
+  }
+  [ "$tree" = "$want" ]
 }
 
 # One "<path><TAB><branch>" line per worktree; branch is "(detached)" when headless
@@ -303,21 +310,16 @@ wtclean() {
       [ "$b" = "$def" ] && continue
       printf '%s\n' "$held" | grep -Fxq -- "$b" && continue
 
-      bmerged=0
-      if git -C "$root" rev-parse --verify --quiet "refs/remotes/origin/$def" >/dev/null &&
-         git -C "$root" merge-base --is-ancestor "$b" "refs/remotes/origin/$def" 2>/dev/null; then
-        bmerged=1
-      fi
       bstate=$(_wt_upstream_state "$b")
+      bmerged=0
+      _wt_absorbed "$b" "refs/remotes/origin/$def" && bmerged=1
 
-      if [ "$bmerged" -eq 1 ] && [ "$bstate" = "gone" ]; then
+      if [ "$bstate" = "gone" ] && [ "$bmerged" -eq 1 ]; then
         reason="merged, and gone from the remote"
+      elif [ "$bstate" = "gone" ]; then
+        reason="gone from the remote, and NOT in $def — 'git reflog' recovers it"
       elif [ "$bmerged" -eq 1 ]; then
         reason="already merged into $def"
-      elif [ "$bstate" = "gone" ]; then
-        echo "  skip     branch $b — gone from the remote but never merged ('git branch -D $b' to drop it)"
-        skipped=$((skipped + 1))
-        continue
       else
         continue
       fi

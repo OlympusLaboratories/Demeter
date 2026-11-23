@@ -342,6 +342,7 @@ file git reads for machine-wide ignores, so no repo needs a committed
 ```
 **/.claude/settings.local.json
 .vscode/settings.json
+**/.claude/worktrees/
 ```
 
 The destination is `core.excludesFile` when that is set, and otherwise
@@ -354,7 +355,18 @@ path in `~/.rdev-managed.json` the step steps aside and says so.
 
 The pattern is `.vscode/settings.json`, not `.vscode/`, so a repo can still
 commit `extensions.json` or `launch.json` normally; only the file Peacock writes
-is hidden. Two limits are worth knowing:
+is hidden.
+
+`**/.claude/worktrees/` is the one **directory** here, and deliberately so: it is
+`WT_ROOT`, where `wt` and `go` put their checkouts, so everything under it is a
+working copy of the repo it sits in and none of it is ever committable. Without
+it every repo you have ever made a worktree in shows a permanent `?? .claude/`,
+which is noise in the one place you look for real unstaged changes — and it is
+reachable by a `git add -A`, which would commit a second copy of the repo into
+itself. It is scoped to that subdirectory rather than to `.claude/`, so a project
+can still track its own `.claude/skills` or agent config.
+
+Two limits are worth knowing:
 
 - **A gitignore never applies to a tracked file.** A repo that already commits
   `.vscode/settings.json` keeps showing Peacock's edit. Either commit the color
