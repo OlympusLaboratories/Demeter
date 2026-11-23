@@ -1,0 +1,69 @@
+name: AI Reviewer
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, review_requested]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GCP_PROJECT: olympus-build
+  GCP_PROJECT_NUMBER: 921596518220
+  GCP_REGION: us-central1
+  SERVICE_ACCOUNT: hephaestus-runner@olympus-build.iam.gserviceaccount.com
+
+jobs:
+  ai-review:
+    if: >-
+      github.event.action != 'review_requested' ||
+      github.event.requested_reviewer.login == 'Hephaestux'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Authenticate to GCP
+        id: auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: projects/${{ env.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/github/providers/github
+          service_account: ${{ env.SERVICE_ACCOUNT }}
+          create_credentials_file: true
+
+      - name: Fetch GitHub token from Secret Manager
+        id: gh-token
+        uses: google-github-actions/get-secretmanager-secrets@2b5f97c5a4b9c105e64646762ad4fc3f5128e6f5
+        with:
+          secrets: |-
+            token:${{ env.GCP_PROJECT }}/hephaestus-github-token
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+
+      - name: Install Hephaestus
+        env:
+          GIT_AUTH_TOKEN: ${{ steps.gh-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0="url.https://x-access-token:${GIT_AUTH_TOKEN}@github.com/.insteadOf" \
+          GIT_CONFIG_VALUE_0="https://github.com/" \
+            pip install --quiet "git+https://github.com/OlympusLaboratories/Hephaestus.git@main"
+
+      - name: Run AI PR Review
+        env:
+          GITHUB_TOKEN: ""
+          GOOGLE_CLOUD_PROJECT: ${{ env.GCP_PROJECT }}
+          GOOGLE_CLOUD_LOCATION: ${{ env.GCP_REGION }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_EVENT_ACTION: ${{ github.event.action }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+        run: review

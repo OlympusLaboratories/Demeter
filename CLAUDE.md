@@ -9,6 +9,9 @@ Demeter is a shared dotfile repo. Each machine setup lives in its own profile di
 ```
 Demeter/
   install.sh              # Interactive symlink installer (idempotent)
+  .github/
+    workflows/
+      ai-review.yml       # Hephaestus AI review on every PR; the repo's only CI
   _starter/               # Template for new contributors — copy to get started
     .bash_profile
   _vendor/                # Vendor packages (skills + tools) — linked/installed by installer
