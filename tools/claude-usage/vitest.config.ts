@@ -1,13 +1,4 @@
-import * as path from 'node:path';
 import { defineConfig } from 'vitest/config';
+import { vitestConfig } from '../vitest.base';
 
-export default defineConfig({
-  resolve: {
-    alias: {
-      vscode: path.resolve(import.meta.dirname, 'src/testing/vscodeStub.ts'),
-    },
-  },
-  test: {
-    include: ['src/**/*.test.ts'],
-  },
-});
+export default defineConfig(vitestConfig(import.meta.dirname));
