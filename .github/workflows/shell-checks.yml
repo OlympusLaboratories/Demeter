@@ -1,0 +1,48 @@
+name: Shell Checks
+
+on:
+  pull_request:
+    paths:
+      - 'install.sh'
+      - 'uninstall.sh'
+      - 'lib/**'
+      - 'vscode/**'
+      - 'shell/**'
+      - 'tests/**'
+      - '.github/workflows/shell-checks.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shell-checks:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+
+      # SC2155 is a pre-existing finding in install.sh, left alone rather than
+      # fixed under an unrelated change. Style and info findings are below the
+      # gate; warnings and errors are not.
+      - name: shellcheck
+        run: |
+          shellcheck -x --severity=warning --exclude=SC2155 \
+            install.sh \
+            uninstall.sh \
+            lib/*.sh \
+            vscode/*.sh \
+            shell/*.sh \
+            tests/*.sh
+
+      - name: Link roots are declared
+        run: tests/check-link-roots.sh
+
+      - name: Uninstall round-trip
+        run: tests/uninstall-roundtrip.sh
