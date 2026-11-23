@@ -802,6 +802,9 @@ def classify(payload):
 
 CHANGE_REQUEST_RE = re.compile(
     r"https?://[^\s<>\"')\]]+?/(?:pull/|-/merge_requests/)\d+")
+CHANGE_REQUEST_ANSWERED_RE = re.compile(
+    r"\\?\"(?:html_url|web_url)\\?\"\s*:\s*\\?\""
+    r"(https?://[^\s<>\"'\\)\]]+?/(?:pull/|-/merge_requests/)\d+)")
 
 
 def remote_slug(cwd):
@@ -813,6 +816,11 @@ def remote_slug(cwd):
     url = re.sub(r"\.git/?$", "", url.strip())
     match = re.search(r"[:/]([^/:]+/[^/]+)$", url)
     return match.group(1).lower() if match else None
+
+
+def change_request_answered_in(chunk):
+    found = CHANGE_REQUEST_ANSWERED_RE.findall(chunk or "")
+    return found[-1] if found else None
 
 
 def change_request_in(chunk, slug=None):
@@ -829,16 +837,22 @@ def change_request_in(chunk, slug=None):
 
 
 def change_request_for(transcript_path, state, cwd=None):
-    # Cached once found: the URL does not change for the life of the session,
-    # and the scan is over the same widening tail the title lookup uses.
-    if isinstance(state, dict):
+    # Re-read on every call. A session opens more than one change request over
+    # its life, so a value cached on first sight is the oldest one rather than
+    # the current one, and it feeds itself: once the state file is read back
+    # into the transcript, the stale URL is also the most recent URL in it.
+    # The cache is therefore only a fallback for a scan that found nothing.
+    found = scan_tail(transcript_path, change_request_answered_in)
+    if not found:
+        slug = remote_slug(cwd)
+        if slug:
+            found = scan_tail(
+                transcript_path, lambda chunk: change_request_in(chunk, slug)
+            )
+    if not found and isinstance(state, dict):
         cached = state.get("change_request")
         if isinstance(cached, str) and cached.strip():
             return cached.strip()
-    slug = remote_slug(cwd)
-    if not slug:
-        return None
-    found = scan_tail(transcript_path, lambda chunk: change_request_in(chunk, slug))
     if found and isinstance(state, dict):
         state["change_request"] = found
     return found
