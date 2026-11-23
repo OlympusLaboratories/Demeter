@@ -355,15 +355,3 @@ Example structure (as markdown in chat):
 8. **Output as markdown in chat only.** Do NOT write an HTML file. Print the snippet directly in chat using markdown formatting — bold for headers, italics for domain groups, bullet points for items, and markdown links for MR/ticket references. The user copies directly from chat into Slack.
 9. **NEVER use API tokens directly.** If using Bash fallback, always use `~/.claude/scripts/gitlab-api.sh` which reads tokens securely from config.
 10. **Always persist the detailed report.** The performance-context report (Step 4) must be written before the snippet is displayed. If writing the file fails, warn the user but still produce the snippet.
-
-## Step 6: Self-Improvement
-
-After the snippet is written and presented to the user, reflect on how the execution went. Consider:
-
-- Did any tool calls fail or require retries? (e.g., wrong parameters, missing `Read` before `Write`, tool not loaded)
-- Did any MCP tools need to be loaded via `ToolSearch` in a way that could be streamlined?
-- Were there data gaps or API quirks that should be documented? (e.g., parameter format issues, missing fields)
-- Was the output format correct on the first try, or did it need adjustment?
-- Did the `list_merge_requests` tool require `project_id` when a broader query would have been better?
-
-If any issues were encountered, **edit this skill file** (`~/.claude/skills/reflect-week/SKILL.md`) to add instructions, warnings, or tips that would prevent the same issue next time. Keep edits surgical — add a note near the relevant step rather than rewriting sections. Briefly tell the user what was updated and why.

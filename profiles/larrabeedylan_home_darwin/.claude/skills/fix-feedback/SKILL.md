@@ -466,6 +466,8 @@ After resolving one thread, offer to address the next unresolved thread. Loop ba
 
 **Under `--autonomous`, do not offer — continue.** Move straight to the next item in the Step 4 queue and keep going until it is empty. Then stop and write one closing summary: every thread, the decision taken on it, whether a reply was posted, whether it was resolved, anything escalated, and the reminder that the fixes are uncommitted and unpushed. That summary is the whole report the user gets, so it is worth more than the running commentary was.
 
+**Name every finding that landed as an unanchored note.** Step 3b warned which ones were at risk; this says which ones it actually happened to, and why — local-only commits, a line the diff does not touch, a defect the finding described too vaguely to place. An unanchored note is the one outcome the author of the change will notice and the user will not, because it reads as posted either way.
+
 ## Important Rules
 
 1. **NEVER auto-apply suggestions — `--autonomous` is the single sanctioned exception.** By default, always analyze and present your assessment first and let the user decide; the whole point of this skill is to think critically, not to blindly accept reviewer feedback. The flag does not suspend the thinking, it only removes the user from the loop: Step 6b's assessment and Recommendation are still produced in full and still printed, and under the flag that Recommendation becomes the decision instead of a proposal awaiting approval. An autonomous run that applies a reviewer's suggestion without first arguing it through has broken this rule exactly as badly as an interactive one would.
@@ -476,18 +478,3 @@ After resolving one thread, offer to address the next unresolved thread. Loop ba
 6. **Keep replies concise.** Drafted replies should be 2-5 sentences. Long replies in code review threads are rarely read.
 7. **Use the local codebase.** The user is expected to have the PR branch checked out locally. Use `Read`, `Grep`, and `Glob` to explore the actual code — don't rely solely on the diff from the API.
 8. **No comments in the code.** When you apply a change, add no explanatory comment, docstring, or note recording what the reviewer asked for — a reviewer reading the next diff does not need the last review narrated back at them. That belongs in the drafted reply. Machine-read directives (linter suppressions, build pragmas, a doc-comment CI requires) are program input, not commentary, and stay allowed.
-
-## Step 9: Self-Improvement
-
-After the session, reflect on how the execution went. Consider:
-
-- Did URL parsing work correctly for the given GitHub URL?
-- Were there issues fetching reviews (pagination, permissions, empty responses)?
-- Did the diff context help or was it stale relative to the local code?
-- Were the drafted replies well-received or did the user need to heavily edit them?
-- Did the critical analysis add value, or was it obvious the reviewer was correct?
-- Did Step 3b's duplicate detection hold up — anything posted that a review bot had already said, or dropped that it had not?
-- Did the posted comments anchor to the right lines, or did they fall back to file-level or general comments? If a fallback was avoidable, record why.
-- If the run was autonomous: did anything stop it that is not on the escalation list, or pass unchallenged that should have stopped it? Did the Step 6b → Step 6c mapping produce a decision the user later overturned, and if so, what in the assessment should have flagged it?
-
-If any issues were encountered, **edit this skill file** (`~/.claude/skills/fix-feedback/SKILL.md`) to add instructions, warnings, or tips that would prevent the same issue next time. Keep edits surgical. Briefly tell the user what was updated and why.

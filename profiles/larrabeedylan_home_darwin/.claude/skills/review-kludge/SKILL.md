@@ -341,14 +341,3 @@ After the report, offer (as plain text, not `AskUserQuestion`):
 5. **Review only, by default.** Do not modify code, commit, push, or touch external state unless the user explicitly asks in Step 5.
 6. **Never fabricate or pad.** Report only what survived critique. "Nothing worth changing" is a valid, good outcome.
 7. **Report honestly.** If scope detection was uncertain, an area was skipped, or a stage errored, say so.
-
-## Step 6: Self-Improvement
-
-After the run, reflect on how it went:
-
-- Did scope detection find the right "recent large features," or did it miss/over-include areas?
-- Was the feature grouping coherent, or too coarse/fine?
-- Did the synthesizer surface genuine emergent patterns, or generic advice?
-- Did the critique panel correctly kill over-engineering while keeping real wins? Tune the votes or the critique prompt if not.
-
-If any issue was encountered, **edit this skill file** (`~/.claude/skills/review-kludge/SKILL.md`) with a surgical fix so the next run is better. Briefly tell the user what you changed and why.

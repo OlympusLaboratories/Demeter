@@ -323,16 +323,3 @@ Then print a final table: `#` · identifier · title · URL · blocked-by. Follo
 6. **Ground every ticket in real paths** unless `--shallow`, and say when you didn't.
 7. **This skill writes no code and creates no branches.** It produces tickets. Implementation is `/fix-linear`'s job.
 8. **If a ticket description would tell the implementer to write a comment in the code, delete that instruction.** Explanation belongs in the PR description, and the repo-wide rule forbids agent-written code comments.
-
----
-
-## Step 10: Self-Improvement
-
-After the tickets exist, reflect:
-
-- Did the user re-cut the slices? In which direction — too fat, too fine, wrong seams? That's a durable calibration signal; record it.
-- Did the docs contradict the codebase, and did the probe catch it before the tickets went out?
-- Did any Linear call fail on a field name, ordering, or permission? Add the specific fix here.
-- Did the descriptions land, or did the user rewrite the voice? Capture what they changed.
-
-If a different instruction would have avoided a round trip, **edit this skill file** (`~/.claude/skills/plan-subtasks/SKILL.md`) surgically — a note at the relevant step, not a rewrite. Tell the user what changed and why.
