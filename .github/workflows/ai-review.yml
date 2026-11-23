@@ -43,9 +43,27 @@ jobs:
           secrets: |-
             token:${{ env.GCP_PROJECT }}/hephaestus-github-token
 
-      - uses: OlympusLaboratories/Actions/hephaestus-review@main
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
-          gcp_project: ${{ env.GCP_PROJECT }}
-          gcp_region: ${{ env.GCP_REGION }}
-          version: main
-          github_token: ${{ steps.gh-token.outputs.token }}
+          python-version: "3.12"
+
+      - name: Install Hephaestus
+        env:
+          GIT_AUTH_TOKEN: ${{ steps.gh-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0="url.https://x-access-token:${GIT_AUTH_TOKEN}@github.com/.insteadOf" \
+          GIT_CONFIG_VALUE_0="https://github.com/" \
+            pip install --quiet "git+https://github.com/OlympusLaboratories/Hephaestus.git@main"
+
+      - name: Run AI PR Review
+        env:
+          GITHUB_TOKEN: ""
+          GOOGLE_CLOUD_PROJECT: ${{ env.GCP_PROJECT }}
+          GOOGLE_CLOUD_LOCATION: ${{ env.GCP_REGION }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_EVENT_ACTION: ${{ github.event.action }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+        run: review
