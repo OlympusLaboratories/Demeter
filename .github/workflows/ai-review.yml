@@ -1,0 +1,51 @@
+name: AI Reviewer
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, review_requested]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GCP_PROJECT: olympus-build
+  GCP_PROJECT_NUMBER: 921596518220
+  GCP_REGION: us-central1
+  SERVICE_ACCOUNT: hephaestus-runner@olympus-build.iam.gserviceaccount.com
+
+jobs:
+  ai-review:
+    if: >-
+      github.event.action != 'review_requested' ||
+      github.event.requested_reviewer.login == 'Hephaestux'
+    runs-on: gke-us-central1
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/${{ env.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/github/providers/github
+          service_account: ${{ env.SERVICE_ACCOUNT }}
+          create_credentials_file: true
+
+      - name: Fetch GitHub token from Secret Manager
+        id: gh-token
+        uses: google-github-actions/get-secretmanager-secrets@v2
+        with:
+          secrets: |-
+            token:${{ env.GCP_PROJECT }}/hephaestus-github-token
+
+      - uses: OlympusLaboratories/Actions/hephaestus-review@main
+        with:
+          gcp_project: ${{ env.GCP_PROJECT }}
+          gcp_region: ${{ env.GCP_REGION }}
+          version: main
+          github_token: ${{ steps.gh-token.outputs.token }}
