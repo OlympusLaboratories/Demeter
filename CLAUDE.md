@@ -24,6 +24,7 @@ Demeter/
     check-link-roots.sh   # every link_file dest is under a declared root; `rules` prints what it checks
     check_link_roots.py   # the static half of the above
     uninstall-roundtrip.sh # plant a link under every root, sweep, assert none survive
+    check-change-request.py # the ping's link resolution order, over every profile copy; `rules` prints it
   tools/                  # First-party projects shared by every profile
     claude-usage/         # VS Code extension, linked into ~/.claude/tools/
     worktree-sync/        # VS Code extension, linked into ~/.claude/tools/
