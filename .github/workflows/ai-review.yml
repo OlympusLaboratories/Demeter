@@ -19,7 +19,7 @@ jobs:
     if: >-
       github.event.action != 'review_requested' ||
       github.event.requested_reviewer.login == 'Hephaestux'
-    runs-on: gke-us-central1
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
