@@ -9,6 +9,7 @@ on:
       - 'vscode/**'
       - 'shell/**'
       - 'tests/**'
+      - 'profiles/*/.claude/hooks/**'
       - '.github/workflows/shell-checks.yml'
 
 concurrency:
@@ -46,3 +47,6 @@ jobs:
 
       - name: Uninstall round-trip
         run: tests/uninstall-roundtrip.sh
+
+      - name: Change request link resolution
+        run: tests/check-change-request.py
