@@ -223,8 +223,8 @@ const measure = (text) => {
   const paragraphs = t.split(/\n\s*\n/).filter((p) => p.trim() && !/^\s*(?:[-*+#>|]|\d+[.)]\s)/.test(p.trim()))
   const longestPara = paragraphs.reduce((m, p) => Math.max(m, countWords(p)), 0)
 
-  const prose = t.replace(/^#{1,6}\s.*$/gm, '')
-  const sentences = prose.split(/[.!?]+(?:\s+|$)/).map((s) => s.trim()).filter((s) => countWords(s) > 2)
+  const prose = t.replace(/^#{1,6}\s.*$/gm, '').replace(/^\s*\|.*$/gm, '')
+  const sentences = prose.split(/[.!?]+["'”’*`)\]]*(?:\s+|$)/).map((s) => s.trim()).filter((s) => countWords(s) > 2)
   const lens = sentences.map(countWords).sort((a, b) => a - b)
   const p90 = lens.length ? lens[Math.min(lens.length - 1, Math.floor(lens.length * 0.9))] : 0
 
@@ -236,6 +236,8 @@ const measure = (text) => {
     if (next && next.level > sec.level) return false
     if (i === 0 && sec.level === 1) return false
     const b = sec.body.join('\n')
+    const bodyLines = b.split('\n').filter((l) => l.trim())
+    if (bodyLines.length && bodyLines.every((l) => /^\s*`[^`]+`/.test(l))) return false
     return countWords(b) > 0 && countWords(b) < 12 && !/^\s*(?:[-*+|]|\d+[.)]\s)/m.test(b)
   }).map((sec) => sec.heading)
 
@@ -437,7 +439,7 @@ Rules that make this ledger usable downstream:
 - Give every item a stable id: F1, F2, F3…
 - \`loadBearing\` is false for throat-clearing, restated headings, and sentences that assert a benefit with no fact behind them. Record them anyway — a later phase needs to know they were seen and deliberately dropped, not missed.
 - An item the document HEDGES ("we think", "roughly", "TBD", "pending confirmation") keeps its hedge in \`text\`. Stripping it is how a maybe becomes a fact.
-- Anything the source leaves genuinely unknown — an unnamed owner, an undecided approach, a number marked TBD — is an \`open-question\` item. These are the items most often lost in a rewrite, and losing them is the worst outcome available here.
+- Anything the source leaves genuinely unknown — an unnamed owner, an undecided approach, a number marked TBD — is an \`open-question\` item. These are the items most often lost in a rewrite, and losing them is the worst outcome available here. An open question is a DECISION NOBODY HAS MADE, not work nobody has started. "Protobuf or Parquet at rest" is one; "the migration script is not written" is not — that is an \`action\`, however far from done it is, and so is a defect with an obvious remedy. Recording unstarted work as an open question manufactures uncertainty the source does not have, and a later phase will dutifully print it beside the very bullet it came from.
 - If two parts of the source contradict each other, record BOTH as items and list the pair in \`conflicts\`. Do not pick a winner; that is not your job and the author may not know yet.
 
 In \`purposeRead\`, say in one sentence what this document is actually for, judged from its content rather than from its title.
@@ -487,7 +489,7 @@ const worstFailure = (audit && audit.worstFailure) || 'structure'
 const BANDS = {
   generated: { padded: [0.25, 0.5], normal: [0.35, 0.6], dense: [0.5, 0.8] },
   mixed:     { padded: [0.35, 0.6], normal: [0.5, 0.8],  dense: [0.65, 0.95] },
-  human:     { padded: [0.5, 0.8],  normal: [0.7, 1.0],  dense: [0.85, 1.1] },
+  human:     { padded: [0.5, 0.8],  normal: [0.7, 1.0],  dense: [0.85, 1.25] },
 }
 let [floor, ceil] = BANDS[provenance][density]
 if (sourceWords < 250) { floor = Math.min(floor, 0.6); ceil = Math.max(ceil, 1.4) }
@@ -559,7 +561,11 @@ NON-NEGOTIABLE HOUSE RULES — no persona may argue against these:
 2. UNCERTAINTY SURVIVES AS UNCERTAINTY. A hedge in the source stays a hedge. An
    open-question ledger item appears in the output — in its own named section when there
    are two or more. A document that quietly resolves what the source left open has lied in
-   the most expensive way available.
+   the most expensive way available. An open question the source ALREADY states in a
+   standing header line is already in the output; restating it in the body is duplication,
+   not fidelity, and a judge is right to block it. The same holds for a gap the document
+   already lists as a defect or an action: naming it again as an open question is one
+   sentence twice, and the restatement is the copy to cut.
 3. CONFLICTS ARE SURFACED, NOT RESOLVED. Where the source contradicts itself, say so in one
    line and name both versions. You are not the person who gets to decide.
 4. LEAD WITH THE POINT. The first paragraph says what this is and what it is for. No
@@ -719,7 +725,10 @@ TIE-BREAK RULES (the structural editor applies these; personas may not override 
   load-bearing fact genuinely cannot be made to fit, the shape is wrong, not the fact.
 - Newcomer vs skimmer: resolve by REMOVING the jargon, not by adding a gloss for it. If the
   concrete thing can simply be named, name it and delete the term. Only a genuinely
-  irreducible term earns an inline explanation — and then it stays.
+  irreducible term earns an inline explanation — and then it stays. A gloss NEVER goes
+  inside a table cell: a table is the one container built for scanning down a column, and a
+  parenthetical in a cell widens it and breaks that. Gloss the term in the prose that
+  introduces or follows the table, or drop the term from the cell.
 - Doer vs archivist: the doer never wins the right to invent. When the doer needs something
   the source does not have, the resolution is always a plain statement of the gap — "owner
   not named in the source", "no acceptance criteria were written" — placed where the doer
@@ -735,7 +744,9 @@ TIE-BREAK RULES (the structural editor applies these; personas may not override 
   them is tightening each line, never deleting the section.
 - Open questions vs everyone: they survive. The skimmer may compress them into a list; nobody
   may cut them. A document that hides what it does not know is the failure mode this skill
-  exists to prevent.
+  exists to prevent. That protection covers REAL open questions only. One that merely
+  restates a defect or an unstarted task is not an open question, and the skimmer may cut it
+  outright — a section padded to justify its own heading is the opposite of admitting a gap.
 - Voice vs polish: where the source reads as human-written, a passage with a real voice beats
   a smoother rewrite of the same content. Polish is not a veto condition for anyone.
 - Any objection that would violate a house rule is discarded outright, however senior the
@@ -867,7 +878,7 @@ if (!current || !current.doc) throw new Error('docs-humanize: the composing edit
 // It is an observation instead, reported to the human and to nobody's veto.
 const report = (m) => {
   const out = []
-  if (m.ratio > ceil) out.push(`length is ${m.words} words (${m.ratio}× the source); the ceiling is ${Math.round(sourceWords * ceil)} — cut ${m.words - Math.round(sourceWords * ceil)}`)
+  if (m.words > Math.round(sourceWords * ceil)) out.push(`length is ${m.words} words (${m.ratio}× the source); the ceiling is ${Math.round(sourceWords * ceil)} — cut ${m.words - Math.round(sourceWords * ceil)}`)
   if (m.longestSentence > LIMITS.maxSentence) out.push(`longest sentence is ${m.longestSentence} words, cap is ${LIMITS.maxSentence}`)
   // Below ten sentences the 90th percentile IS the longest sentence, so this
   // would quietly tighten the real cap from 32 to 24 and call one long sentence

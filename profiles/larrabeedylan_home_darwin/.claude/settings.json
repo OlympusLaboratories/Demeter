@@ -10,7 +10,6 @@
       "WebFetch",
       "Glob",
       "Read",
-      "Bash(~/.claude/scripts/gitlab-api.sh:*)",
       "Bash(~/.claude/scripts/github-api.sh:*)",
       "mcp__claude_ai_Linear__list_issues",
       "mcp__claude_ai_Linear__get_issue",

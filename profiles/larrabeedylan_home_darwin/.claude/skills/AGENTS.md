@@ -11,17 +11,17 @@ Each skill is a subdirectory containing a `SKILL.md` file that defines the skill
 | `changes-branch` | Load branch context |
 | `changes-description` | Adversarial four-persona debate (senior / skimmer / novice / AI-slop hawk) that converges on a PR description, then fact-checks it against the diff (uses the Workflow tool; prints a `wf_…` run ID to watch live with `wfwatch <id>`) |
 | `changes-diagram` | Turns the branch's diff into an interactive call-flow page — each changed function a box with its +/- lines, grouped into module boxes, with new and dropped calls and a click-through review walk. Falls back to a file/module graph on non-Python branches, so a non-empty diff never yields an empty chart. Publishes to whichever artifact store `skill-env.sh` names |
-| `changes-explain` | Change breakdown (diff explainer) |
+| `changes-explain` | PR change breakdown |
 | `commit-msg` | Generate commit messages |
 | `docs-humanize` | Adversarial five-persona swarm (archivist / skimmer / newcomer / slop hawk / doer) that rebuilds an AI-written Notion page, markdown file or Linear ticket into something a human reads once and acts on — builds a fact ledger first, then proves against it that nothing real was lost and nothing was invented (uses the Workflow tool; prints a `wf_…` run ID to watch live with `wfwatch <id>`) |
 | `docs-update` | Audit and update README.md and AGENTS.md to reflect current repo state |
 | `autopilot` | A mode switched on over `fix-linear` or `fix-freeform`, never a task of its own — it overrides none of that skill's flags and adds only the automation: commits, commits, describes, pushes, opens the PR, watches the pipeline and the review bot with `Monitor`, runs a `review-code` swarm alongside that bot, works the review clean, applies infrastructure plans, merges stacked changes in order, and pings you when done or stuck |
-| `fix-feedback` | Work through review feedback — MR/PR threads or a local review agent's output |
+| `fix-feedback` | Work through review feedback — pull request threads or a local review agent's output |
 | `fix-freeform` | `fix-linear` without a ticket — implements a freeform problem statement. Defaults to the repo's default branch, a one-shot description, no diagram and no review swarm (`--review true` opts in); escalates to a feature branch on its own when the change touches Terraform, the default branch is protected, or the tree has unrelated uncommitted work |
 | `fix-linear` | Linear ticket implementation. After the description it defaults to both a call-flow diagram and a `review-code` swarm over the branch (`--diagram false` / `--review false` to skip either) |
 | `ping` | Send yourself a push notification carrying what this session is doing and what it needs. Invoked directly, or by another skill handing over a status, a question, a blocker or a finished run. The notification is one-way — answering from a phone is Remote Control, which is armed at session startup because no skill can run a slash command, and which `/ping off` therefore does not disconnect |
 | `plan-initiative` | Sequence a Linear initiative's subtasks and delegate them across named engineers — dependency graph, parallelism verdict, swimlane chart, per-person work orders |
-| `plan-subtasks` | Turn a design doc + implementation breakdown into a Linear ticket tree — one parent, one MR-sized subtask per reviewable slice, both doc links on every ticket; confirms team/project/assignee and writes to Linear only after the plan is approved |
+| `plan-subtasks` | Turn a design doc + implementation breakdown into a Linear ticket tree — one parent, one PR-sized subtask per reviewable slice, both doc links on every ticket; confirms team/project/assignee and writes to Linear only after the plan is approved |
 | `reflect-peer` | Peer assessment generator (stub) |
 | `reflect-self` | Self-assessment generator (stub) |
 | `review-code` | Adversarial multi-agent review of proposed local changes, or of an incoming branch someone else pushed — the latter is fetched into a detached review worktree and comes back with a pack of ready-to-paste review comments (uses the Workflow tool; prints a `wf_…` run ID to watch live with `wfwatch <id>`) |
@@ -40,28 +40,30 @@ Two facts those four skills depend on: a workflow reports `completed` even when 
 
 ## GitHub Data
 
-PR-related skills (`changes-explain`, `changes-description`, `fix-feedback`, `reflect-week`) use `~/.claude/scripts/github-api.sh` for GitHub API access. It reads the token from `GITHUB_PERSONAL_ACCESS_TOKEN` in the environment, so it never enters conversation context, and takes owner, repo, and PR number as plain arguments.
+PR-related skills (`changes-explain`, `fix-feedback`, `fix-linear`, `fix-freeform`) name `~/.claude/scripts/github-api.sh` directly; `autopilot` reaches it through `skill-env.sh`'s `api_script` instead, which is the form a new skill should copy. It reads the token from `GITHUB_PERSONAL_ACCESS_TOKEN` in the environment, so it never enters conversation context, and takes owner, repo, and PR number as plain arguments. Run it with `help` to get every command and its arguments, generated from the script's own source.
 
 `fix-feedback` is the only one that **writes** through it, and both writes are gated on an explicit yes in chat: Step 3b opens one new comment per unique review-swarm finding (`create-diff-comment` — body over stdin; anchors to the diff line, retrying as a file-level and then a general comment when GitHub rejects the anchor), and Step 7b replies into an existing thread (`reply-to-thread`). `pr-for-branch` finds the PR when only the branch is known — its arguments accept `-` to derive owner and repo from `origin` and the branch from `HEAD`. Note that `create-diff-comment` returns a REST comment id, not the GraphQL thread ID `reply-to-thread` needs; re-run `pr-reviews` to pick that up.
 
 ## User Data
 
 Some skills accumulate context data that is NOT tracked in git:
-- `eng-snippet/slack-context.md` — ephemeral Slack threads pasted before each run
-- `performance-review-self/context/` — weekly self-reports
-- `performance-review-peer/context/` — per-peer collaboration profiles
-- `performance-review-*/prompts.md` — review questions pasted per cycle
+- `reflect-self/context/` — weekly self-reports
+- `reflect-peer/context/` — per-peer collaboration profiles
+- `reflect-self/prompts.md`, `reflect-peer/prompts.md` — review questions pasted per cycle
 - `plan-initiative/team.md` — team roster (seniority, specialties, ramp areas, capacity); `team.example.md` is the tracked template
 
-These files are gitignored. The install script creates necessary directories.
+These files are gitignored, and the paths above are the ones the root `.gitignore` actually names — an entry here that does not appear there is tracking a file somebody will commit by accident. The installer creates the two `context/` directories; the rest are created on first use. `reflect-week/slack-context.md` is on that list too, but this profile ships no `reflect-week`.
 
 ## Skill Environment
 
 Nothing in a skill may hardcode the forge, the AI reviewer's username, the infrastructure
-bot, or the artifact store. Those differ between the work profiles (GitHub, a self-hosted store) and work (GitLab, Claude
-Artifacts, a self-hosted store), and a skill that bakes one machine's
-answer in fails silently on the other — grepping for the wrong bot username finds no
-threads and reports a clean review.
+bot, or the artifact store. Every one of them differs between the work profiles and home,
+and a skill that bakes one machine's answer in fails silently on the other — grepping for
+the wrong bot username finds no threads and reports a clean review. This paragraph names
+none of those values on purpose, because it is subject to its own rule: a sentence saying
+which profile is on which forge cannot survive the work→home transform, which rewrites the
+forge name wherever it appears, so the two copies drift into contradicting each other. Ask
+`skill-env.sh`.
 
 `~/.claude/scripts/skill-env.sh` is the seam. It carries this profile's defaults **in its
 own code** and merges `~/.claude/environment.json` over them, so a missing or malformed

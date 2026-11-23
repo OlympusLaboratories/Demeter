@@ -1,0 +1,22 @@
+name: Profile Drift
+
+on:
+  pull_request:
+    paths:
+      - 'profiles/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-transform:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Check profile drift
+        run: python3 profiles/check-transform.py check --summary "$GITHUB_STEP_SUMMARY"

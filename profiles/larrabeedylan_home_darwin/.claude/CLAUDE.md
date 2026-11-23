@@ -12,7 +12,7 @@ did not already have one, no note about why the change was made or what it repla
 The reason is that a comment written next to the code it describes almost always restates
 the line, goes stale on the next edit, and pads the diff — a reviewer has to read it and
 decide whether to trust it before they can get to the change itself. Explanation belongs
-in the commit message, the MR/PR description, and the review thread, where the people who
+in the commit message, the pull request description, and the review thread, where the people who
 need it read it once.
 
 In practice:

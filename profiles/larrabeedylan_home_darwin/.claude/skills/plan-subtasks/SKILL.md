@@ -1,6 +1,6 @@
 # Plan Subtasks — Turn Design + Implementation Docs into a Linear Ticket Tree
 
-Read a design doc and an implementation-breakdown doc, cut the work into slices that each map to **one reasonably sized, reviewable MR**, and create a Linear parent ticket with one subtask per slice.
+Read a design doc and an implementation-breakdown doc, cut the work into slices that each map to **one reasonably sized, reviewable PR**, and create a Linear parent ticket with one subtask per slice.
 
 The deliverable is a ticket tree someone can pick up cold. Each subtask must be implementable **to spec by a coding agent** and **understandable by a human** who has not read either doc — thorough without being a jargon-y wall of text.
 
@@ -25,7 +25,7 @@ This skill writes to Linear, but only once, at the very end, after you show the 
 | `--assignee <name\|me\|none>` | Default `me` — every ticket starts assigned to the user running the skill. |
 | `--label <name>` | Label applied to every created ticket, repeatable. |
 | `--shallow` | Skip the codebase probe (Step 3). Slice from the docs alone — faster, and much likelier to produce tickets that don't match the repo. |
-| `--no-fanout` | Do the codebase probe inline instead of dispatching subagents. Use for small initiatives (≤ 4 expected MRs). |
+| `--no-fanout` | Do the codebase probe inline instead of dispatching subagents. Use for small initiatives (≤ 4 expected PRs). |
 | `--dry-run` | Stop after Step 7. Print the plan, write nothing to Linear. |
 
 If no docs are given, ask for them and stop. If exactly one is given, ask whether it is the design doc, the implementation doc, or both in one page — do not guess.
@@ -94,7 +94,7 @@ State the resolved destination back before continuing:
 
 ## Step 3: Probe the Codebase
 
-Docs describe intent. The repo decides what a single MR can actually contain. Skip only under `--shallow`, and when you skip, say in the final output that the slicing is doc-only and unverified.
+Docs describe intent. The repo decides what a single PR can actually contain. Skip only under `--shallow`, and when you skip, say in the final output that the slicing is doc-only and unverified.
 
 Work out which repo the docs describe. If the current working directory is not it, ask the user for the path rather than slicing against the wrong tree.
 
@@ -114,11 +114,11 @@ Collect the results into one table keyed by area. Where the docs name a file or 
 
 ---
 
-## Step 4: Cut the Work into MR-Sized Slices
+## Step 4: Cut the Work into PR-Sized Slices
 
-This is the judgement the skill exists for. One slice = one merge request.
+This is the judgement the skill exists for. One slice = one pull request.
 
-### What "one reviewable MR" means
+### What "one reviewable PR" means
 
 A slice qualifies when **all** of these hold:
 
@@ -131,7 +131,7 @@ A slice qualifies when **all** of these hold:
 
 ### How to cut
 
-- Start from the implementation doc's own breakdown — it usually has one — then **re-cut it**. Docs habitually write "Phase 2: build the controller" where the repo says that's four MRs.
+- Start from the implementation doc's own breakdown — it usually has one — then **re-cut it**. Docs habitually write "Phase 2: build the controller" where the repo says that's four PRs.
 - Prefer **vertical slices that ship something observable** over horizontal layers ("all the types", then "all the handlers"), unless the layers genuinely land independently.
 - **Split** anything that: touches more than one deployable in a way requiring lockstep, mixes a migration with logic that reads it, mixes a refactor with a behavior change, or has more than one acceptance criterion pointing at unrelated behavior.
 - **Merge** anything that: cannot be tested without its neighbor, is a two-line change plus its caller, or would leave the tree in a state nobody could review in isolation.
@@ -142,7 +142,7 @@ A slice qualifies when **all** of these hold:
 
 For each slice record `blocked_by` (slices whose merge it truly needs) and `blocks`. Distinguish a **hard** dependency (won't compile/test without it) from a **soft** one (same files, merge conflict). Only hard dependencies go into Linear's `blockedBy` relations; soft ones become a "Notes" line in the description.
 
-Number the slices `MR 1 … MR N` in merge order. That number goes in the title.
+Number the slices `PR 1 … PR N` in merge order. That number goes in the title.
 
 ---
 
@@ -153,7 +153,7 @@ Every description serves two readers at once: a coding agent that must implement
 ### Template
 
 ```markdown
-**Part of:** <PARENT-ID> — <initiative title> · MR <n> of <N>
+**Part of:** <PARENT-ID> — <initiative title> · PR <n> of <N>
 **Design doc:** <design url>
 **Implementation breakdown:** <impl url>
 
@@ -164,9 +164,9 @@ No jargon that isn't defined in this ticket or obvious from the repo.
 
 ## Scope
 
-**In:** the concrete things this MR does.
+**In:** the concrete things this PR does.
 **Out:** the neighbouring things it deliberately does not do, each with the ticket
-that covers it (`MR 5` / `PLAT-1601`).
+that covers it (`PR 5` / `PLAT-1601`).
 
 ## Where the code goes
 
@@ -195,14 +195,14 @@ and any manual verification the automated tests can't cover.
 
 ## Acceptance criteria
 
-- [ ] Each item independently checkable by someone reading the MR.
+- [ ] Each item independently checkable by someone reading the PR.
 - [ ] Behavioral, not procedural — "grant expires after TTL", not "wrote a test".
 - [ ] The flag/rollout state at merge time is one of these items.
 
 ## Dependencies
 
-Blocked by: MR 2 (`PLAT-1599`) — needs the `Grant` type.
-Blocks: MR 6.
+Blocked by: PR 2 (`PLAT-1599`) — needs the `Grant` type.
+Blocks: PR 6.
 Safe to start now: yes / no, and what to stub if starting early.
 
 ## Notes
@@ -251,9 +251,9 @@ Anything the docs left unresolved, with who needs to answer it.
 
 ## Step 6: Titles
 
-`MR <n>: <verb phrase>` — e.g. `MR 3: Add namespace grant expiry to the reconciler`.
+`PR <n>: <verb phrase>` — e.g. `PR 3: Add namespace grant expiry to the reconciler`.
 
-Parent title: the initiative name from the design doc, no `MR` prefix. Keep titles under ~70 characters, specific enough to be unambiguous in a project list, and never numbered in a way that breaks if a slice is added later — if the user inserts a slice during review, renumber the whole set before writing.
+Parent title: the initiative name from the design doc, no `PR` prefix. Keep titles under ~70 characters, specific enough to be unambiguous in a project list, and never numbered in a way that breaks if a slice is added later — if the user inserts a slice during review, renumber the whole set before writing.
 
 ---
 
@@ -265,7 +265,7 @@ Present, in this order:
 
 1. **Destination line** — team, project, assignee, labels, parent (new or existing).
 2. **The slice table** — `#`, title, one-line summary, size (S/M/L), blocked-by, files it touches.
-3. **The dependency chain** in one line: `MR1 → MR2 → {MR3, MR4} → MR5`.
+3. **The dependency chain** in one line: `PR1 → PR2 → {PR3, PR4} → PR5`.
 4. **Two full sample descriptions** — the parent, and the subtask you consider hardest to describe. Not all of them; a wall of N descriptions is unreviewable, and the user is approving the *slicing*, plus a sample of the writing quality.
 5. **Open questions** — every gap you found in the docs, and how you plan to word the ticket around it.
 6. **Anything the docs claimed that the codebase contradicts.**
@@ -309,7 +309,7 @@ Re-fetch the parent with `get_issue` (`includeRelations: true`) and `list_issues
 
 Then print a final table: `#` · identifier · title · URL · blocked-by. Follow it with:
 
-> Next: `/plan-initiative <PARENT-ID> with <names>` to distribute these across the team, or `/fix-linear <FIRST-ID>` to start MR 1.
+> Next: `/plan-initiative <PARENT-ID> with <names>` to distribute these across the team, or `/fix-linear <FIRST-ID>` to start PR 1.
 
 ---
 
@@ -317,12 +317,12 @@ Then print a final table: `#` · identifier · title · URL · blocked-by. Follo
 
 1. **One write phase, gated.** Steps 1–7 touch nothing. If the user never approves, nothing exists in Linear.
 2. **Confirm the project, every run.** Even when `--project` was passed. Wrong-project tickets are invisible to the people tracking the work.
-3. **One MR per ticket, no exceptions.** If a slice can't be described without "and", split it.
+3. **One PR per ticket, no exceptions.** If a slice can't be described without "and", split it.
 4. **Never invent spec.** Doc silence becomes an open question in the ticket and a question to the user — never a confident-sounding fabrication.
 5. **Both doc links on every ticket**, in the description header *and* as link attachments. A subtask read in isolation must be able to reach its context.
 6. **Ground every ticket in real paths** unless `--shallow`, and say when you didn't.
 7. **This skill writes no code and creates no branches.** It produces tickets. Implementation is `/fix-linear`'s job.
-8. **If a ticket description would tell the implementer to write a comment in the code, delete that instruction.** Explanation belongs in the MR description, and the repo-wide rule forbids agent-written code comments.
+8. **If a ticket description would tell the implementer to write a comment in the code, delete that instruction.** Explanation belongs in the PR description, and the repo-wide rule forbids agent-written code comments.
 
 ---
 
