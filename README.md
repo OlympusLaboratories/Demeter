@@ -11,6 +11,11 @@ Demeter/
 ├── _starter/           # copy this to get started
 │   └── .bash_profile
 ├── _vendor/            # vendor packages — skills + tools (git submodules)
+├── lib/                # shell libraries sourced by the installer and its siblings
+│   └── paths.sh        # git_excludes_path + demeter_link_roots
+├── tests/              # mechanical checks over the installer and its siblings
+│   ├── check-link-roots.sh    # every link destination is under a declared root
+│   └── uninstall-roundtrip.sh # plant a link under every root, sweep, assert none survive
 ├── tools/              # first-party projects, shared by every profile
 │   ├── claude-usage/   # VS Code extension, synced to ~/.claude/tools/
 │   └── worktree-sync/  # VS Code extension, synced to ~/.claude/tools/
@@ -20,6 +25,7 @@ Demeter/
 │   ├── tmux.conf       # symlinked to ~/.tmux.conf (~/.tmux.conf.local on rdev)
 │   └── install-tools.sh  # installs starship, fzf, fd, bat + the zsh plugins
 ├── vscode/             # editor settings, shared by every profile
+│   ├── lib.sh          # editor CLI + path resolution, shared with install.sh
 │   ├── settings.json   # symlinked over VS Code's user settings.json
 │   ├── extensions.txt  # extensions the installer keeps present
 │   └── sync-extensions.sh  # refresh that list from this machine
@@ -99,10 +105,17 @@ To un-symlink everything and start fresh:
 ./uninstall.sh
 ```
 
+Add `-y` / `--yes` to answer every prompt instead of reading stdin.
+
 The script will:
-- Remove every symlink in `~/` and `~/.claude` whose target points back into this repo (layout-agnostic — it reverses whatever was linked)
-- Remove the templated `~/.claude/settings.json` copy (prompts first)
-- Remove the VS Code `settings.json` symlink and offer to restore the backup taken at install time
+- List the directories it is about to sweep, then remove every symlink in them whose target points back into this repo (layout-agnostic — it reverses whatever was linked)
+- Offer to restore the editor `settings.json` backup taken at install time
+
+The directories it sweeps are declared once, as `demeter_link_roots` in `lib/paths.sh`, and the installer links into nothing else — `tests/check-link-roots.sh` fails CI if that stops being true. Today they are `~/`, `~/.claude` (recursively), `~/.config/zsh`, `~/.config`, whichever directory holds `core.excludesFile`, `~/.vscode-server/data/Machine`, and every editor user directory on both platforms. Only `~/.claude` is swept recursively; the rest are one level deep, which is all the installer writes into.
+
+Two things changed about what it reaches. It now sweeps the four `~/.config` and `~/.vscode-server` roots it used to miss, so an uninstall no longer leaves a machine sourcing repo files. And the `~/` pass now considers **every** symlink there, not only dotfiles — so a convenience link like `~/dotfiles -> ~/Demeter` is removed too, where before it survived. Every removal is printed as it happens.
+
+Your repo files are never touched.
 - Clean up now-empty skill directories left behind
 
 Your repo files are never touched, and skill data directories are left in place.
