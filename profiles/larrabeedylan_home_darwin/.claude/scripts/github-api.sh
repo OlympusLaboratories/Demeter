@@ -3,14 +3,13 @@
 Token read from GITHUB_PERSONAL_ACCESS_TOKEN environment variable.
 
 Usage: github_api.py <command> [args...]
-Commands: current-user | open-prs | merged-prs | pr-info | pr-reviews | pr-changes | pr-commits |
-          pr-for-branch | reply-to-thread | resolve-thread | unresolve-thread |
-          create-diff-comment | create-pr | update-pr-description | pr-checks | pr-merge |
-          pr-auto-merge | pr-cancel-auto-merge | pr-status | pr-notes | rerun-check
+Run `github_api.py help` for every command and the arguments it takes.
 """
 
+import inspect
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -37,6 +36,29 @@ def api_get(token, path, params=None):
     })
     with urllib.request.urlopen(req) as resp:
         return json.loads(resp.read())
+
+
+class _NoAutoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def api_get_text(token, path):
+    opener = urllib.request.build_opener(_NoAutoRedirect)
+    req = urllib.request.Request('https://api.github.com' + path, headers={
+        'Authorization': f'Bearer {token}',
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+    })
+    try:
+        with opener.open(req) as resp:
+            raw = resp.read()
+    except urllib.error.HTTPError as err:
+        if err.code not in (301, 302, 303, 307, 308):
+            raise
+        with urllib.request.urlopen(err.headers['Location']) as resp:
+            raw = resp.read()
+    return raw.decode('utf-8', errors='replace').lstrip('\ufeff')
 
 
 def api_get_all(token, path, params=None, key=None):
@@ -375,6 +397,10 @@ def _repo_from_remote():
 
 
 def cmd_pr_for_branch(token, args):
+    if len(args) > 3:
+        sys.exit('Usage: github_api.py pr-for-branch [owner|-] [repo|-] [branch|-]\n'
+                 '       "-" derives owner and repo from the origin remote, and the branch\n'
+                 '       from HEAD. Every argument defaults to "-".')
     owner = args[0] if args else '-'
     repo = args[1] if len(args) > 1 else '-'
     branch = args[2] if len(args) > 2 else '-'
@@ -658,11 +684,7 @@ mutation($threadId: ID!) {
 """
 
 
-def _set_thread_resolution(token, args, command, query, field, resolved):
-    if len(args) < 3 or not all(args[:3]):
-        sys.exit(f'Usage: github_api.py {command} <owner> <repo> <thread_id>\n'
-                 '       thread_id is the GraphQL node id of a PullRequestReviewThread, as\n'
-                 '       returned by pr-reviews. A REST comment id will not work.')
+def _set_thread_resolution(token, args, query, field, resolved):
     thread_id = args[2]
     data = _graphql_mutation(token, query, {'threadId': thread_id})
     thread = (data.get(field) or {}).get('thread') or {}
@@ -670,12 +692,20 @@ def _set_thread_resolution(token, args, command, query, field, resolved):
 
 
 def cmd_resolve_thread(token, args):
-    _set_thread_resolution(token, args, 'resolve-thread',
+    if len(args) < 3 or not all(args[:3]):
+        sys.exit('Usage: github_api.py resolve-thread <owner> <repo> <thread_id>\n'
+                 '       thread_id is the GraphQL node id of a PullRequestReviewThread, as\n'
+                 '       returned by pr-reviews. A REST comment id will not work.')
+    _set_thread_resolution(token, args,
                            _RESOLVE_THREAD_MUTATION, 'resolveReviewThread', True)
 
 
 def cmd_unresolve_thread(token, args):
-    _set_thread_resolution(token, args, 'unresolve-thread',
+    if len(args) < 3 or not all(args[:3]):
+        sys.exit('Usage: github_api.py unresolve-thread <owner> <repo> <thread_id>\n'
+                 '       thread_id is the GraphQL node id of a PullRequestReviewThread, as\n'
+                 '       returned by pr-reviews. A REST comment id will not work.')
+    _set_thread_resolution(token, args,
                            _UNRESOLVE_THREAD_MUTATION, 'unresolveReviewThread', False)
 
 
@@ -744,7 +774,70 @@ def cmd_rerun_check(token, args):
     emit({'ok': True})
 
 
+def cmd_job_log(token, args):
+    if len(args) < 3:
+        sys.exit('Usage: github_api.py job-log <owner> <repo> <job_id> [lines|all]')
+    owner, repo, job_id = args[0], args[1], args[2]
+    budget = args[3] if len(args) > 3 else '400'
+    if budget != 'all' and not budget.isdigit():
+        sys.exit(f'job-log: line budget must be a number or "all", got "{budget}"')
+
+    try:
+        check = api_get(token, f'/repos/{owner}/{repo}/check-runs/{job_id}')
+    except urllib.error.HTTPError as err:
+        if err.code == 404:
+            emit({'error': f'no check run {job_id} in {owner}/{repo}; a commit status has no '
+                           'Actions job behind it and so has no log this helper can read'})
+        else:
+            emit({'error': http_error_message(err)})
+        sys.exit(1)
+
+    slug = (check.get('app') or {}).get('slug') or 'unknown'
+    if slug != 'github-actions':
+        emit({
+            'error': f'check run {job_id} was produced by "{slug}", not GitHub Actions, '
+                     'so there is no job log to read',
+            'name': check.get('name', ''),
+            'html_url': check.get('html_url', ''),
+        })
+        sys.exit(1)
+
+    try:
+        log = api_get_text(token, f'/repos/{owner}/{repo}/actions/jobs/{job_id}/logs')
+    except urllib.error.HTTPError as err:
+        emit({'error': http_error_message(err)})
+        sys.exit(1)
+
+    lines = log.rstrip('\n').split('\n') if log.strip() else []
+    total = len(lines)
+    if budget == 'all':
+        kept = lines
+        print(f'==> job-log: {total} lines, all shown')
+    else:
+        kept = lines[-int(budget):] if int(budget) else []
+        print(f'==> job-log: {total} lines, showing last {len(kept)}, '
+              f'{total - len(kept)} dropped from the head (pass "all" for the whole log)')
+    for line in kept:
+        print(line)
+
+
+def _arguments_of(fn):
+    try:
+        source = inspect.getsource(fn)
+    except (OSError, TypeError):
+        return ''
+    match = re.search(r"Usage: github_api\.py [a-z][a-z0-9-]* ?([^'\\]*)", source)
+    return match.group(1).strip() if match else ''
+
+
+def cmd_help(token, args):
+    for name, fn in COMMANDS.items():
+        arguments = _arguments_of(fn)
+        print(f'{name:<24} {arguments}' if arguments else name)
+
+
 COMMANDS = {
+    'help':            cmd_help,
     'current-user':    cmd_current_user,
     'open-prs':        cmd_open_prs,
     'merged-prs':      cmd_merged_prs,
@@ -766,10 +859,16 @@ COMMANDS = {
     'pr-status':       cmd_pr_status,
     'pr-notes':        cmd_pr_notes,
     'rerun-check':     cmd_rerun_check,
+    'job-log':         cmd_job_log,
 }
 
 if __name__ == '__main__':
-    if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
-        sys.exit(f'Usage: github_api.py {{{"| ".join(COMMANDS)}}}')
-    token = load_token()
-    COMMANDS[sys.argv[1]](token, sys.argv[2:])
+    command = sys.argv[1] if len(sys.argv) > 1 else ''
+    if command in ('--help', '-h'):
+        command = 'help'
+    if command not in COMMANDS:
+        print(f'Usage: github_api.py {{{"|".join(COMMANDS)}}}', file=sys.stderr)
+        print("Run 'github_api.py help' for each command's arguments.", file=sys.stderr)
+        sys.exit(1)
+    token = None if command == 'help' else load_token()
+    COMMANDS[command](token, sys.argv[2:])

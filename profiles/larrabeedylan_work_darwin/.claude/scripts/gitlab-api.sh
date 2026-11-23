@@ -3,8 +3,52 @@
 # Reads token from .mcp.json so it never passes through Claude's context.
 set -euo pipefail
 
-TOKEN=$(python3 -c "import json; print(json.load(open('$HOME/.claude/.mcp.json'))['mcpServers']['gitlab']['env']['GITLAB_PERSONAL_ACCESS_TOKEN'])")
 GITLAB_URL="https://gitlab.com/api/v4"
+
+list_commands() {
+  grep -oE '^  [a-z][a-z0-9-]*\)$' "$0" | tr -d ' )' | paste -sd'|' -
+}
+
+print_usage() {
+  echo "Usage: gitlab-api.sh {$(list_commands)}" >&2
+  echo "Run 'gitlab-api.sh help' for each subcommand's arguments." >&2
+}
+
+print_help() {
+  awk '
+    /^  [a-z][a-z0-9-]*\)$/ {
+      name = $1
+      sub(/\)$/, "", name)
+      printed = 0
+      while ((getline line) > 0) {
+        if (line !~ /^    #/) break
+        sub(/^    # ?/, "", line)
+        sub(/^Args: */, "", line)
+        printf "%-24s %s\n", (printed ? "" : name), line
+        printed = 1
+      }
+      if (!printed) print name
+    }
+  ' "$0"
+}
+
+case "${1:-}" in
+  help)
+    # Args: none; --help and -h do the same
+    print_help
+    exit 0
+    ;;
+  --help|-h)
+    print_help
+    exit 0
+    ;;
+  "")
+    print_usage
+    exit 1
+    ;;
+esac
+
+TOKEN=$(python3 -c "import json; print(json.load(open('$HOME/.claude/.mcp.json'))['mcpServers']['gitlab']['env']['GITLAB_PERSONAL_ACCESS_TOKEN'])")
 
 case "${1:-}" in
   current-user)
@@ -348,11 +392,37 @@ for b in bridges:
 "
     ;;
   job-log)
-    # Args: project_path (URL-encoded), job_id
-    PROJECT="${2:?Usage: gitlab-api.sh job-log <project_path_urlencoded> <job_id>}"
+    # Args: project_path (URL-encoded), job_id, optional line budget — a number (default 400) or "all"
+    # Prints the tail, because a failing job's reason is at the end of its trace.
+    PROJECT="${2:?Usage: gitlab-api.sh job-log <project_path_urlencoded> <job_id> [lines|all]}"
     JOB_ID="${3:?}"
-    curl -sf -H "PRIVATE-TOKEN: $TOKEN" \
-      "$GITLAB_URL/projects/$PROJECT/jobs/$JOB_ID/trace"
+    LINES="${4:-400}"
+    case "$LINES" in
+      all) ;;
+      ''|*[!0-9]*)
+        echo "job-log: line budget must be a number or \"all\", got \"$LINES\"" >&2
+        exit 1
+        ;;
+    esac
+    TRACE=$(curl -sf -H "PRIVATE-TOKEN: $TOKEN" \
+      "$GITLAB_URL/projects/$PROJECT/jobs/$JOB_ID/trace")
+    if [ -z "$TRACE" ]; then
+      TOTAL=0
+    else
+      TOTAL=$(printf '%s\n' "$TRACE" | wc -l | tr -d ' ')
+    fi
+    if [ "$LINES" = "all" ]; then
+      echo "==> job-log: $TOTAL lines, all shown"
+      if [ "$TOTAL" -gt 0 ]; then
+        printf '%s\n' "$TRACE"
+      fi
+    else
+      if [ "$TOTAL" -lt "$LINES" ]; then KEPT="$TOTAL"; else KEPT="$LINES"; fi
+      echo "==> job-log: $TOTAL lines, showing last $KEPT, $((TOTAL - KEPT)) dropped from the head (pass \"all\" for the whole trace)"
+      if [ "$TOTAL" -gt 0 ]; then
+        printf '%s\n' "$TRACE" | tail -n "$LINES"
+      fi
+    fi
     ;;
   retry-job)
     # Args: project_path (URL-encoded), job_id
@@ -829,7 +899,7 @@ for m in json.load(sys.stdin):
 "
     ;;
   *)
-    echo "Usage: gitlab-api.sh {current-user|merged-mrs|open-mrs|mr-info|mr-discussions|mr-notes|mr-changes|mr-commits|reply-to-thread|reply-to-thread-stdin|resolve-thread|create-note|update-note|create-mr|update-mr-description|update-mr-title|mr-for-branch|create-diff-comment|retry-job|merge-mr|rebase-mr|cancel-auto-merge|mr-approvals|merge-status|project-info|project-runners|runner-info|ci-variable-keys|protected-refs|project-members}" >&2
+    print_usage
     exit 1
     ;;
 esac

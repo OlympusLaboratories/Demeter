@@ -182,7 +182,7 @@ The values that matter here:
 
 **Every one of these may be empty, and empty means "this machine does not have that".** An empty `review_bots` does not mean there is no review — it means you cannot identify the reviewer by name, so treat every unresolved thread that is not from an `operational_bots` account as real feedback. An empty `iac_bot` disables the apply gate entirely. An empty `review_job` means you cannot re-trigger a review and must say so rather than retrying something that does not exist.
 
-Use `$(~/.claude/scripts/skill-env.sh get api_script)` for the helper path throughout. Read that script's usage before calling a subcommand — **do not assume a subcommand exists on both forges**, because the two helpers are not symmetric and the GitHub one is thinner.
+Use `$(~/.claude/scripts/skill-env.sh get api_script)` for the helper path throughout. Run it with `help` before calling a subcommand — that prints every subcommand with the arguments it takes, generated from the script's own source, which is cheaper and more reliable than reading the script. **Do not assume a subcommand exists on both forges**, because the two helpers are not symmetric and the GitHub one is thinner.
 
 ## Step 0b: Work out how this change reaches production
 
