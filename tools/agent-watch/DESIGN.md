@@ -751,6 +751,10 @@ members started writing, and `propagateActivity` could not repair it because of 
 `Verify` phase holds 61 done and 49 errored agents.
 
 No polling of agent processes, no PID tracking — purely derived from the files.
+### Never truncate content to protect the webview
+
+`tools/agent-watch/` shows what an agent said, thought and got back from a tool, so cutting any of it defeats the tool — and the cut is invisible, because a clipped string looks like a short one. The cost of a hundred-KB `Bash` result is paid by **not rendering** instead: a detail panel fills its `<pre>` on first open, so a collapsed panel costs only its one-line header, and `detailRevision` in `panel.ts` re-posts an open node's detail only when its content changed rather than on every 2s poll. Clipping is for one-line headers alone — node labels and the per-tool summary — and `clip()` flattens whitespace, so it must never touch a body destined for a `<pre>`: that strips every newline and the panel then reports `N chars` where it should say `N lines`. Long prose is **folded, not cut** — `preview.ts` holds back everything past 20 lines or 1600 chars behind a `Show more` button that names the exact remainder, and the fold survives the live re-render keyed by event index plus panel label. A transcript's user `content` is often a bare **string** instead of a block list, so `blocksOf` must synthesize a text block for it or most prompts never render at all (614 such lines across 40 local transcripts); and a text event needs a `role`, because an `isMeta` line is harness-injected skill text or an image marker, not something the user typed.
+
 
 ---
 
