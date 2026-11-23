@@ -65,6 +65,8 @@ Store `$ARGUMENTS` (trimmed, uppercased) as `TICKET_ID`. It should match a patte
 
 The target branch name is `FIRST_NAME/TICKET_ID` — e.g., `dylan/ENG-123`. Store this as `BRANCH_NAME`.
 
+The identifier must survive into the branch name literally. It is one of the two things the forge integration matches to link the merge request back to the ticket — the other is the identifier in the merge request title, which `autopilot` Step 4b sets — and a link that never forms means the ticket stays in its pre-review state after the work merges, with nothing reporting it.
+
 ## Step 2: Choose the Branch Mode
 
 `--branch` decides where the work lands, and it has exactly two values.

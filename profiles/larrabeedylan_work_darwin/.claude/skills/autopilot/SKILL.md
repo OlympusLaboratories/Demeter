@@ -340,7 +340,9 @@ The fix skill committed onto the default branch and no merge request is coming. 
 
 ### 4b. Everything else — open the merge request
 
-Push the branch, then open the MR with the helper's create command. Title from the commit subject; description from Step 3; reference the ticket where there is one so the forge's integration can transition it on merge.
+Push the branch, then open the MR with the helper's create command. Description from Step 3. Where there is a ticket the title is `TICKET_ID: <commit subject>`; with no ticket it is the commit subject alone.
+
+**The identifier in the title is what links the merge request to the ticket.** The forge integration matches it literally — in the merge request title and in the branch name — and on a match it attaches the merge request to the ticket and moves the ticket's state as the merge request opens, enters review and merges. `BRANCH_NAME` already carries the identifier, so the branch alone is usually enough; putting it in the title too costs nothing and stops the link depending on which of the two matchers fires. A paraphrase or an abbreviation matches neither, and it fails in the direction that matters: the merge request looks entirely normal, and the ticket sits in its pre-review state with the work already merged.
 
 **The user may land the change themselves while the run is still working.** It is not a conflict and not a race to recover from — a human merging is strictly stronger than the gate this skill was going to apply. Most often the run invited it — see Step 5b on never reporting a change request as ready while a review is still running. What it breaks is the assumption that the branch is still the place to put work: a squash merge rewrites the commit, so a later push onto that branch no longer shares history with the default branch, and the forge may have deleted the branch under you so the push silently recreates it. Observed exactly that way — a review round finished after the merge and pushed a fix onto a branch with no open merge request, where it would have sat unnoticed.
 
