@@ -92,7 +92,7 @@ Store as `REPO_ROOT`.
 **Never check their branch out in the working tree you are standing in.** That rewrites the user's files and can destroy uncommitted work. It goes in its own worktree, which is how the rest of this setup already works (`wt`, `wtl`, `wtclean`):
 
 ```bash
-ROOT=$(git worktree list --porcelain | awk '/^worktree /{ print substr($0,10); exit }')
+ROOT=$(git worktree list --porcelain | awk '/^worktree /{ sub(/^worktree /, ""); print; exit }')
 REVIEW_WT="$ROOT/.claude/worktrees/review/$NAME"
 BASE_SHA=$(git merge-base "origin/$NAME" "origin/$DEFAULT_BRANCH")
 

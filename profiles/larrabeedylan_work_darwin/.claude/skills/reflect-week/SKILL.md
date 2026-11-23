@@ -82,7 +82,7 @@ than from the two list commands, and check its `state`.
 
 `mr-info` returns `state` but **not** `merged_at` (it comes back null) and not `draft`. Use it for state and the full description; take merge dates from `merged-mrs` and draft status from `open-mrs`.
 
-The shell is **zsh**, which does not word-split unquoted parameters — `for spec in "proj iid"; do set -- $spec` silently leaves `$2` empty and every call fails with `parameter null or not set`. Write the pairs to a file and `while read -r proj iid` instead.
+The shell is **zsh**, which does not word-split unquoted parameters — `for spec in "proj iid"; do set -- $spec` silently leaves the second positional empty and every call fails with `parameter null or not set`. Write the pairs to a file and `while read -r proj iid` instead.
 
 `mr-discussions` prints one JSON object per thread on its own line — it is NOT a single JSON array, so `json.load()` on the whole stream fails. Parse line-by-line, or just `grep -o '"author": "[^"]*"' | sort | uniq -c` to get a participant tally quickly. Filter out the bots (`griddy-bot`, `gridmatic-releaser`, `gridmatic-linear`) when identifying human peers.
 
