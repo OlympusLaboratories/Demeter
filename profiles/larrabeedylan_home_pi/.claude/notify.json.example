@@ -11,6 +11,7 @@
   "min_interval_seconds": 30,
   "quiet_hours": null,
   "only_when_armed": true,
+  "notify_when_blocked": true,
   "summarize": {
     "command": "",
     "model": "claude-haiku-4-5-20251001",

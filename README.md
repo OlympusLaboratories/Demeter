@@ -556,7 +556,7 @@ It composes the ordinary skills (`fix-linear` or `fix-freeform`, `commit-msg`, `
 
 What makes it safe to walk away from:
 
-- **It arms your phone as it takes over.** Notifications are opt-in per session and the opt-in is a sent ping, so an unarmed session stays silent through every permission prompt, question and failure. Autopilot sends one ping as it picks the work up — saying what it took over and where it will stop — which both tells you the hand-off happened and switches the automatic notifications on for everything that follows. Pinging only at the end would arm the session at the exact moment it stopped mattering. Every route in arms, including a mid-run `/autopilot --merge` on work that was never a fix-skill run, which is the route that needs it most.
+- **It arms your phone as it takes over.** Notifications are opt-in per session and the opt-in is a sent ping, so an unarmed session stays silent when it *finishes* or *fails* — only a session blocked on you speaks up unasked. Autopilot sends one ping as it picks the work up — saying what it took over and where it will stop — which both tells you the hand-off happened and switches the automatic notifications on for everything that follows. Pinging only at the end would arm the session at the exact moment it stopped mattering. Every route in arms, including a mid-run `/autopilot --merge` on work that was never a fix-skill run, which is the route that needs it most.
 - **It can ask you something, and you can answer from your phone.** Remote Control is armed when a session starts, so a question raised mid-run is a real option rather than a dead end — which is why the run asks instead of guessing for the calls that are expensive to get wrong: anything irreversible, anything that spends money, a product decision a review thread needs, a merge conflict whose intent is unclear. The last two used to end the run; now they pause it until you tap an answer. Most calls are still made alone and written down, because a question stalls the run until you answer it — asking does not replace the ledger, it just means fewer entries in it.
 - **It waits with the `Monitor` tool, never a sleep loop.** A watcher wakes the session when something happens, so the prompt stays free and several runs can be in flight at once. A monitor that only reports success would stay silent through a crashloop, so every terminal state emits a line.
 - **Review comments outrank CI, always.** Fixing comments means pushing, and a push restarts the pipeline — waiting on a red or running pipeline first throws away a whole CI run.
@@ -658,6 +658,10 @@ Automatic notifications are off in every session until you ask for one. The gest
 That sends the message you asked for and, in the same move, **arms the session** — `armed_at` in `~/.claude/notify-state/sessions/<id>.json`. From then on that session notifies on everything its `events` config allows, with no turn-length floor, because you have already said you are not watching it.
 
 The reason it works this way round rather than notifying by default: a hook that fires on every turn longer than a minute is indistinguishable from no notifications at all once a dozen sessions are live, because you stop reading them. Asking for a ping is the same gesture as walking away from that session, so it is the thing worth triggering on.
+
+**One exception, and it is the difference between news and stuck.** A session that is *blocked on you* — a permission prompt, an `AskUserQuestion`, a plan waiting for approval — notifies whether or not it was armed. The latch is the right gate for "this session has something to tell you", because a finished turn keeps until you get back. It is the wrong gate for "this session will do nothing at all until you act": staying quiet there costs an unbounded wait, while speaking up when you are sitting right there costs one buzz you ignore. The log says which path it took, so a message from a session you never armed reads as `unarmed: blocking gate` rather than as a mystery.
+
+It notifies but it does **not** arm. Only you clear or set the latch, so the session's eventual "finished" stays silent until you ask for it. `idle` is deliberately not in this set — it is a timer that fires on any session left at a prompt, not a gate the session ran into. `notify_when_blocked: false` switches the exception off; `events.question`/`events.permission` remain real off switches above it, and quiet hours still apply.
 
 **It stays armed until you switch it off.** It is a latch, not a timer:
 
@@ -761,6 +765,7 @@ Then check it:
 |---|---|---|
 | `host_label` | `""` | what to call a session that is not inside a checkout, in place of the directory name. Set it on a box whose sessions all start in one fixed directory, or every ping from it carries the same uninformative word |
 | `only_when_armed` | `true` | notify only in sessions a ping has opted in; `false` restores always-on |
+| `notify_when_blocked` | `true` | a session blocked on you (`question`, `permission`) notifies even unarmed; `false` makes the latch absolute |
 | `min_turn_seconds` | 60 | shortest turn that earns a "finished" ping, and only when `only_when_armed` is `false` |
 | `min_interval_seconds` | 30 | floor between two messages from the same session |
 | `quiet_hours` | `null` | `[22, 7]` to stay silent overnight |

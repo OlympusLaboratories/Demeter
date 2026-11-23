@@ -1,0 +1,12 @@
+.vscode/**
+src/**
+node_modules/**
+esbuild.mjs
+tsconfig.json
+Makefile
+.mise.toml
+**/*.map
+**/*.test.ts
+vitest.config.ts
+package-lock.json
+DESIGN.md

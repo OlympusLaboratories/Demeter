@@ -75,6 +75,7 @@ DEFAULTS = {
     "min_interval_seconds": 30,
     "quiet_hours": None,
     "only_when_armed": True,
+    "notify_when_blocked": True,
     "host_label": "",
     "events": {
         "stop": True,
@@ -95,6 +96,8 @@ NOTIFICATION_KINDS = {
 }
 
 QUESTION_TOOLS = {"AskUserQuestion", "ExitPlanMode"}
+
+BLOCKING_KINDS = {"question", "permission"}
 
 DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
@@ -800,9 +803,12 @@ def handle(payload):
     session_id = payload.get("session_id") or "unknown"
     state = read_json(session_path(session_id), {}) or {}
 
+    unarmed_blocking = False
     if not away:
         armed, reason = armed_state(state)
-        if config["only_when_armed"]:
+        if not armed and kind in BLOCKING_KINDS and config["notify_when_blocked"]:
+            unarmed_blocking = True
+        elif config["only_when_armed"]:
             if not armed:
                 return "skip: %s" % reason
         elif payload.get("hook_event_name") == "Stop" and not armed:
@@ -845,6 +851,8 @@ def handle(payload):
     if thread:
         state["thread"] = thread
     write_json(session_path(session_id), state)
+    if unarmed_blocking:
+        how += "; unarmed: blocking gate"
     return "sent %s for %s (%s)" % (kind, repo, how)
 
 
@@ -902,6 +910,9 @@ def cmd_test():
     print(output or ("ok" if done.returncode == 0 else "failed"))
     print("away state: %s" % describe_away())
     print("sessions opted in: %d" % len(armed_sessions()))
+    print("unarmed sessions still notify when blocked: %s" % (
+        "yes (%s)" % ", ".join(sorted(BLOCKING_KINDS))
+        if config["notify_when_blocked"] else "no"))
     report_summarizer(config)
     return done.returncode
 

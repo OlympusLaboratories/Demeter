@@ -329,8 +329,16 @@ link_directory_contents() {
 }
 
 tool_has_install_target() {
-  local tool_dir="$1"
-  [[ -f "$tool_dir/Makefile" ]] && grep -qE '^install[[:space:]]*:' "$tool_dir/Makefile"
+  local tool_dir="$1" fragment candidate
+  local makefile="$tool_dir/Makefile"
+  [[ -f "$makefile" ]] || return 1
+  grep -qE '^install[[:space:]]*:' "$makefile" && return 0
+  while IFS= read -r fragment; do
+    for candidate in "$tool_dir/$fragment" "$tool_dir/../$fragment"; do
+      [[ -f "$candidate" ]] && grep -qE '^install[[:space:]]*:' "$candidate" && return 0
+    done
+  done < <(grep -oE '[A-Za-z0-9_.-]+\.mk' "$makefile")
+  return 1
 }
 
 run_tool_install() {
