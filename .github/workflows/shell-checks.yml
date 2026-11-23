@@ -40,7 +40,8 @@ jobs:
             lib/*.sh \
             vscode/*.sh \
             shell/*.sh \
-            tests/*.sh
+            tests/*.sh \
+            profiles/*/.claude/scripts/publish-artifact.sh
 
       - name: Link roots are declared
         run: tests/check-link-roots.sh
@@ -50,3 +51,6 @@ jobs:
 
       - name: Change request link resolution
         run: tests/check-change-request.py
+
+      - name: Artifact publish seam
+        run: tests/check-publish-artifact.sh

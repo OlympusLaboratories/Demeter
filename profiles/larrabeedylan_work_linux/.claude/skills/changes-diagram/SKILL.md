@@ -111,17 +111,28 @@ Call the **Artifact** tool with `file_path` set to the rendered HTML, plus:
 
 Re-running for the same branch: rebuild, then publish **the same file path**. That updates the page in place and keeps its URL. A new path creates a second artifact and orphans the first.
 
-### `mnemosyne` — deliberately unimplemented
+### `mnemosyne` — publish with the shared script
 
-**This branch is a stub on purpose.** `mnemosyne` is the user's own artifact store; it was not present on the machine where this skill was written, so there is no API here to call and none has been invented. Inventing one would produce a command that fails in a way that looks like a bug in the user's store.
+```bash
+FOLDER=$(~/.claude/scripts/skill-env.sh get diagram_folder)
+~/.claude/scripts/publish-artifact.sh <rendered>.html \
+  ${FOLDER:+--folder "$FOLDER"} \
+  --title '<short noun phrase naming the change>' \
+  --description '<one sentence, naming the branch>'
+```
 
-At runtime, discover how to publish before trying:
+It prints the URL on stdout. `diagram_folder` is empty on a machine with no folder to
+file into, and the `${FOLDER:+…}` form then omits the flag rather than passing an empty
+one — **never substitute a folder name of your own**, because publishing refuses a folder
+that does not exist and the run loses its diagram to a guess.
 
-1. Is there a `mnemosyne` executable on `PATH` (`command -v mnemosyne`)? If so, read its `--help`.
-2. Is there a config at `~/.config/mnemosyne/` or `~/.mnemosyne`? Read it.
-3. Is there a README for it in one of the user's own repos (`~/src`, `~/code`, `~/Developer`, wherever their checkouts live)?
+**Exit status 3 is not a failure.** It means this machine has no self-hosted store, which
+is the ordinary answer on most of them. Fall through to the next option. Any other
+non-zero status is a real failure: report what it printed in one line, then fall through
+the same way.
 
-If any of those tells you how to publish an HTML file, do it and report the resulting location. **If none does, say so in one line and fall through to the next option** — the Artifact tool when it is available, otherwise `local`. Do not guess at a command, and do not stop to ask: a diagram the user cannot see is worth less than a local file they can open.
+Re-running for the same branch: pass `--update <hash>` taken from the previous URL, which
+revises the page in place and keeps its link and its stored data.
 
 ### `auto` — mnemosyne, then the Artifact tool, then local
 

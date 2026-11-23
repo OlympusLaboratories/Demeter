@@ -395,9 +395,24 @@ Use the ticket title, description, comments, the parent/sibling/related context 
    **`rg -r` is `--replace`, not "recursive".** `rg -rn 'foo-bar' .` silently rewrites every match to `n` in the output, which reads as a real but wrong result (it made a bucket named `ftl-local-dev` appear to be named `n`, sending me down a false trail). ripgrep is recursive by default; never pass `-r`.
 2. **Design an implementation approach** — identify which files need changes, what the changes are, and in what order.
 3. **Ask clarifying questions** — if the ticket description is ambiguous or missing details, use `AskUserQuestion` to clarify with the user before finalizing the plan.
-4. **Present the plan and gate on it — and put the plan inside the question.** Write the full plan into your reply for the terminal, then call `AskUserQuestion` whose **question text carries the plan itself**, compressed: the files that change, what changes in each, and in what order. Options are `Approve` and `Change something`. Treat anything other than a clear approval as a revision and plan again. Do **not** call `ExitPlanMode`; this skill never enters plan mode, so there is nothing to exit.
+4. **Present the plan and gate on it — and put the plan inside the question.** Write the full plan into your reply for the terminal, then call `AskUserQuestion` whose **question text carries the plan itself**, compressed: the link published below, then the files that change, what changes in each, and in what order. Options are `Approve` and `Change something`. Treat anything other than a clear approval as a revision and plan again. Do **not** call `ExitPlanMode`; this skill never enters plan mode, so there is nothing to exit.
 
-**The question text is the only copy that reaches the phone**, so a question reading "approve the plan?" strands the user — they get a notification saying the session is waiting and no way to know what for without opening the laptop. `ExitPlanMode` was no better: the hook sends the fixed string `Waiting for plan approval.` for it and never the plan, so this is a gap being closed rather than one being introduced. Keep the question under roughly fifteen lines — one line per file, leading with the path — because it is read on a phone screen and the full version is already in the reply for anyone at a terminal.
+**Publish the plan first, so the question can carry a link to the whole thing.** Render the plan as a self-contained HTML page and publish it:
+
+```bash
+FOLDER=$(~/.claude/scripts/skill-env.sh get plan_folder)
+~/.claude/scripts/publish-artifact.sh <plan>.html \
+  ${FOLDER:+--folder "$FOLDER"} \
+  --expires 7d \
+  --title '<the ticket id and the change in a few words>' \
+  --description 'implementation plan'
+```
+
+It prints the URL. `plan_folder` is empty on a machine with nowhere to file it, and the `${FOLDER:+…}` form then omits the flag rather than passing an empty one — **never substitute a folder name of your own**, since publishing refuses a folder that does not exist. `--expires 7d` is deliberate: a plan is worth reading while it is being approved and clutter a fortnight later.
+
+**Exit status 3 means this machine has no self-hosted store.** That is the ordinary answer on most of them and not a failure — publish the same HTML with the **Artifact** tool instead and use the link it returns. Any other non-zero status is a real failure: say what it printed in one line, then ask the question with the summary alone. **Never hold the gate open waiting for a link.** A plan the user can only read in the terminal still gets approved; a question that never arrives strands the run.
+
+**The question text is the only copy of the plan that is certain to reach the phone**, so a question reading "approve the plan?" strands the user — they get a notification saying the session is waiting and no way to know what for without opening the laptop. `ExitPlanMode` was no better: the hook sends the fixed string `Waiting for plan approval.` for it and never the plan, so this is a gap being closed rather than one being introduced. Keep the question under roughly fifteen lines — the link, then one line per file, leading with the path — because it is read on a phone screen. The link is what carries the full plan to the phone; the lines are what tell the user whether opening it is worth doing, so neither replaces the other.
 
 Once the user approves the plan, implement the changes.
 
