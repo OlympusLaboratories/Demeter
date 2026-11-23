@@ -4,7 +4,10 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as stub from './testing/vscodeStub';
-import { activate } from './extension';
+import { AuthManager } from './auth';
+import { CacheRecord, UsageCache } from './cache';
+import { Logger } from './log';
+import { UsageController, activate } from './extension';
 
 function payload() {
   const soon = Date.now() + 80 * 60_000 + 30_000;
@@ -414,5 +417,78 @@ describe('activate', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(stub.visibleItems()).toHaveLength(0);
+  });
+});
+
+describe('adopting another window reading', () => {
+  const CEILING_MS = 15 * 60_000;
+
+  interface Internals {
+    adopt(cached: CacheRecord): void;
+    applyBackoff(explicitMs?: number): void;
+    schedule(): void;
+    effectiveIntervalMs(): number;
+    backoffMs: number;
+    retryUntil: number | undefined;
+    dispose(): void;
+  }
+
+  let controller: Internals;
+
+  function healthyRecord(): CacheRecord {
+    const now = Date.now();
+    return { updatedAt: now, snapshot: { meters: [], fetchedAt: now } };
+  }
+
+  beforeEach(() => {
+    const logger = new Logger();
+    const auth = new AuthManager(new FakeSecretStorage() as never, logger);
+    controller = new UsageController(auth, logger, new UsageCache(cacheDir)) as unknown as Internals;
+  });
+
+  afterEach(() => {
+    controller.dispose();
+  });
+
+  it('drops the backoff entirely when the reading it adopts is healthy', () => {
+    controller.applyBackoff(60 * 60_000);
+    expect(controller.backoffMs).toBe(CEILING_MS);
+
+    controller.adopt(healthyRecord());
+
+    expect(controller.backoffMs).toBe(0);
+    expect(controller.retryUntil).toBeUndefined();
+  });
+
+  it('still takes the backoff from a reading that is itself backing off', () => {
+    const retryUntil = Date.now() + 5 * 60_000;
+
+    controller.adopt({ updatedAt: Date.now(), retryUntil });
+
+    expect(controller.retryUntil).toBe(retryUntil);
+    expect(controller.backoffMs).toBeGreaterThan(4 * 60_000);
+    expect(controller.backoffMs).toBeLessThanOrEqual(5 * 60_000);
+  });
+
+  it('goes back to the normal interval instead of the inherited ceiling', () => {
+    const delays: number[] = [];
+    const realSetTimeout = globalThis.setTimeout;
+    vi.stubGlobal('setTimeout', (handler: () => void, ms?: number) => {
+      if (ms !== undefined) {
+        delays.push(ms);
+      }
+      return realSetTimeout(handler, ms);
+    });
+
+    controller.applyBackoff(60 * 60_000);
+    controller.schedule();
+    expect(delays.at(-1)).toBeGreaterThanOrEqual(CEILING_MS);
+
+    controller.adopt(healthyRecord());
+    controller.schedule();
+
+    const interval = controller.effectiveIntervalMs();
+    expect(delays.at(-1)).toBeGreaterThanOrEqual(interval);
+    expect(delays.at(-1)).toBeLessThan(interval * 1.2);
   });
 });

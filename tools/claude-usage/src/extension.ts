@@ -20,7 +20,7 @@ import {
   renderBar,
 } from './format';
 import { Logger } from './log';
-import { clockInterval, nextInterval, pollDelay, readingOf } from './pacing';
+import { backoffFrom, clockInterval, nextInterval, pollDelay, readingOf } from './pacing';
 import { CacheRecord, UsageCache } from './cache';
 import { UsageFailure, UsageSnapshot, fetchUsage } from './usage';
 
@@ -85,7 +85,7 @@ function severityColor(severity: Severity): vscode.ThemeColor | undefined {
   return undefined;
 }
 
-class UsageController {
+export class UsageController {
   private readonly items = new Map<string, vscode.StatusBarItem>();
   private readonly noticeItem: vscode.StatusBarItem;
   private readonly freshnessItem: vscode.StatusBarItem;
@@ -192,7 +192,7 @@ class UsageController {
   }
 
   async refreshNow(): Promise<void> {
-    this.backoffMs = 0;
+    this.setRetryUntil(undefined);
     await this.poll('manual');
   }
 
@@ -230,8 +230,7 @@ class UsageController {
           this.snapshot = result.snapshot;
           this.notice = undefined;
           this.needsSignIn = false;
-          this.backoffMs = 0;
-          this.retryUntil = undefined;
+          this.setRetryUntil(undefined);
           this.updatedAt = result.snapshot.fetchedAt;
           const reading = readingOf(result.snapshot.meters);
           this.unchanged = reading === this.lastReading ? this.unchanged + 1 : 0;
@@ -286,10 +285,12 @@ class UsageController {
       this.unchanged = 0;
       this.lastReading = reading;
     }
-    this.retryUntil = cached.retryUntil;
-    if (cached.retryUntil !== undefined) {
-      this.backoffMs = Math.max(0, cached.retryUntil - Date.now());
-    }
+    this.setRetryUntil(cached.retryUntil);
+  }
+
+  private setRetryUntil(retryUntil: number | undefined): void {
+    this.retryUntil = retryUntil;
+    this.backoffMs = backoffFrom(retryUntil, Date.now());
   }
 
   private async publish(): Promise<void> {
@@ -341,8 +342,7 @@ class UsageController {
     this.logger.info(`Usage request failed (${failure.kind}): ${failure.message}`);
     if (failure.kind === 'unauthorized') {
       await this.auth.reject(token.source, token.accessToken);
-      this.backoffMs = 0;
-      this.retryUntil = undefined;
+      this.setRetryUntil(undefined);
       this.notice =
         token.source === 'claudeCode'
           ? 'The Claude Code token was rejected. It refreshes the next time you use Claude Code.'

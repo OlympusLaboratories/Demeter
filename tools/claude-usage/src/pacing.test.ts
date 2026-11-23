@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Meter } from './format';
-import { MIN_DELAY_MS, clockInterval, nextInterval, pollDelay, readingOf } from './pacing';
+import { MIN_DELAY_MS, backoffFrom, clockInterval, nextInterval, pollDelay, readingOf } from './pacing';
 
 const base = { activeMs: 60_000, idleMs: 600_000, steadyAfter: 2 };
 
@@ -48,6 +48,25 @@ describe('readingOf', () => {
   it('treats a missing reading as its own thing', () => {
     expect(readingOf(undefined)).toBe('');
     expect(readingOf([])).toBe('');
+  });
+});
+
+describe('backoffFrom', () => {
+  const now = 1_000_000;
+
+  it('is nothing at all when the record carries no retry deadline', () => {
+    expect(backoffFrom(undefined, now)).toBe(0);
+  });
+
+  it('is the time left when the deadline is still ahead', () => {
+    expect(backoffFrom(now + 900_000, now)).toBe(900_000);
+    expect(backoffFrom(now + 60_000, now)).toBe(60_000);
+  });
+
+  it('is nothing once the deadline has passed, never negative', () => {
+    expect(backoffFrom(now - 1, now)).toBe(0);
+    expect(backoffFrom(now - 900_000, now)).toBe(0);
+    expect(backoffFrom(now, now)).toBe(0);
   });
 });
 

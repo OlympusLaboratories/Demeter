@@ -23,6 +23,10 @@ export function readingOf(meters: Meter[] | undefined): string {
   return meters.map((meter) => `${meter.id}:${meter.percent}`).join('|');
 }
 
+export function backoffFrom(retryUntil: number | undefined, now: number): number {
+  return retryUntil === undefined ? 0 : Math.max(0, retryUntil - now);
+}
+
 export const RESET_BUFFER_MS = 5_000;
 export const MIN_DELAY_MS = 10_000;
 
