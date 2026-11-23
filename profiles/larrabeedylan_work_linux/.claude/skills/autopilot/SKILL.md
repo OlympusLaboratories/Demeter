@@ -463,6 +463,17 @@ The gate also sits after the forge's own approval requirements for a practical r
 
 Everything below applies only when `--merge` is `true`.
 
+### Re-read the verdict here, as late as possible
+
+**The state Step 6 gathered is already stale.** A reviewer can report between your last read and the merge call, and that window is exactly as long as this step takes. Observed on this repo: the reviewer requested changes 77 seconds before the merge, after the last state read, and the merge went through anyway. Nothing in Step 6 could have caught that, because the event had not happened yet when Step 6 ran.
+
+So read the review verdict and the open threads **again, in this step**, in the last call before the one that merges. Two fields, and conflating them is what went wrong:
+
+- **A review job going green is not an approval.** `review_job` passing means the reviewer *ran*. The verdict is a separate field — ask the helper's `help` for the one this forge uses — and a green check beside a rejecting verdict is the shape this failure takes. It looks like consent and is not.
+- **Changes-requested blocks the merge outright**, however green the checks and however long the run has waited. An *empty* verdict is a different thing and is not blocking where the repository configures no approval rule (Step 6). Those two readings must never collapse into "no approval yet, carry on".
+
+A verdict that blocks sends you to **Step 6 branch 1** — it is review feedback and goes through `fix-feedback` — never to Step 11 and never to the merge. If the merge has already landed when you notice, say so plainly and do not revert it; the recovery is a follow-up change, per Step 4b.
+
 Check `require_human_approval` first. When it is true, a review bot's approval **is not sufficient** — wait for at least one human approver. The user driving this run counts as a human; other bots do not. This is the one gate autonomy never waives, and it is the reason this skill is safe to leave running.
 
 - **Infrastructure repos** (the Step 8 gate applied): merge **directly**. Never enable auto-merge here — auto-merge fires the instant the pipeline is green and can beat the apply, merging a plan that was never applied.
