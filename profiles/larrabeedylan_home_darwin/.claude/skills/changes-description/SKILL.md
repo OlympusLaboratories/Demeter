@@ -11,10 +11,11 @@ Produce a pull request description by making four reviewers with incompatible go
 | `--rounds N` | Cap the debate at N rounds (default `2`, max `3`). |
 | `--quick` | One judging round plus a single repair pass if anyone blocks. Use for small changes — the repair is not re-judged, so the run reports non-unanimous. |
 | `--one-shot [true\|false]` | Default `false`. `true` drops the debate entirely: one writer, then the budget and the fact-check. Bare `--one-shot` means `true`. |
+| `--inline [true\|false]` | Default `false`. `true` launches **no workflow at all**: you write the description yourself, in this turn, against the same template, the same measured word budget and a fact-check you run yourself. Bare `--inline` means `true`. |
 
-Parse the flags out of `$ARGUMENTS` **first**; whatever remains (if anything) is the git ref. `--rounds` and `--quick` set the `rounds` value passed to the workflow, and `--one-shot` sets `oneShot` — they are not part of the diff base, and feeding them to `git merge-base` produces a confusing failure.
+Parse the flags out of `$ARGUMENTS` **first**; whatever remains (if anything) is the git ref. `--rounds` and `--quick` set the `rounds` value passed to the workflow, and `--one-shot` sets `oneShot` — they are not part of the diff base, and feeding them to `git merge-base` produces a confusing failure. `--inline` sets nothing, because under it there is no workflow to set anything in — see **Step 2-INLINE**.
 
-This skill uses the **Workflow** tool. Invoking it is an explicit opt-in to multi-agent orchestration — proceed without asking for further permission. A run is 15 agents when the panel accepts in one round, 20 at the default two rounds, and 26 at `--rounds 3` with no consensus and a factual correction. `--quick` is 15–16. **`--one-shot` is 4–6**, which is the point of it.
+This skill uses the **Workflow** tool. Invoking it is an explicit opt-in to multi-agent orchestration — proceed without asking for further permission. A run is 15 agents when the panel accepts in one round, 20 at the default two rounds, and 26 at `--rounds 3` with no consensus and a factual correction. `--quick` is 15–16. **`--one-shot` is 4–6**, which is the point of it. **`--inline` is none**: no workflow is launched, nothing runs in the background, and the description exists before the turn ends.
 
 ### What `--one-shot` keeps, and why it keeps exactly that
 
@@ -24,6 +25,21 @@ This skill uses the **Workflow** tool. Invoking it is an explicit opt-in to mult
 - **The fact-check.** It reads the diff and the checkout and proves the claims are true. A single unopposed writer needs this *more* than a panel does, not less — nobody else read the text.
 
 What you genuinely lose is the adversarial pressure: the skimmer forcing cuts, the novice forcing plain language, the hawk hunting generated prose. The sole writer is handed the veto table and told to apply all four, which is weaker than four reviewers who each actually hold one. So use `--one-shot` for routine work where the diff is small and the stakes are low, and let the panel run when the description is the thing a reviewer will lean on.
+
+### What `--inline` is for, and what it still owes you
+
+`--inline` is the setting for the run where the description is not the deliverable. The user wants the change request **open**, and a workflow of any size sits between the finished code and that open change request: even `--one-shot` returns a run ID and ends the turn, so the description — and the push, and the change request, and everything a caller does after them — arrives one completion notification later. `--inline` writes it in the turn it was asked for and the caller carries straight on.
+
+What it gives up is every agent but you: no four-persona contest, no cross-examination, and **no independent fact-checker**.
+
+What it still owes the reader is the part that is arithmetic rather than opinion, and it owes it *more* than a panel does, not less:
+
+- **The template and the house rules.** The sections, their order, and the hard rules in Step 2's `HOUSE` block bind a hand-written description exactly as they bind a persona. The banned design-decisions section is the one that comes back when nobody is refereeing.
+- **The budget, measured rather than estimated.** The one time a writer here was trusted to respect a stated limit it produced 913 words while satisfying every rule it had been given. You are that writer on this path. Count the words with the command in Step 2-INLINE; do not eyeball them.
+- **A fact-check against the diff.** Nobody else is going to read this text before a reviewer does, so you read it against the hunks yourself, claim by claim.
+
+Reach for it when the diff is small, or when the change request being open is worth more than the description being argued over. Let the panel run when the description is the thing a reviewer will lean on to read the diff.
+
 
 ## Who reads this
 
@@ -82,6 +98,61 @@ This is the part only you can do — it is the reason the description isn't just
 - **What you are unsure about.** Say it plainly in the packet. A stated gap makes the fact-checker suspicious in the right place; an unstated gap gets confidently invented.
 
 If the conversation is thin, say so in `context` rather than padding it. Never invent rationale to fill the packet — the debate will polish an invention into something that reads exactly like a fact.
+
+## Step 2-INLINE: `--inline` — write it here, no workflow
+
+**This step replaces Steps 2 and 2b.** Do not call the **Workflow** tool, do not print a run ID, and do not end the turn waiting for anything: the flag exists so that the description is in hand before this turn is over. Read Step 2's `HOUSE` block for the template and the hard rules, and skip the script.
+
+1. **Fix the through-line first, in one sentence, before writing any prose.** One sentence naming what this change is about. Everything in the text then earns its place against it. Written the other way round — prose first, spine inferred afterwards — produces an inventory of true facts about a diff, which is the failure this skill exists to prevent and the one a lone writer walks into fastest. If you cannot write that sentence, say so to the user: the branch may want splitting.
+
+2. **Write the description against the `HOUSE` block in Step 2.** `## Summary`, then `## Changes`, then `## Testing` and `## Rollout` only where they clear the bar stated there. Run the Rollout trigger list against the diff rather than consulting your instinct — a new config key, a changed helm value, a changed schedule or timeout a running deployment must pick up, a migration, a feature flag, a destructive operation this change makes possible, or a required ordering against another merge.
+
+3. **Measure it. Do not estimate it.** Write the text to the scratchpad and count it. The tiers and the counter below are a port of `measure()` in Step 2's script — if the tiers there move, move them here too:
+
+```bash
+DESC=<your session scratchpad>/description.md   # the text exactly as written, nothing else in it
+DIFF_LINES=$(git --no-pager diff "$MERGE_BASE" -- . | wc -l)
+FILES=$(git --no-pager diff --name-status "$MERGE_BASE" -- . | grep -c .)
+python3 - "$DESC" "$DIFF_LINES" "$FILES" <<'PY'
+import re, sys
+lines = open(sys.argv[1]).read().split('\n')
+diff_lines, files = int(sys.argv[2]), int(sys.argv[3])
+size = 'large' if diff_lines > 1200 or files > 12 else 'medium' if diff_lines > 300 or files > 4 else 'small'
+total, summary_cap, bullet_cap, changes_cap = {
+    'small': (170, 60, 4, 100), 'medium': (250, 80, 6, 150), 'large': (320, 80, 8, 200),
+}[size]
+count = lambda s: len([t for t in s.split() if not re.fullmatch(r'[—–*+\-:;,.]+', t)])
+has = lambda n: any(l.strip().lower() == '## ' + n for l in lines)
+def section(name):
+    i = next((i for i, l in enumerate(lines) if l.strip().lower() == '## ' + name), -1)
+    if i < 0: return []
+    rest = lines[i + 1:]
+    return rest[:next((j for j, l in enumerate(rest) if l.strip().startswith('## ')), len(rest))]
+bullets = []
+for l in section('changes'):
+    if re.match(r'^\s*[-*]\s+', l): bullets.append(re.sub(r'^\s*[-*]\s+', '', l).strip())
+    elif l.strip() and bullets: bullets[-1] += ' ' + l.strip()
+summary = ' '.join(section('summary')).strip()
+sentences = [s.strip() for s in re.split(r'[.!?]+(?:\s+|$)', summary) if s.strip()]
+cap = total + (25 if has('testing') else 0) + (30 if has('rollout') else 0)
+body = count('\n'.join(l for l in lines if not l.startswith('##')))
+print('%s change · %d diff lines · %d files' % (size, diff_lines, files))
+print('total    %d / %d' % (body, cap))
+print('summary  %d / %d words, %d / 3 sentences' % (count(summary), summary_cap, len(sentences)))
+print('changes  %d / %d bullets, %d / %d words' % (len(bullets), bullet_cap, sum(map(count, bullets)), changes_cap))
+for i, s in enumerate(sentences):
+    if count(s) > 30: print('OVER: summary sentence %d is %d words, cap 30' % (i + 1, count(s)))
+for i, b in enumerate(bullets):
+    if count(b) > 25: print('OVER: bullet %d is %d words, cap 25 — %s' % (i + 1, count(b), b[:60]))
+PY
+```
+
+**Over budget means cut, and then measure again.** The caps are ceilings, not quotas: landing well under one is not a description with something missing. When the text will not fit, the fix is removing undefined terminology and abstraction, never compressing explanations into denser jargon.
+
+4. **Fact-check your own claims against the diff.** Go claim by claim and point each one at a hunk, a file, or a line in the checkout. A claim you cannot point at comes out — not softened, out. This is the step with nothing standing behind it on this path, and the one failure mode of `--inline` is a description that reads well and is wrong about the diff, with nobody else having read either.
+
+5. **Present it per Step 3**, with the inline record.
+
 
 ## Step 2: Run the Debate
 
@@ -974,6 +1045,8 @@ return {
 
 ## Step 2b: Surface the Run ID for `wfwatch`
 
+**Skip this step under `--inline`** — no workflow was launched, so there is no run ID, nothing to watch, and nothing to wait for. Never print a `wf_` block for a run that did not happen.
+
 The **Workflow** tool runs the debate in the background and its tool result includes a **run ID** (`wf_…`). The user has a shell function, **`wfwatch`** (defined in their `.zshrc` / `.bashrc`), that live-tails a workflow's progress by that ID — the debate is worth watching, since the round-by-round objections show exactly which persona forced which sentence.
 
 **In the same turn that launches the workflow — before you yield — print the run ID in a copyable form with the exact command:**
@@ -1014,6 +1087,15 @@ one-shot · medium change · 212 words, 4 of 6 bullets · within budget · 1 fac
 
 Drawn only from `size`, `words`, `budget`, `overBudget`, `atCap`, `factErrors`, `factChecked` and `dropped`. Never print `rounds`, `unanimous`, `repaired`, `judgesReported`, `history` or `outstanding` on a one-shot run — `unanimous: false` and `0 of 4 judges reported` are artifacts of a panel that never sat, and reporting them as if a panel had disagreed is exactly the fabricated provenance this skill's fact-check exists to prevent. The `factChecked` rule below still applies in full: a one-shot run that could not fact-check is **more** dangerous than a debated one, because no other agent read the text.
 
+**When the description was written `--inline`, print an inline record.** No workflow ran, so every field one returns is unavailable and printing one is fabricated provenance. Print the through-line, then a single line:
+
+```
+inline · medium change · 212 words, 4 of 6 bullets · within budget · self fact-checked against the diff
+```
+
+Drawn only from what you measured in Step 2-INLINE and checked yourself. Never print `rounds`, `unanimous`, `repaired`, `judgesReported`, `history`, `outstanding`, `dropped` or a correction count: no panel sat and no independent checker ran. Say **`self fact-checked`**, never `fact-checked` — the difference between a claim you verified and a claim another agent verified is the whole difference between this path and the other two, and the user is entitled to know which one produced the text in front of them. Where you could not verify a claim and cut it, say that in one line too.
+
+
 **Every other line must come from a field the workflow returned** — `rounds`, `unanimous`, `repaired`, `judgesReported`, `words`, `budget`, `overBudget`, `atCap`, `size`, `caps`, `sections`, `composePasses`, `factErrors`, `factChecked`, `dropped`, `unresolved`, `outstanding`, and `history[].blockers` (round, persona, quote, problem). Never state how an objection was *resolved*: the workflow does not return that, and inferring it from the final text fabricates a provenance log — the exact failure this skill's fact-check phase exists to prevent. Never reconstruct a debate line you were not handed; if the field is empty, print fewer lines.
 
 Then, specifically:
@@ -1034,7 +1116,7 @@ If the workflow returns no usable `description`, say the debate failed and write
 2. **Never invent rationale.** If the conversation didn't say why, the description doesn't say why. The fact-checker exists because three rounds of polishing turn a hedge into a confident falsehood.
 3. **Format is not up for debate.** The house rules bind every persona. A "thorough" description with a design-decisions section is a failed run, not a thorough one.
 4. **Respect what was discussed.** Where the user explained their reasoning in the chat, that reasoning goes in the packet and wins over anything a persona invents.
-5. **Match the tool to the change.** A one-line fix does not need a fifteen-agent debate. For a trivial diff, run `--one-shot` (4–6 agents, budget and fact-check intact) or `--quick` (15–16). Reach for `--one-shot` rather than offering to write the description by hand outside the skill: freehand loses the mechanical word count and the fact-check, which are the two things this skill has evidence a lone writer gets wrong.
+5. **Match the tool to the change.** A one-line fix does not need a fifteen-agent debate. For a trivial diff, run `--one-shot` (4–6 agents) or `--quick` (15–16); where the description is not the deliverable and the change request wants opening now, run `--inline` and launch nothing. **Never write a description by hand *outside* this skill**: freehand loses the mechanical word count and the fact-check, which are the two things this skill has evidence a lone writer gets wrong. `--inline` is how a hand-written description keeps both — the prose is yours, the budget and the fact-check are still compulsory, and Step 2-INLINE is where they are spelled out.
 6. **The description ships alone.** Everything outside the code block is for the user's eyes, never for pasting into the PR.
 7. **Report the debate honestly.** A non-unanimous result is a real signal about the change, not a formatting problem to smooth over.
 8. **The budget is arithmetic, not taste.** It is measured in code and handed to the agents precisely because "1–3 sentences" was satisfied by three 50-word sentences. If the text cannot fit, say so — do not quietly widen the limit.

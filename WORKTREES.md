@@ -74,7 +74,10 @@ is passed straight through to git untouched.
 
 **`wtclean`** — remove worktrees whose branch is gone from the remote or whose last commit
 is older than `WT_STALE_DAYS` (default 90). It fetches with `--prune` first so "gone" means
-gone, and it is a **dry run unless you pass `-y`**.
+gone, and it is a **dry run unless you pass `-y`**. `autopilot` deletes the source branch from
+the remote as part of merging, which is what makes "gone" ever become true — a merged branch
+left on the remote reads here as live work, so the worktree never ages out and `wtclean`
+reports nothing to do.
 
 ```bash
 wtclean                  # show what would go
@@ -86,8 +89,10 @@ wtclean --keep-branches  # remove the worktrees, keep the local branches
 ## Cleanup is yours
 
 No skill ever removes a worktree. Cleanup is deliberately manual, because a worktree may
-hold uncommitted work and an agent cannot tell whether you still want it. When a branch is
-merged or abandoned:
+hold uncommitted work and an agent cannot tell whether you still want it. What a skill does
+do is delete the **remote** branch once its change request merges — that is the signal
+`wtclean` reads, and it is the whole division of labour. When a branch is merged or
+abandoned:
 
 ```bash
 git worktree remove .claude/worktrees/<branch>

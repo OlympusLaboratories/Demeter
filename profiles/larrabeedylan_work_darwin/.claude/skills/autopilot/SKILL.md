@@ -63,8 +63,8 @@ Three rules govern every amendment:
 | `--diagram false` | any time | Skip the Step 11 attach. Never delete one already attached. |
 | `--review true` | before the merge | Run the swarm now against what is pushed (Step 5b), and feed its confirmed findings through `fix-feedback` as a fresh round. This is the amendment most likely to arrive with `--merge false` beside it, and the pair means *hold on, let me see it reviewed first*. |
 | `--review false` | before the merge | Stop starting new swarm rounds. Never discard findings already posted to the merge request — they are the reviewer's now. |
-| `--quick-description false` | after the description exists | The user wants the thorough version. Re-run `changes-description` with no flag and replace the description on the merge request — then **re-append the decision fold**, which the replacement drops. |
-| `--quick-description true` | after the description exists | A no-op. Nobody wants a cheaper rewrite of text that already exists; say so in one line. |
+| `--quick-description false` | after the description exists | The user wants the thorough version. Re-run `changes-description` with no flag — the full panel, which yields the turn until it reports — and replace the description on the merge request, then **re-append the decision fold**, which the replacement drops. |
+| `--quick-description true` | after the description exists | A no-op. Nobody wants a hand-written rewrite of text a panel already produced; say so in one line. |
 | `--branch new` | before the push | This is the fix skill's own escalation path and it is always available: cut the branch, move the commits (its "escalating after work has already started" step), and carry on. |
 | `--branch default` | after a feature branch has commits | Refuse, in one line. Escalation is one-way within a run, and the commits live on a branch created for a reason. |
 | `--autopilot false` | any time | Stop the automation where it stands and report. Leave the branch, the merge request and the threads exactly as they are — **never delete a pushed branch or close a merge request** to honour this. It means *stop driving*, not *undo*. |
@@ -125,7 +125,7 @@ One fold, appended last, after the diagram link if there is one:
 
 ```markdown
 <details>
-<summary>Decisions made without review (4)</summary>
+<summary>Relevant Decisions (4)</summary>
 
 - **Dropped the retry on 409** — the handler is already idempotent, so a retry duplicates the write. Capping at three was the alternative; it hides the bug rather than fixing it.
 - **Left the legacy `v1` path in place** — two callers outside this repo still use it. Removing it belongs in its own change.
@@ -141,6 +141,7 @@ Rules, all mechanical:
 - **At most 25 words after the bold.** Over budget means cut, never means run on. Cut the reasoning before the decision — a reviewer who disagrees will ask.
 - **No preamble, no heading, no closing sentence.** The `<summary>` is the only label. A sentence introducing the list is a sentence nobody needs.
 - **The count goes in the summary**, so the fold can be judged without expanding it.
+- **The summary line is exactly `Relevant Decisions (N)`.** Do not reword it per run, and do not describe the list as unreviewed, made alone, made autonomously, or made without review. The reader is being handed the judgment calls behind a change, which is an ordinary thing a change request carries; a label that frames them as a gap in process invites the reviewer to read the diff as something that got less scrutiny than it did, and it is the author of the change who wears that. The run's own autonomy is reported to the user in the Step 11 report, where it is a fact about the run rather than a disclaimer on the change.
 - **Zero hard-slop phrases.** The mechanical list lives in `docs-humanize`'s `HARD_SLOP` — `leverage`, `utilize`, `facilitate`, `seamless`, `in order to`, `plays a crucial role`, `it is worth noting`, `empower`, and the rest. Check the ledger against it before publishing, matching a **whitespace-flattened** copy so a line break inside a phrase cannot hide it. These are the phrases that make a generated block unreadable, and they are the reason this record needs a budget at all.
 - **Past tense, active, first word a verb.** "Dropped", "Left", "Treated", "Did not" — never "It was decided that".
 - **An empty ledger means no fold.** A run that made no unreviewed calls says nothing. Never publish an empty fold, and never pad one to look thorough.
@@ -177,6 +178,7 @@ The values that matter here:
 | `iac_bot`, `iac_plan_marker`, `iac_apply_marker` | The infrastructure apply gate. |
 | `require_human_approval` | Whether a bot approval alone may merge. |
 | `artifact_store` | Where the diagram goes. |
+| `default_remote` | The remote to push to, and to delete the source branch from at Step 9a. |
 | `fix_merge`, `fix_max_rounds` | This skill's two flags, when the invocation did not set them. |
 | `fix_branch`, `fix_quick_description`, `fix_diagram`, `fix_review`, `fix_autopilot` | The fix skill's flags. **On a hand-off, take these from the values the fix skill passed, not from here** — it already resolved them and the user may have amended one since. Read them here only on a direct invocation.
 
@@ -304,7 +306,7 @@ Two things hold on every route:
 - **Start the decision ledger, and append to it as you go.** Every call nobody reviewed gets one line in the scratchpad ledger at the moment you make it, the locked plan's own judgment calls included. Nothing is published to the forge here — the ledger stays local until Step 11.3 appends it to the description. See **The decision record**.
 - **The no-comments rule still applies.** The code carries no explanatory comments, no banners, no docstrings that were not already there, no TODOs, no ticket references. The fix skills restate this in full; do not let an unattended run be the reason it slips.
 
-**Every flag but `--merge` and `--max-rounds` belongs to the fix skill.** `--branch`, `--quick-description`, `--diagram` and `--review` are resolved there, against this machine's defaults, and this skill does not second-guess any of them. In particular, an unattended run is not grounds to turn a swarm on that the machine's default left off, nor to spend the full description panel where it left the one-shot.
+**Every flag but `--merge` and `--max-rounds` belongs to the fix skill.** `--branch`, `--quick-description`, `--diagram` and `--review` are resolved there, against this machine's defaults, and this skill does not second-guess any of them. In particular, an unattended run is not grounds to turn a swarm on that the machine's default left off, nor to spend the full description panel where it left the inline write.
 
 **The swarm and the diagram are this skill's to run, and that is about *where*, not whether.** The fix skill deliberately does not run either on an autopilot run. `review-code` fires at **Step 5b**, in the turn that arms the watcher, because the branch is pushed by then and `fix-feedback` needs a merge request to anchor each confirmed finding to — fired before the push, those findings would have nowhere to land. `changes-diagram` runs at **Step 11**, once the code has stopped moving. On a `--branch default` run neither reasoning survives, because there is never going to be a merge request: the fix skill runs its own diagram and its own swarm there, and Steps 5b and 11's attach are skipped.
 
@@ -316,7 +318,7 @@ Invoke `commit-msg` with the `Skill` tool and commit with the message it produce
 
 **On a hand-off the description already exists** — the fix skill produced it before handing over. Use it as it stands; do not regenerate it, and do not run a second panel over the same diff. Regenerate only on an explicit `--quick-description false` amendment (see **Amending a run in flight**).
 
-On a direct invocation the fix skill you called in Step 1 produced it, the same way. If for any reason there is no description in hand, invoke `changes-description` with the `Skill` tool, passing `--one-shot` when `--quick-description` is true and no flag at all when it is false.
+On a direct invocation the fix skill you called in Step 1 produced it, the same way. If for any reason there is no description in hand, invoke `changes-description` with the `Skill` tool, passing `--inline` when `--quick-description` is true — it then writes the description in that same turn, with no workflow, no run ID and no yielded turn — and no flag at all when it is false.
 
 **On a `--branch default` run there is no description field to fill**, so the text is the change summary that goes into the Step 11 report and, where it is short enough to belong there, the commit body. Everything below still governs it: a summary nobody will read on a merge request is not licence to write it carelessly, because it is the only account of the change a reader will ever get.
 
@@ -394,7 +396,7 @@ Each time the watcher wakes you, gather the current state — MR state, pipeline
 
 1. **Unresolved threads exist, or the Step 5b swarm has reported confirmed findings** (whatever the pipeline is doing) → invoke `fix-feedback --autonomous` with the `Skill` tool. It takes both sources as one queue: its Mode B reads the swarm's findings out of the conversation, and its Step 3b posts every finding the merge request does not already carry as an anchored comment *before* fixing any of them — so a swarm finding becomes a thread on the merge request like any other, and survives this run. If the pipeline has also failed, diagnose it in the same pass and fold the fix into the **same push** — never push twice. Then return to the watcher.
 2. **Pipeline failed, no open threads** → Step 7.
-3. **Approved and green** → Step 8.
+3. **Approved and green, with every review this run commissioned already reported** → Step 8. Approved and green while the Step 5b swarm is still in flight is **not** this branch — that is branch 5, keep waiting. On a repository with no infrastructure plan this distinction costs one wait; on one with a plan, Step 8's gate depends on it.
 4. **Approved, pipeline still running** → keep waiting.
 5. **No verdict yet** → keep waiting. Do not babysit jobs unrelated to the review.
 
@@ -428,13 +430,32 @@ Job ids are per-pipeline: after any push, re-resolve the pipeline and its jobs b
 
 Detect it: fetch the MR's raw notes (not just discussion threads — the bot usually posts plain notes, which a thread-only fetch discards) and look for notes authored by `iac_bot`. None means this gate does not apply; go to Step 9.
 
+### A green plan is not a reviewed change
+
+**The review has to have passed before the apply comment goes up.** A successful plan says the configuration is valid and shows what would change; it says nothing about whether that change should happen. The apply is the step that touches real infrastructure and the least reversible thing this run does — a destroyed resource, a recreated database or a rotated credential is not undone by closing the merge request afterwards. So the apply waits on the same review the merge waits on, and it waits on it **first**, not alongside it.
+
+Posting the apply comment requires all of these. Check them in order, and check them again after any push, since a push revokes the approval and re-triggers the review:
+
+1. **Every review this run commissioned has reported.** The forge's reviewer has produced a verdict, and — where `--review` resolved to `true` — the Step 5b swarm has finished. Both where both are relevant. A swarm still in flight is a review that has not reported, however green the plan and the pipeline are.
+2. **The verdict is a pass**, not silence. An approval, or a review whose findings are all resolved. A verdict that cannot arrive is not a pass either: where Step 6 established that the configured reviewer is not installed in this repository, that review does not exist and condition 4 governs.
+3. **No open feedback is left on the change.** No unresolved reviewer threads, and every confirmed swarm finding either fixed or answered on its thread. An open finding is feedback that may change what the plan does, and applying first spends the review.
+4. **Where no review of any kind was available, review it yourself before applying.** Both absent — no reviewer installed here and `--review false` — means nothing has read this change but the bot that planned it. Do the review yourself, as Step 6 already requires when the configured reviewer cannot run: read the plan output directory by directory, read the diff against what the plan says it will create, change and destroy, and record in the run notes that it was your own review and what you checked. Then apply. **Never apply on a green plan with no review of any kind behind it** — that is the case this gate exists for.
+
+A plan that would **destroy or recreate** anything is a Step 10 escalation whatever the review said. Raise the question there rather than settling it inside your own review.
+
+**`--merge false` does not switch this step off.** The gate is the review, not the merge: on an infrastructure change, landing it means apply *then* merge, so once the review has passed the apply happens and Step 9 then holds the merge for a human. What `--merge false` holds back is the merge.
+
+In a stack, each member clears its own gate. A predecessor's review says nothing about this change.
+
+### Running the apply
+
 Collect every directory the bot reported a plan for using `iac_plan_marker`. Run the apply by posting the comment the bot expects, once and idempotently. Then wait — via the watcher, not a sleep loop — until **every** planned directory has reported `iac_apply_marker`.
 
 - Every planned directory shows the apply marker → Step 9.
 - An apply reported an error → **stop, do not merge, and escalate.** A failed infrastructure apply can leave partial state, and that needs a person.
 - Nothing yet → keep waiting.
 
-Run this gate **after** approval, because the bot will usually refuse to apply before the MR meets its approval requirements.
+The gate also sits after the forge's own approval requirements for a practical reason on top of the review one: the bot will usually refuse to apply before the MR meets them.
 
 ## Step 9: Merge
 
@@ -449,9 +470,31 @@ Check `require_human_approval` first. When it is true, a review bot's approval *
 
 Then keep watching until the state is actually `merged`. Auto-merge can be cancelled by a failing pipeline or a new push, so arming it is not the same as it having happened.
 
-Once it is merged, go to **Step 10b**. The merge is not the end of the run: the change has not reached anything yet.
-
 If the merge is refused, report the exact blocker. Rebase if the forge says the branch is behind; surface anything else.
+
+### 9a. Delete the source branch
+
+Once the state reads back as `merged`, delete the branch from the remote:
+
+```bash
+git push "$DEFAULT_REMOTE" --delete "$BRANCH_NAME"
+```
+
+**This is part of merging, not tidying up afterwards.** A merged branch left on the remote is not cosmetic. `wtclean` decides a worktree is finished by its branch's upstream being **gone**, and that is its only signal — so a surviving remote branch means the worktree, the local branch and the whole checkout sit there indefinitely, and the user ends up pruning by hand the thing the run was supposed to finish. Observed exactly that way: three merged change requests, three branches still on the remote, and `wtc -y` reporting nothing to remove.
+
+Five rules:
+
+- **Only after the merged state has been read back.** Never alongside arming auto-merge, and never on a refused, cancelled or still-pending merge. Until the merge actually lands, that branch is the only copy of the work.
+- **Already gone is the goal, not a failure.** The forge may have done it first — a change request here is opened with its remove-source-branch flag set where the forge has one, and a repository may carry its own delete-on-merge setting. `remote ref does not exist` means the job is done; report it that way rather than as an error.
+- **Only this run's own branch.** Never the default branch, never a branch belonging to another change request, never a branch this run did not push. Rule 5's one-branch scope covers the delete exactly as it covers the push.
+- **In a stack, one member's branch is the next member's base.** Delete it only once no open change request targets it. Where one still does, retarget that change request at the default branch first: some forges do that themselves when a base branch is deleted and some leave the dependent change request pointing at nothing, and *some* is not a thing to rely on. Step 10 merges in order, so in the normal case the successor has already merged or been retargeted by the time this runs.
+- **The worktree and the local branch are not yours to remove.** This run is standing in that worktree, and no skill here removes one — it may hold work the user still wants. Deleting the remote branch is what lets `wtclean` see it, and that division of labour is the design: the run reports the work finished, the user's own command reclaims the disk.
+
+**A human who merges mid-run leaves the same branch behind.** Where Step 4b finds the change request already merged by somebody else, delete the source branch the same way, under the same five rules.
+
+**On `--merge false` nothing is deleted**, because nothing was merged. Say in the Step 11 report that the branch stays until whoever merges it deletes it — and where the forge has no per-change-request flag for this, name its repository-level delete-on-merge setting as the fix, so the user changes one setting once rather than deleting a branch per change request.
+
+Then go to **Step 10b**. The merge is not the end of the run: the change has not reached anything yet.
 
 ## Step 10: Several Merge Requests, In Order
 
