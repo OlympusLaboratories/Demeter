@@ -930,6 +930,15 @@ main() {
     fi
   done
 
+  local transform_check="$REPO_DIR/profiles/check-transform.py"
+  if [[ -f "$transform_check" ]] && command -v python3 >/dev/null 2>&1; then
+    echo ""
+    bold "Checking profile drift ..."
+    if ! python3 "$transform_check" check --warn-only --quiet; then
+      warn "Drift check failed to run. Try: python3 profiles/check-transform.py check"
+    fi
+  fi
+
   echo ""
   success "Done! You may need to restart your shell for changes to take effect."
 }

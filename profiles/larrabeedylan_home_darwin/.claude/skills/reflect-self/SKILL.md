@@ -12,12 +12,12 @@ learned" — that means the answer is not done until it says why).
 
 ## Step 2: Read the weekly reports
 
-Read every file in `context/`. They're written by the `reflect-week` skill: merged MRs,
+Read every file in `context/`. They're written by the `reflect-week` skill: merged PRs,
 Done Linear tickets, in-progress tickets, Slack collaboration, OKR mapping, evidence
 highlights. The period to cover is whatever the prompts name (e.g. "Q1 and Q2").
 
 If the reports don't cover the whole period (there are usually gaps), say so **once**,
-briefly, and offer to pull the missing window from Linear/GitLab. Don't belabor it.
+briefly, and offer to pull the missing window from Linear/GitHub. Don't belabor it.
 
 ## Step 3: Pick the accomplishments — get the altitude right
 
@@ -36,10 +36,10 @@ This is where the first drafts failed hardest. Rules:
 
 **Every claim must trace to something you can point at.** Reviews are read line by line;
 anything the user can't defend gets them "hey, can you explain what you meant here?"
-Before writing a claim, find the Done ticket or merged MR behind it.
+Before writing a claim, find the Done ticket or merged PR behind it.
 
 - **Do not present in-progress / draft / in-review work as delivered.** Check ticket
-  status and whether MRs actually merged. "Delivered X" when X is a draft MR is the
+  status and whether PRs actually merged. "Delivered X" when X is a draft PR is the
   exact thing that gets flagged.
 - **No editorializing adjectives.** Cut "durable," "robust," "significant," "seamless,"
   "huge" (unless the *user* chooses to add them — see below).

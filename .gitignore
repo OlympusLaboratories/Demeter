@@ -12,4 +12,5 @@ profiles/*/.claude/skills/reflect-peer/prompts.md
 profiles/*/.claude/skills/plan-initiative/team.md
 __pycache__/
 *.pyc
+*.bak*
 profiles/*/.claude/notify.json

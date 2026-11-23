@@ -17,7 +17,7 @@ flattering entry produces a worse plan than a blunt one.
 
 - **Role:** Staff engineer — usually the initiative owner
 - **Seniority:** Senior/staff
-- **Specialties:** Platform services, Temporal workflows, GitLab CI, data pipelines
+- **Specialties:** Platform services, Temporal workflows, CI pipelines, data pipelines
 - **Ramps slowly on:** Frontend state management
 - **Capacity:** Full, minus ~1 day/week of review and meetings
 - **Notes:** Holds the model on most platform work — critical-path tasks in that area

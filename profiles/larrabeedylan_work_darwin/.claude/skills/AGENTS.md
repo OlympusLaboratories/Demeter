@@ -16,7 +16,7 @@ Each skill is a subdirectory containing a `SKILL.md` file that defines the skill
 | `docs-humanize` | Adversarial five-persona swarm (archivist / skimmer / newcomer / slop hawk / doer) that rebuilds an AI-written Notion page, markdown file or Linear ticket into something a human reads once and acts on — builds a fact ledger first, then proves against it that nothing real was lost and nothing was invented (uses the Workflow tool; prints a `wf_…` run ID to watch live with `wfwatch <id>`) |
 | `docs-update` | Audit and update README.md and AGENTS.md to reflect current repo state |
 | `autopilot` | A mode switched on over `fix-linear` or `fix-freeform`, never a task of its own — it overrides none of that skill's flags and adds only the automation: commits, commits, describes, pushes, opens the MR, watches the pipeline and the review bot with `Monitor`, runs a `review-code` swarm alongside that bot, works the review clean, applies infrastructure plans, merges stacked changes in order, and pings you when done or stuck |
-| `fix-feedback` | Work through review feedback — MR/PR threads or a local review agent's output |
+| `fix-feedback` | Work through review feedback — merge request threads or a local review agent's output |
 | `fix-freeform` | `fix-linear` without a ticket — implements a freeform problem statement. Defaults to the repo's default branch, a one-shot description, no diagram and no review swarm (`--review true` opts in); escalates to a feature branch on its own when the change touches Terraform, the default branch is protected, or the tree has unrelated uncommitted work |
 | `fix-linear` | Linear ticket implementation. After the description it defaults to both a call-flow diagram and a `review-code` swarm over the branch (`--diagram false` / `--review false` to skip either) |
 | `ping` | Send yourself a push notification carrying what this session is doing and what it needs. Invoked directly, or by another skill handing over a status, a question, a blocker or a finished run. The notification is one-way — answering from a phone is Remote Control, which is armed at session startup because no skill can run a slash command, and which `/ping off` therefore does not disconnect |
@@ -41,28 +41,31 @@ Two facts those four skills depend on: a workflow reports `completed` even when 
 
 ## GitLab Data
 
-MR-related skills (`explain`, `mr-description`, `feedback`, `eng-snippet`) use `~/.claude/scripts/gitlab-api.sh` for all GitLab API access. The script reads the GitLab token from `~/.claude/.mcp.json` so tokens never enter conversation context.
+MR-related skills (`changes-explain`, `fix-feedback`, `fix-linear`, `fix-freeform`, `reflect-week`) name `~/.claude/scripts/gitlab-api.sh` directly; `autopilot` reaches it through `skill-env.sh`'s `api_script` instead, which is the form a new skill should copy. The script reads the GitLab token from `~/.claude/.mcp.json` so tokens never enter conversation context. Run it with `help` to get every subcommand and its arguments, generated from the script's own source.
 
 `fix-feedback` is the only one that **writes** through it, and both writes are gated on an explicit yes in chat: Step 3b opens one new anchored discussion per unique review-swarm finding (`create-diff-comment` — body over stdin, so the single-quote rule that governs `reply-to-thread` does not apply; falls back to an unanchored note when the line sits outside the MR diff or the commit is unpushed), and Step 7b replies into an existing thread (`reply-to-thread`). `mr-for-branch` finds the MR when only the branch is known — both its arguments accept `-` to derive the project from `origin` and the branch from `HEAD`.
 
 ## User Data
 
 Some skills accumulate context data that is NOT tracked in git:
-- `eng-snippet/slack-context.md` — ephemeral Slack threads pasted before each run
-- `performance-review-self/context/` — weekly self-reports
-- `performance-review-peer/context/` — per-peer collaboration profiles
-- `performance-review-*/prompts.md` — review questions pasted per cycle
+- `reflect-week/slack-context.md` — ephemeral Slack threads pasted before each run
+- `reflect-self/context/` — weekly self-reports
+- `reflect-peer/context/` — per-peer collaboration profiles
+- `reflect-self/prompts.md`, `reflect-peer/prompts.md` — review questions pasted per cycle
 - `plan-initiative/team.md` — team roster (seniority, specialties, ramp areas, capacity); `team.example.md` is the tracked template
 
-These files are gitignored. The install script creates necessary directories.
+These files are gitignored, and the paths above are the ones the root `.gitignore` actually names — an entry here that does not appear there is tracking a file somebody will commit by accident. The installer creates the two `context/` directories; the rest are created on first use.
 
 ## Skill Environment
 
 Nothing in a skill may hardcode the forge, the AI reviewer's username, the infrastructure
-bot, or the artifact store. Those differ between the work profiles (GitLab, Claude
-Artifacts) and home (GitHub, a self-hosted store), and a skill that bakes one machine's
-answer in fails silently on the other — grepping for the wrong bot username finds no
-threads and reports a clean review.
+bot, or the artifact store. Every one of them differs between the work profiles and home,
+and a skill that bakes one machine's answer in fails silently on the other — grepping for
+the wrong bot username finds no threads and reports a clean review. This paragraph names
+none of those values on purpose, because it is subject to its own rule: a sentence saying
+which profile is on which forge cannot survive the work→home transform, which rewrites the
+forge name wherever it appears, so the two copies drift into contradicting each other. Ask
+`skill-env.sh`.
 
 `~/.claude/scripts/skill-env.sh` is the seam. It carries this profile's defaults **in its
 own code** and merges `~/.claude/environment.json` over them, so a missing or malformed
@@ -112,7 +115,7 @@ rather than reimplementing them: the fix skill, then `commit-msg`,
   has already forced a feature branch for Terraform, a protected default branch, or a dirty
   tree.
 - **It supersedes `fix-linear`/`fix-freeform` Important Rule 1** (never push, never open a
-  change request) for the one branch it created, and for nothing else. That carve-out is
+  merge request) for the one branch it created, and for nothing else. That carve-out is
   written into `autopilot` explicitly; it is not something an agent may infer.
 - **It may ask, but asking is the exception.** Remote Control makes a mid-run
   `AskUserQuestion` answerable from a phone, so the calls that are expensive to get wrong
