@@ -64,10 +64,15 @@ fi
 
 OWNER=$(env_get mnemosyne_user)
 remote_publish() {
+  local command="publish-artifact"
+  local argument
+  for argument in "$@"; do
+    command+=" $(printf '%q' "$argument")"
+  done
   if [[ -n "$OWNER" ]]; then
-    ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "sudo -n -u $OWNER publish-artifact $*"
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "sudo -n -u $OWNER $command"
   else
-    ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "publish-artifact $*"
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "$command"
   fi
 }
 
@@ -100,9 +105,4 @@ if [[ -n "$OWNER" ]]; then
   ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "chmod a+r '$REMOTE_PATH'" || true
 fi
 
-quoted=()
-for argument in "$@"; do
-  quoted+=("$(printf '%q' "$argument")")
-done
-
-remote_publish "$(printf '%q' "$REMOTE_PATH")" "${quoted[@]+${quoted[@]}}"
+remote_publish "$REMOTE_PATH" "$@"

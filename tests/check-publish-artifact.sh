@@ -18,6 +18,11 @@ publish-artifact.sh, checked over every profile copy:
   publish-artifact on PATH                    runs it locally, forwards every argument
   a missing source file                       exits 1, never 3
   no arguments                                exits 1
+  no publish-artifact on PATH                 scp the file, then run it over ssh
+  mnemosyne_user set                          the remote command is sudo -n -u <user>
+  mnemosyne_user empty                        no sudo in the remote command
+  an argument containing spaces               arrives at the remote argv intact
+  after publishing                            the remote temp file is removed
 
 exit 3 is the "no self-hosted store here" answer and must never be confused with a
 failure: the callers fall through to the Artifact tool on 3, and report on anything else.
@@ -102,6 +107,103 @@ LOCAL
   fi
   checked=$((checked + 1))
   rm -f "$WORK/args.txt"
+
+  mkdir -p "$WORK/fake"
+  cat >"$WORK/fake/scp" <<'FAKESCP'
+#!/usr/bin/env bash
+target=""
+for a in "$@"; do target="$a"; done
+printf '%s\n' "$target" >>"$SCP_LOG"
+printf '%s\n' "$@" | tail -2 | head -1 >"$SCP_SOURCE"
+exit 0
+FAKESCP
+  cat >"$WORK/fake/ssh" <<'FAKESSH'
+#!/usr/bin/env bash
+command=""
+for a in "$@"; do command="$a"; done
+printf '%s\n' "$command" >>"$SSH_LOG"
+case "$command" in
+  rm\ -f*) exit 0 ;;
+esac
+remote=${command#sudo -n -u * }
+if [[ "$command" == "$remote" ]]; then remote="$command"; fi
+PATH="$FAKE_REMOTE_BIN:$PATH" bash -c "$remote"
+FAKESSH
+  chmod +x "$WORK/fake/scp" "$WORK/fake/ssh"
+
+  mkdir -p "$WORK/remotebin"
+  cat >"$WORK/remotebin/publish-artifact" <<'REMOTE'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >"$REMOTE_ARGS"
+echo "https://example.invalid/abc"
+REMOTE
+  chmod +x "$WORK/remotebin/publish-artifact"
+
+  rm -f "$WORK/ssh.log" "$WORK/scp.log" "$WORK/remote-args.txt"
+  out=$(
+    SCP_LOG="$WORK/scp.log" SCP_SOURCE="$WORK/scp-source.txt" \
+    SSH_LOG="$WORK/ssh.log" REMOTE_ARGS="$WORK/remote-args.txt" \
+    FAKE_REMOTE_BIN="$WORK/remotebin" \
+    PATH="$WORK/fake:/usr/bin:/bin" \
+    SKILL_ENV="$WORK/reachable/skill-env.sh" \
+    "$script" "$page" --folder 'A/B' --title 'My Plan' --description "it's fine" 2>/dev/null
+  )
+  check "$profile: remote publish exits 0" 0 $?
+
+  if [[ "$out" != "https://example.invalid/abc" ]]; then
+    printf '  fail — %s: remote URL not printed (got %s)\n' "$profile" "${out:-<empty>}"
+    failures=$((failures + 1))
+  fi
+  checked=$((checked + 1))
+
+  if ! grep -q 'sudo -n -u someuser publish-artifact' "$WORK/ssh.log"; then
+    printf '  fail — %s: remote command is not run as mnemosyne_user\n      %s\n' \
+      "$profile" "$(head -1 "$WORK/ssh.log" 2>/dev/null)"
+    failures=$((failures + 1))
+  fi
+  checked=$((checked + 1))
+
+  want_argv="--folder
+A/B
+--title
+My Plan
+--description
+it's fine"
+  got_argv=$(tail -n +2 "$WORK/remote-args.txt" 2>/dev/null)
+  if [[ "$got_argv" != "$want_argv" ]]; then
+    printf '  fail — %s: remote argv mangled\n      want: %s\n      got:  %s\n' \
+      "$profile" "$(printf '%s' "$want_argv" | tr '\n' '|')" "$(printf '%s' "$got_argv" | tr '\n' '|')"
+    failures=$((failures + 1))
+  fi
+  checked=$((checked + 1))
+
+  if ! head -1 "$WORK/remote-args.txt" 2>/dev/null | grep -q '^/tmp/demeter-'; then
+    printf '  fail — %s: remote path is not the copied temp file\n' "$profile"
+    failures=$((failures + 1))
+  fi
+  checked=$((checked + 1))
+
+  if ! grep -q '^rm -f ' "$WORK/ssh.log"; then
+    printf '  fail — %s: remote temp file is never removed\n' "$profile"
+    failures=$((failures + 1))
+  fi
+  checked=$((checked + 1))
+
+  fake_env "$WORK/nouser" auto somehost
+  sed -i.bak "s/echo 'someuser'/echo ''/" "$WORK/nouser/skill-env.sh" && rm -f "$WORK/nouser/skill-env.sh.bak"
+  rm -f "$WORK/ssh.log"
+  SCP_LOG="$WORK/scp.log" SCP_SOURCE="$WORK/scp-source.txt" \
+  SSH_LOG="$WORK/ssh.log" REMOTE_ARGS="$WORK/remote-args.txt" \
+  FAKE_REMOTE_BIN="$WORK/remotebin" \
+  PATH="$WORK/fake:/usr/bin:/bin" \
+  SKILL_ENV="$WORK/nouser/skill-env.sh" \
+  "$script" "$page" >/dev/null 2>&1
+  check "$profile: empty mnemosyne_user still publishes" 0 $?
+  if grep -q 'sudo' "$WORK/ssh.log"; then
+    printf '  fail — %s: sudo used even though mnemosyne_user is empty\n' "$profile"
+    failures=$((failures + 1))
+  fi
+  checked=$((checked + 1))
 done
 
 echo "publish-artifact.sh"
