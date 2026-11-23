@@ -23,6 +23,12 @@ publish-artifact.sh, checked over every profile copy:
   mnemosyne_user empty                        no sudo in the remote command
   an argument containing spaces               arrives at the remote argv intact
   after publishing                            the remote temp file is removed
+  --purpose plan, plan_folder set             --folder <value> reaches the remote argv
+  --purpose plan, plan_folder empty           no --folder at all
+  --purpose diagram                           uses diagram_folder, not plan_folder
+  --purpose nonsense                          exits 1
+  --purpose under zsh and under bash          identical remote argv
+  --purpose on the local path                 --folder reaches the local argv too
 
 exit 3 is the "no self-hosted store here" answer and must never be confused with a
 failure: the callers fall through to the Artifact tool on 3, and report on anything else.
@@ -188,6 +194,99 @@ it's fine"
     failures=$((failures + 1))
   fi
   checked=$((checked + 1))
+
+  purpose_env() {
+    local dir="$1" plan="$2" diagram="$3"
+    mkdir -p "$dir"
+    cat >"$dir/skill-env.sh" <<ENVSCRIPT
+#!/usr/bin/env bash
+[[ "\$1" == "get" ]] || exit 1
+case "\$2" in
+  artifact_store) echo 'auto' ;;
+  mnemosyne_host) echo 'somehost' ;;
+  mnemosyne_user) echo 'someuser' ;;
+  plan_folder) echo '$plan' ;;
+  diagram_folder) echo '$diagram' ;;
+  *) echo '' ;;
+esac
+ENVSCRIPT
+    chmod +x "$dir/skill-env.sh"
+  }
+
+  run_remote() {
+    local env_file="$1"
+    shift
+    rm -f "$WORK/remote-args.txt"
+    SCP_LOG="$WORK/scp.log" SCP_SOURCE="$WORK/scp-source.txt" \
+    SSH_LOG="$WORK/ssh.log" REMOTE_ARGS="$WORK/remote-args.txt" \
+    FAKE_REMOTE_BIN="$WORK/remotebin" \
+    PATH="$WORK/fake:/usr/bin:/bin" \
+    SKILL_ENV="$env_file" \
+    "$script" "$@" >/dev/null 2>&1
+  }
+
+  purpose_env "$WORK/purpose" 'P/Plans' 'P/Diagrams'
+  purpose_env "$WORK/nofolders" '' ''
+
+  rm -f "$WORK/args.txt"
+  LOCAL_ARGS="$WORK/args.txt" PATH="$WORK/bin:$PATH" \
+    SKILL_ENV="$WORK/purpose/skill-env.sh" "$script" "$page" --purpose plan >/dev/null 2>&1
+  check "$profile: --purpose plan on the local path" 0 $?
+  if ! grep -qx -- '--folder' "$WORK/args.txt" 2>/dev/null \
+    || ! grep -qx 'P/Plans' "$WORK/args.txt" 2>/dev/null; then
+    printf '  fail — %s: --purpose plan did not reach the local argv\n      got: %s\n' \
+      "$profile" "$(tr '\n' '|' <"$WORK/args.txt" 2>/dev/null)"
+    failures=$((failures + 1))
+  fi
+  checked=$((checked + 1))
+  rm -f "$WORK/args.txt"
+
+  run_remote "$WORK/purpose/skill-env.sh" "$page" --purpose plan --expires 7d
+  check "$profile: --purpose plan publishes" 0 $?
+  if ! grep -qx -- '--folder' "$WORK/remote-args.txt" 2>/dev/null \
+    || ! grep -qx 'P/Plans' "$WORK/remote-args.txt" 2>/dev/null; then
+    printf '  fail — %s: --purpose plan did not send --folder P/Plans\n      got: %s\n' \
+      "$profile" "$(tr '\n' '|' <"$WORK/remote-args.txt" 2>/dev/null)"
+    failures=$((failures + 1))
+  fi
+  checked=$((checked + 1))
+
+  run_remote "$WORK/purpose/skill-env.sh" "$page" --purpose diagram
+  if ! grep -qx 'P/Diagrams' "$WORK/remote-args.txt" 2>/dev/null; then
+    printf '  fail — %s: --purpose diagram did not use diagram_folder\n' "$profile"
+    failures=$((failures + 1))
+  fi
+  checked=$((checked + 1))
+
+  run_remote "$WORK/nofolders/skill-env.sh" "$page" --purpose plan
+  if grep -qx -- '--folder' "$WORK/remote-args.txt" 2>/dev/null; then
+    printf '  fail — %s: an empty plan_folder still sent --folder\n' "$profile"
+    failures=$((failures + 1))
+  fi
+  checked=$((checked + 1))
+
+  run_remote "$WORK/purpose/skill-env.sh" "$page" --purpose nonsense
+  check "$profile: --purpose nonsense" 1 $?
+
+  for shell in zsh bash; do
+    command -v "$shell" >/dev/null 2>&1 || continue
+    rm -f "$WORK/remote-args.txt"
+    "$shell" -c "
+      SCP_LOG='$WORK/scp.log' SCP_SOURCE='$WORK/scp-source.txt'
+      SSH_LOG='$WORK/ssh.log' REMOTE_ARGS='$WORK/remote-args.txt'
+      FAKE_REMOTE_BIN='$WORK/remotebin'
+      export SCP_LOG SCP_SOURCE SSH_LOG REMOTE_ARGS FAKE_REMOTE_BIN
+      PATH='$WORK/fake:/usr/bin:/bin' SKILL_ENV='$WORK/purpose/skill-env.sh' \
+        '$script' '$page' --purpose plan --expires 7d >/dev/null 2>&1
+    "
+    if ! grep -qx -- '--folder' "$WORK/remote-args.txt" 2>/dev/null \
+      || ! grep -qx 'P/Plans' "$WORK/remote-args.txt" 2>/dev/null; then
+      printf '  fail — %s: --purpose plan is wrong under %s\n      got: %s\n' \
+        "$profile" "$shell" "$(tr '\n' '|' <"$WORK/remote-args.txt" 2>/dev/null)"
+      failures=$((failures + 1))
+    fi
+    checked=$((checked + 1))
+  done
 
   fake_env "$WORK/nouser" auto somehost
   sed -i.bak "s/echo 'someuser'/echo ''/" "$WORK/nouser/skill-env.sh" && rm -f "$WORK/nouser/skill-env.sh.bak"

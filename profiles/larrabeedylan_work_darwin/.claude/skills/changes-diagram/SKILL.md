@@ -114,17 +114,18 @@ Re-running for the same branch: rebuild, then publish **the same file path**. Th
 ### `mnemosyne` — publish with the shared script
 
 ```bash
-FOLDER=$(~/.claude/scripts/skill-env.sh get diagram_folder)
 ~/.claude/scripts/publish-artifact.sh <rendered>.html \
-  ${FOLDER:+--folder "$FOLDER"} \
+  --purpose diagram \
   --title '<short noun phrase naming the change>' \
   --description '<one sentence, naming the branch>'
 ```
 
-It prints the URL on stdout. `diagram_folder` is empty on a machine with no folder to
-file into, and the `${FOLDER:+…}` form then omits the flag rather than passing an empty
-one — **never substitute a folder name of your own**, because publishing refuses a folder
-that does not exist and the run loses its diagram to a guess.
+It prints the URL on stdout. `--purpose diagram` makes the script look up
+`diagram_folder` itself and omit the flag when that key is empty — **never pass
+`--folder` with a name of your own**, because publishing refuses a folder that does not
+exist and the run loses its diagram to a guess. The conditional form this replaced,
+`${FOLDER:+--folder "$FOLDER"}`, is not shell-portable: bash splits it into two
+arguments and zsh keeps it as one, so it fused the flag onto its value.
 
 **Exit status 3 is not a failure.** It means this machine has no self-hosted store, which
 is the ordinary answer on most of them. Fall through to the next option. Any other
