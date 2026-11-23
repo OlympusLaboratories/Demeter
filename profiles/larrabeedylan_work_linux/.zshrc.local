@@ -62,6 +62,15 @@ _wt_main_root() {
   git worktree list --porcelain 2>/dev/null | awk '/^worktree /{ print substr($0, 10); exit }'
 }
 
+# Name of the default branch, from the remote's HEAD with a main/master fallback
+_wt_default_branch() {
+  local d
+  d=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
+  [ -n "$d" ] || d=$(git branch -r 2>/dev/null | grep -E 'origin/(main|master)$' | head -1 | sed 's@.*origin/@@')
+  [ -n "$d" ] || d=main
+  printf '%s\n' "$d"
+}
+
 # One "<path><TAB><branch>" line per worktree; branch is "(detached)" when headless
 _wt_list() {
   git worktree list --porcelain 2>/dev/null | awk '
@@ -192,6 +201,8 @@ wtl() {
 #   Removes worktrees whose branch was deleted on the remote, or whose last
 #   commit is older than N days (default $WT_STALE_DAYS). Merged branches are
 #   deleted too; unmerged stale ones are kept and reported.
+#   Then sweeps local branches that no worktree holds -- merged, or gone from
+#   the remote and merged -- since the worktree pass can never see those.
 #   Dry run unless -y. Never touches the main working tree, the worktree you are
 #   standing in, a detached-HEAD worktree, or one with uncommitted changes.
 wtclean() {
@@ -212,7 +223,7 @@ wtclean() {
   done
   case "$days" in ''|*[!0-9]*) echo "wtclean: --days needs a number" >&2; return 2 ;; esac
 
-  local root here list wp branch kind reason last cutoff removed=0 skipped=0
+  local root here list wp branch kind reason last cutoff removed=0 skipped=0 branches=0
   root=$(_wt_main_root)
   here=$(git rev-parse --show-toplevel 2>/dev/null)
 
@@ -276,11 +287,55 @@ wtclean() {
     fi
   done <<< "$list"
 
+  # Branches no worktree holds. The loop above only ever sees a branch some
+  # worktree has checked out, so a branch whose worktree went earlier -- or that
+  # never had one -- is invisible to it and survives every run.
+  if [ "$keep_branches" -eq 0 ]; then
+    local def held b bstate bmerged
+    def=$(_wt_default_branch)
+    held=$(_wt_list | cut -f2)
+    while IFS= read -r b; do
+      [ -n "$b" ] || continue
+      [ "$b" = "$def" ] && continue
+      printf '%s\n' "$held" | grep -Fxq -- "$b" && continue
+
+      bmerged=0
+      if git -C "$root" rev-parse --verify --quiet "refs/remotes/origin/$def" >/dev/null &&
+         git -C "$root" merge-base --is-ancestor "$b" "refs/remotes/origin/$def" 2>/dev/null; then
+        bmerged=1
+      fi
+      bstate=$(_wt_upstream_state "$b")
+
+      if [ "$bmerged" -eq 1 ] && [ "$bstate" = "gone" ]; then
+        reason="merged, and gone from the remote"
+      elif [ "$bmerged" -eq 1 ]; then
+        reason="already merged into $def"
+      elif [ "$bstate" = "gone" ]; then
+        echo "  skip     branch $b — gone from the remote but never merged ('git branch -D $b' to drop it)"
+        skipped=$((skipped + 1))
+        continue
+      else
+        continue
+      fi
+
+      if [ "$apply" -eq 0 ]; then
+        echo "  would delete  branch $b — $reason"
+      elif git -C "$root" branch -D "$b" >/dev/null 2>&1; then
+        echo "  deleted  branch $b — $reason"
+      else
+        echo "  skip     branch $b — git refused to delete it ($reason)"
+        skipped=$((skipped + 1))
+        continue
+      fi
+      branches=$((branches + 1))
+    done <<< "$(git -C "$root" for-each-ref --format='%(refname:short)' refs/heads/)"
+  fi
+
   git -C "$root" worktree prune
   if [ "$apply" -eq 0 ]; then
-    printf '\n%d to remove, %d skipped. Re-run with -y to apply.\n' "$removed" "$skipped"
+    printf '\n%d worktree(s) to remove, %d branch(es) to delete, %d skipped. Re-run with -y to apply.\n' "$removed" "$branches" "$skipped"
   else
-    printf '\n%d removed, %d skipped.\n' "$removed" "$skipped"
+    printf '\n%d worktree(s) removed, %d branch(es) deleted, %d skipped.\n' "$removed" "$branches" "$skipped"
   fi
 }
 

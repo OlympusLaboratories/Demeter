@@ -83,8 +83,18 @@ reports nothing to do.
 wtclean                  # show what would go
 wtclean -y               # actually remove them
 wtclean --days 30 -y     # stricter staleness cutoff
-wtclean --keep-branches  # remove the worktrees, keep the local branches
+wtclean --keep-branches  # remove the worktrees, keep every local branch
 ```
+
+It then sweeps local branches **no worktree holds**, because the worktree pass can only
+ever see a branch some worktree has checked out — so a branch whose worktree went earlier,
+or that never had one, is invisible to it and survives every run. A branch goes when it is
+merged into the default branch (tested against `origin/<default>` by ancestry, not against
+your possibly-stale local copy), whether or not its remote branch is still there. Two cases
+are deliberately left alone: a branch **gone from the remote but never merged** is reported
+with the command to drop it rather than deleted, since its commits exist nowhere else, and a
+branch that was **never pushed** is untouched and unmentioned — that is work in progress.
+`--keep-branches` skips the sweep entirely.
 
 ## Cleanup is yours
 
