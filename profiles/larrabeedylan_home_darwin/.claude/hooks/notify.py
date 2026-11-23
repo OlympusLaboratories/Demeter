@@ -800,6 +800,50 @@ def classify(payload):
     return None, None
 
 
+CHANGE_REQUEST_RE = re.compile(
+    r"https?://[^\s<>\"')\]]+?/(?:pull/|-/merge_requests/)\d+")
+
+
+def remote_slug(cwd):
+    # "owner/repo" for the session's own remote, which is what separates this
+    # run's change request from any other URL the transcript happens to carry.
+    url = git(cwd or os.getcwd(), "remote", "get-url", "origin")
+    if not url:
+        return None
+    url = re.sub(r"\.git/?$", "", url.strip())
+    match = re.search(r"[:/]([^/:]+/[^/]+)$", url)
+    return match.group(1).lower() if match else None
+
+
+def change_request_in(chunk, slug=None):
+    # Recency alone is not enough: an example URL, a link to somebody else's
+    # change request, or this hook's own test fixtures all match the shape.
+    # Only a URL carrying the session's own owner/repo can be this run's, and
+    # where no remote resolves the honest answer is none rather than a guess.
+    found = [u.rstrip(".,;:") for u in CHANGE_REQUEST_RE.findall(chunk or "")]
+    if slug:
+        found = [u for u in found if slug in u.lower()]
+    else:
+        found = []
+    return found[-1] if found else None
+
+
+def change_request_for(transcript_path, state, cwd=None):
+    # Cached once found: the URL does not change for the life of the session,
+    # and the scan is over the same widening tail the title lookup uses.
+    if isinstance(state, dict):
+        cached = state.get("change_request")
+        if isinstance(cached, str) and cached.strip():
+            return cached.strip()
+    slug = remote_slug(cwd)
+    if not slug:
+        return None
+    found = scan_tail(transcript_path, lambda chunk: change_request_in(chunk, slug))
+    if found and isinstance(state, dict):
+        state["change_request"] = found
+    return found
+
+
 def body_for(kind, payload):
     if kind == "question":
         tool_input = payload.get("tool_input")
@@ -896,6 +940,16 @@ def handle(payload):
             log("anchored thread %s for %s" % (anchored, repo))
         else:
             log("anchor failed (%s); sending as root" % anchor_problem)
+
+    # Naming a change request without its link leaves the user hunting for it
+    # from a phone, and every rule telling a skill to include one is an
+    # instruction a model can forget. The transcript already holds the URL, so
+    # the hook appends it rather than trusting the body to carry it.
+    if "http" not in (envelope.get("body") or ""):
+        link = change_request_for(payload.get("transcript_path"), state, cwd)
+        if link:
+            envelope["body"] = ((envelope.get("body") or "").rstrip() + "\n" + link).strip()
+            log("appended change request link for %s" % repo)
 
     thread, problem = send(envelope)
     if problem:
@@ -1015,6 +1069,17 @@ def main():
         return cmd_test()
     if args and args[0] == "--disarm":
         return cmd_disarm(args[1:])
+    if args and args[0] == "--change-request":
+        session_id = args[1] if len(args) > 1 else ""
+        path = session_path(session_id) if session_id else None
+        state = (read_json(path, {}) or {}) if path else {}
+        if not isinstance(state, dict):
+            state = {}
+        before = state.get("change_request")
+        print(change_request_for(transcript_for(session_id), state, os.getcwd()) or "")
+        if path and state.get("change_request") and state.get("change_request") != before:
+            write_json(path, state)
+        return 0
     if args and args[0] == "--label":
         session_id = args[1] if len(args) > 1 else ""
         config, _ = load_config()
