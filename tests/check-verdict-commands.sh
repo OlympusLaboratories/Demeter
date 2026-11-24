@@ -2,7 +2,19 @@
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SCRIPT="$REPO/profiles/larrabeedylan_home_darwin/.claude/scripts/github-api.sh"
+
+# Every profile that ships the GitHub adapter, discovered rather than named. It
+# lives in one profile today because the work profiles ship gitlab-api.sh, which
+# is a separate implementation and not its transform -- check-transform.py has
+# both in PRESENCE_EXEMPT for that reason. Globbing means a second copy is
+# covered the day it appears, and that no copy at all is a failure rather than a
+# silent pass. The pi profile's scripts/ is a symlink into home_darwin, so it
+# ships the same file and is verified under its own name.
+SCRIPTS=()
+for candidate in "$REPO"/profiles/*/.claude/scripts/github-api.sh; do
+  [[ -e "$candidate" ]] || continue
+  SCRIPTS+=("$candidate")
+done
 
 REQUIRED=(
   pr-review-list
@@ -39,33 +51,44 @@ fi
 failures=0
 checked=0
 
-if [[ ! -x "$SCRIPT" ]]; then
-  echo "  fail — $SCRIPT is not executable"
+if ((${#SCRIPTS[@]} == 0)); then
+  echo "  fail — no profile ships .claude/scripts/github-api.sh"
   exit 1
 fi
 
-help_out="$("$SCRIPT" help 2>/dev/null)"
+for script in "${SCRIPTS[@]}"; do
+  profile="$(basename "$(dirname "$(dirname "$(dirname "$script")")")")"
 
-for name in "${REQUIRED[@]}"; do
   checked=$((checked + 1))
-  if ! grep -qE "^${name}[[:space:]]" <<<"$help_out"; then
-    printf '  fail — help does not list %s\n' "$name"
+  if [[ ! -x "$script" ]]; then
+    printf '  fail — %s: github-api.sh is not executable\n' "$profile"
     failures=$((failures + 1))
     continue
   fi
 
-  checked=$((checked + 1))
-  if ! grep -qE "^${name}[[:space:]]+<owner> <repo>" <<<"$help_out"; then
-    printf '  fail — %s has no argument list in help (its Usage line is missing or malformed)\n' "$name"
-    failures=$((failures + 1))
-  fi
+  help_out="$("$script" help 2>/dev/null)"
 
-  checked=$((checked + 1))
-  GITHUB_PERSONAL_ACCESS_TOKEN="" "$SCRIPT" "$name" >/dev/null 2>&1
-  if [[ $? -eq 0 ]]; then
-    printf '  fail — %s exited 0 with no arguments\n' "$name"
-    failures=$((failures + 1))
-  fi
+  for name in "${REQUIRED[@]}"; do
+    checked=$((checked + 1))
+    if ! grep -qE "^${name}[[:space:]]" <<<"$help_out"; then
+      printf '  fail — %s: help does not list %s\n' "$profile" "$name"
+      failures=$((failures + 1))
+      continue
+    fi
+
+    checked=$((checked + 1))
+    if ! grep -qE "^${name}[[:space:]]+<owner> <repo>" <<<"$help_out"; then
+      printf '  fail — %s: %s has no argument list in help (Usage line missing or malformed)\n' \
+        "$profile" "$name"
+      failures=$((failures + 1))
+    fi
+
+    checked=$((checked + 1))
+    if GITHUB_PERSONAL_ACCESS_TOKEN="" "$script" "$name" >/dev/null 2>&1; then
+      printf '  fail — %s: %s exited 0 with no arguments\n' "$profile" "$name"
+      failures=$((failures + 1))
+    fi
+  done
 done
 
 echo "verdict-clearing subcommands"
@@ -74,5 +97,6 @@ if ((failures)); then
   echo "failed ($failures of $checked checks)"
   exit 1
 fi
-printf '  ok   — %d checks over %d subcommands\n\n' "$checked" "${#REQUIRED[@]}"
+printf '  ok   — %d checks over %d subcommands in %d profile(s)\n\n' \
+  "$checked" "${#REQUIRED[@]}" "${#SCRIPTS[@]}"
 echo "passed"
