@@ -175,6 +175,29 @@ CASES = [
 ]
 
 
+def case_branch_beats_a_nearer_slug_match(module, directory, profile):
+    # The tail scan reads the last TAIL_CHUNK bytes first and stops on the
+    # first answer, so a per-chunk preference order silently degrades to
+    # "preferred within the tail". Push the branch-tagged record outside the
+    # tail and a slug-only record inside it.
+    path = os.path.join(directory, "%s-crosschunk.jsonl" % profile)
+    filler = json.dumps({"type": "assistant", "text": "filler " + "z" * 180})
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps({"type": "assistant", "text": opened_from(
+            REAL, BRANCH)}) + "\n")
+        written = 0
+        while written < module.TAIL_CHUNK * 2:
+            handle.write(filler + "\n")
+            written += len(filler) + 1
+        handle.write(json.dumps({"type": "assistant", "text": answered(
+            BASE)}) + "\n")
+    got = module.change_request_for(path, {}, REPO)
+    if got != REAL:
+        return ("the branch-tagged record outside the tail chunk lost to a"
+                " nearer slug match\n      want %r\n      got  %r" % (REAL, got))
+    return None
+
+
 def run(profile, directory):
     module = load(profile)
     module.remote_slug = lambda cwd=None: SLUG
@@ -193,6 +216,21 @@ def run(profile, directory):
                 "  %s\n      cache does not read back: %r"
                 % (label, state.get("change_request"))
             )
+            continue
+        if want and got == want and not cached:
+            stored = state.get("change_request")
+            if not isinstance(stored, dict):
+                failures.append(
+                    "  %s\n      the writer stored %r, not a {url, at} record,"
+                    " so nothing ever ages out" % (label, stored))
+            elif not isinstance(stored.get("at"), (int, float)):
+                failures.append(
+                    "  %s\n      the stored record carries at=%r, so the ttl"
+                    " cannot apply" % (label, stored.get("at")))
+    problem = case_branch_beats_a_nearer_slug_match(module, directory, profile)
+    if problem:
+        failures.append("  the session's branch wins across the whole"
+                        " transcript, not just the tail\n      %s" % problem)
     return failures
 
 

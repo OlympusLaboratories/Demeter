@@ -25,6 +25,7 @@ BODY_LIMIT = 1200
 GATE_TTL = 12 * 3600
 CHANGE_REQUEST_TTL = 4 * 3600
 RESERVED_TLDS = ("invalid", "test", "example", "localhost")
+RESTORE_URL_MAX = 2
 TAIL_CHUNK = 262144
 TAIL_LIMIT = 8 * 1024 * 1024
 TITLE_MAX = 48
@@ -713,10 +714,14 @@ def window(text, limit=SUMMARY_MAX_INPUT):
 
 
 def restore_urls(line, source):
-    missing = [url for url in urls_in(source) if url not in line]
+    present = set(urls_in(line))
+    missing = [url for url in dict.fromkeys(urls_in(source))
+               if url not in present]
     if not missing:
         return line
-    return (line.rstrip() + " " + " ".join(dict.fromkeys(missing))).strip()
+    ranked = ([u for u in missing if CHANGE_REQUEST_RE.search(u)]
+              + [u for u in missing if not CHANGE_REQUEST_RE.search(u)])
+    return (line.rstrip() + " " + " ".join(ranked[:RESTORE_URL_MAX])).strip()
 
 
 def summarize(text, config):
@@ -739,8 +744,8 @@ def summarize(text, config):
     bare = summarizer_settings()
     if bare:
         argv += ["--settings", bare]
-    prepared = window(strip_markdown(text))
-    argv.append(SUMMARY_PROMPT % (words, prepared))
+    flat = strip_markdown(text)
+    argv.append(SUMMARY_PROMPT % (words, window(flat)))
     try:
         done = subprocess.run(
             argv, input="", capture_output=True, text=True,
@@ -759,7 +764,7 @@ def summarize(text, config):
     parts = line.split()
     if len(parts) > words:
         line = " ".join(parts[:words]).rstrip(",;:") + "\u2026"
-    return restore_urls(line, prepared), None
+    return restore_urls(line, flat), None
 
 
 def shorten(raw, kind, config):
@@ -829,8 +834,7 @@ RECORD_STATE_RE = re.compile(
 CHANGE_REQUEST_NAMED_RE = re.compile(
     r"\b[MP]R\b"
     r"|(?i:\b[MP]Rs?\s*#?\d+)"
-    r"|#\d+"
-    r"|(?i:\b(?:pull|merge)\s+requests?\b)")
+    r"|(?i:\b(?:pull|merge)\s+requests?\s*#?\d*)")
 CLOSED_STATES = ("closed", "merged")
 URL_RE = re.compile(r"https?://[^\s<>\"')\]]+")
 
@@ -882,19 +886,21 @@ def change_request_records(chunk):
     return records
 
 
-def change_request_answered_in(chunk, slug=None, branch=None):
+def change_request_answered_in(chunk, tier, slug=None, branch=None):
     records = [r for r in change_request_records(chunk)
                if not closed_change_request(r["state"])]
     if not records:
         return None
-    if branch:
+    if tier == "branch":
+        if not branch:
+            return None
         mine = [r for r in records if r["branch"] and r["branch"] == branch]
-        if mine:
-            return mine[-1]["url"]
-    if slug:
+        return mine[-1]["url"] if mine else None
+    if tier == "slug":
+        if not slug:
+            return None
         local = [r for r in records if slug in r["url"].lower()]
-        if local:
-            return local[-1]["url"]
+        return local[-1]["url"] if local else None
     distinct = list(dict.fromkeys(r["url"] for r in records))
     return distinct[0] if len(distinct) == 1 else None
 
@@ -949,10 +955,15 @@ def change_request_for(transcript_path, state, cwd=None):
     where = cwd or os.getcwd()
     slug = remote_slug(where)
     branch = branch_label(where)
-    found = scan_tail(
-        transcript_path,
-        lambda chunk: change_request_answered_in(chunk, slug, branch),
-    )
+    found = None
+    for tier in ("branch", "slug", "lone"):
+        found = scan_tail(
+            transcript_path,
+            lambda chunk, t=tier: change_request_answered_in(
+                chunk, t, slug, branch),
+        )
+        if found:
+            break
     if not found and slug:
         found = scan_tail(
             transcript_path, lambda chunk: change_request_in(chunk, slug)
@@ -1420,9 +1431,9 @@ def main():
         state = (read_json(path, {}) or {}) if path else {}
         if not isinstance(state, dict):
             state = {}
-        before = state.get("change_request")
+        before = cached_change_request(state)
         print(change_request_for(transcript_for(session_id), state, os.getcwd()) or "")
-        if path and state.get("change_request") and state.get("change_request") != before:
+        if path and state.get("change_request") and cached_change_request(state) != before:
             merge_state(path, {"change_request": state["change_request"]})
         return 0
     if args and args[0] == "--label":

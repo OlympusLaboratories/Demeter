@@ -35,7 +35,7 @@ NAMED = (
     "the pull request is green",
     "the merge request is green",
     "two pull requests are waiting",
-    "review left three notes on #7",
+    "pull request #7 is green",
     "shipped it, see " + LINK,
 )
 
@@ -47,6 +47,8 @@ UNNAMED = (
     "Reindexing meter_reads: picked the online backfill.",
     "Mr Smith approved the design doc.",
     "Priced it at 7 pr units, whatever those are.",
+    "Shipped release #3 to staging.",
+    "Closed issue #412 as a duplicate.",
     "",
 )
 
@@ -117,8 +119,44 @@ def case_a_mangled_url_does_not_replace_the_real_one(module):
     source = "Opened %s for review" % LINK
     line = "Opened https://github.com/owner/repo/pull/70 for review"
     got = module.restore_urls(line, source)
-    if LINK not in got:
-        return "a mangled number stood in for the url the input carried"
+    if LINK not in module.urls_in(got):
+        return ("a mangled number stood in for the url the input carried: %r"
+                % module.urls_in(got))
+    return None
+
+
+def case_a_prefix_mangle_is_still_restored(module):
+    for real, emitted in (
+        ("https://github.com/owner/repo/pull/7",
+         "https://github.com/owner/repo/pull/70"),
+        ("https://github.com/owner/repo/pull/1",
+         "https://github.com/owner/repo/pull/123"),
+    ):
+        got = module.restore_urls("Opened %s" % emitted, "Opened %s" % real)
+        if real not in module.urls_in(got):
+            return ("%s is a prefix of %s and was never restored: %r"
+                    % (real, emitted, module.urls_in(got)))
+    return None
+
+
+def case_a_truncated_url_is_never_manufactured(module):
+    whole = "https://github.com/owner/repo/pull/1234"
+    limit = module.SUMMARY_MAX_INPUT
+    pad = "x " * ((limit * 2 // 3 - 20) // 2)
+    body = pad + whole + " tail " + ("y " * 2000)
+    got = module.restore_urls("Run finished.", module.strip_markdown(body))
+    for url in module.urls_in(got):
+        if url != whole and whole.startswith(url):
+            return "a truncated fragment of the url was appended: %r" % url
+    return None
+
+
+def case_the_append_is_capped(module):
+    source = " ".join("https://example.dev/p/%d" % i for i in range(12))
+    got = module.restore_urls("short summary.", source)
+    if len(module.urls_in(got)) > module.RESTORE_URL_MAX:
+        return ("restored %d urls against a cap of %d"
+                % (len(module.urls_in(got)), module.RESTORE_URL_MAX))
     return None
 
 
@@ -131,12 +169,16 @@ def case_a_surviving_url_is_not_duplicated(module):
     return None
 
 
-def case_every_input_url_survives(module):
-    source = "plan %s, change request %s, docs %s" % (PAGE, LINK, DOCS)
+def case_the_change_request_url_is_never_the_one_capped(module):
+    source = "plan %s, docs %s, change request %s" % (PAGE, DOCS, LINK)
     got = module.restore_urls("nothing but prose", source)
-    for url in (PAGE, LINK, DOCS):
-        if url not in got:
-            return "%s did not survive the summary" % url
+    restored = module.urls_in(got)
+    if LINK not in restored:
+        return ("the change request link was dropped by the cap while %r"
+                " survived" % restored)
+    if len(restored) > module.RESTORE_URL_MAX:
+        return "restored %d urls against a cap of %d" % (
+            len(restored), module.RESTORE_URL_MAX)
     return None
 
 
@@ -152,11 +194,16 @@ def case_the_trim_cannot_be_what_drops_a_url(module):
         stdout = "one two three four five six seven eight %s" % LINK
         stderr = ""
 
+    real_run = module.subprocess.run
     module.subprocess.run = lambda *a, **k: Done()
-    line, problem = module.summarize("body naming " + LINK, {"summarize": settings})
+    try:
+        line, problem = module.summarize(
+            "body naming " + LINK, {"summarize": settings})
+    finally:
+        module.subprocess.run = real_run
     if problem:
         return "the stubbed summarizer reported %s" % problem
-    if LINK not in line:
+    if LINK not in module.urls_in(line):
         return "the word trim removed the url: %r" % line
     return None
 
@@ -183,10 +230,16 @@ CASES = (
      case_a_dropped_url_is_restored),
     ("a url the summarizer mangled does not stand in for the real one",
      case_a_mangled_url_does_not_replace_the_real_one),
+    ("a real url that is a prefix of the mangled one is still restored",
+     case_a_prefix_mangle_is_still_restored),
+    ("the window's truncation never manufactures a url to append",
+     case_a_truncated_url_is_never_manufactured),
+    ("the restore is capped so it cannot blow the body budget",
+     case_the_append_is_capped),
     ("a url the summarizer kept is not duplicated",
      case_a_surviving_url_is_not_duplicated),
-    ("every url the summarizer was given survives its answer",
-     case_every_input_url_survives),
+    ("the change request link is never the url the cap drops",
+     case_the_change_request_url_is_never_the_one_capped),
     ("the word trim is never what removes a url",
      case_the_trim_cannot_be_what_drops_a_url),
     ("a body carrying no url is returned unchanged",
