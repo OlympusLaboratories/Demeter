@@ -203,6 +203,8 @@ main() {
   echo ""
   success "Done. Removed $removed symlink(s); kept $kept."
   info "Skill data directories were left in place."
+  [[ -e "$claude_dst/.mcp.json" ]] &&
+    info "$claude_dst/.mcp.json holds your MCP tokens and was left in place."
   info "You may need to restart your shell for changes to take effect."
 }
 

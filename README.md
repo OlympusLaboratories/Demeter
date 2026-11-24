@@ -110,15 +110,15 @@ Add `-y` / `--yes` to answer every prompt instead of reading stdin.
 The script will:
 - List the directories it is about to sweep, then remove every symlink in them whose target points back into this repo (layout-agnostic — it reverses whatever was linked)
 - Offer to restore the editor `settings.json` backup taken at install time
+- Clean up now-empty skill directories left behind
 
 The directories it sweeps are declared once, as `demeter_link_roots` in `lib/paths.sh`, and the installer links into nothing else — `tests/check-link-roots.sh` fails CI if that stops being true. Today they are `~/`, `~/.claude` (recursively), `~/.config/zsh`, `~/.config`, whichever directory holds `core.excludesFile`, `~/.vscode-server/data/Machine`, and every editor user directory on both platforms. Only `~/.claude` is swept recursively; the rest are one level deep, which is all the installer writes into.
 
 Two things changed about what it reaches. It now sweeps the four `~/.config` and `~/.vscode-server` roots it used to miss, so an uninstall no longer leaves a machine sourcing repo files. And the `~/` pass now considers **every** symlink there, not only dotfiles — so a convenience link like `~/dotfiles -> ~/Demeter` is removed too, where before it survived. Every removal is printed as it happens.
 
-Your repo files are never touched.
-- Clean up now-empty skill directories left behind
-
-Your repo files are never touched, and skill data directories are left in place.
+Your repo files are never touched, and skill data directories are left in place. So
+is `~/.claude/.mcp.json`, which holds your MCP tokens — it is a real file rather than
+a symlink, so the sweep never sees it.
 
 ## Adding Your Dotfiles
 
@@ -154,6 +154,45 @@ The list is honoured by the dotfile loop, both `.claude/` loops,
 `link_directory_contents`, and the `vscode`, `shell`, `tools` and `gitignore`
 step gates. A new installer step that checks none of them will fire on a box
 with no editor.
+
+### The MCP token file on rdev
+
+`~/.claude/.mcp.json` is the one file holding every MCP server's token. Nothing in
+this repo contains it and nothing ever should, so on an ordinary machine you write
+it by hand once and the installer leaves it alone.
+
+An rdev instance cannot work that way. The instances are disposable, so anything
+written by hand is gone the next time you are handed a fresh one. rdev carries files
+across instances from GCP, but only at an **allowlisted set of paths**, and
+`~/.claude/.mcp.json` is not one of them — so the token file is persisted at a path
+that is: `~/.config/nvim/mcp.json`. That name is a constraint of the persistence
+service and an otherwise unused slot. **There is no nvim integration here, and no
+nvim plugin reads or writes it.** `grep -rn nvim` across this repo hits exactly one
+line, and it is the installer step below.
+
+The chain, on a fresh instance:
+
+1. rdev's persisted-files service restores the token file from GCP to
+   `~/.config/nvim/mcp.json`, before any of this repo runs.
+2. Installer step 10 copies it to `~/.claude/.mcp.json` at mode 600.
+3. Everything that needs an MCP token reads it there — `gitlab-api.sh` among them,
+   which is why a new instance has working forge access without you doing anything.
+
+**The copy is unconditional, and that is the point.** The two seeding steps above it
+(`notify.json`, `environment.json`) gate on `[[ -f src && ! -e dst ]]` because their
+destinations are files you edit and must never lose. This one is the reverse: the
+staged copy is the source of truth, so rotating a token means replacing the staged
+file and letting the next run propagate it. Gate this step on `! -e` and the
+rotation silently stops working — the installer reports success, the old token stays
+in place, and the first thing to notice is a forge call failing much later. `-m 600`
+is deliberate too: it hardens a staged file that arrived at a looser mode.
+
+The one residual trap, stated rather than guarded: on a machine that is *not* an
+rdev box, anything that creates `~/.config/nvim/mcp.json` would have its contents
+copied over a hand-written `~/.claude/.mcp.json`. Nothing writes that path today,
+and adding a condition to a step whose whole job is to overwrite is how the
+rotation path gets broken by a later reader. If an nvim MCP plugin ever does claim
+that filename, move the staged slot rather than gating the copy.
 
 ## Editor Settings
 
