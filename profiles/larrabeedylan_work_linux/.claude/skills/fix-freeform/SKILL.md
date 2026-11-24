@@ -68,17 +68,34 @@ Extract the **first name** (the first word, lowercased) and store it as `FIRST_N
 
 The absence of a ticket cuts both ways: nothing was lost in translation, and nothing was written down carefully either. Before any planning:
 
-1. **Restate it in one sentence** and show the user: "You want X." Your reading of the request, not a paraphrase of their words. If your sentence is longer than theirs, you have not understood it yet — ask.
-2. **Separate the symptom from the guess.** A freeform statement is usually a symptom plus a hypothesis about the cause ("the sync is slow, probably the N+1 in the loader"). The symptom is the requirement; the hypothesis is a thing to test. Implementing the hypothesis and leaving the symptom in place is the most common way this skill fails, and it fails while looking finished.
-3. **Verify every factual claim in the statement against the code, before planning.** `fix-linear` has to do this to tickets because a ticket written during research routinely overstates ("every row is wrong", "X carries no Y") or describes a pre-implementation design that shipped narrower. A statement typed into a prompt in ten seconds is **more** prone to that, not less — nobody reviewed it, not even its author, and there is no description field where a second thought could have landed. Concretely:
+1. **Check that the tree you are about to read is current.** Everything below compares the statement against the code, and a checkout that is behind produces findings that are internally consistent, specific, and about code that no longer exists. Resolve the default branch first — the `git symbolic-ref` from Step 2a — then:
+
+   ```bash
+   git fetch origin <DEFAULT_BRANCH> --quiet
+   git rev-list --count HEAD..origin/<DEFAULT_BRANCH>
+   git log -1 --format='%cd' --date=short HEAD
+   ```
+
+   **Report the gap before you verify anything** — the commit count and the date of `HEAD` — then apply the threshold:
+
+   - **0 commits behind.** The working tree is authoritative. Read it normally.
+   - **1 or more.** For each path you are about to check a claim against, run `git log --oneline HEAD..origin/<DEFAULT_BRANCH> -- <path>`. Any output at all and you read that path with `git show origin/<DEFAULT_BRANCH>:<path>` instead of from disk.
+   - **`HEAD` more than 7 days old.** Skip the per-path test and read every path through `git show origin/<DEFAULT_BRANCH>:<path>`. The per-path log cannot see a **rename into** a namespace your tree never had, so the path you would test is not the path that moved, and the test clears a file that is gone. That is the failure this exists to stop: one run explored a tree a month behind after every rule it was looking for had been moved into a new package.
+
+   Resolving the default branch here repeats one read-only command from Step 2a. That is deliberate — Step 2a stays where it is, and repeating a `symbolic-ref` costs nothing against reading the wrong tree.
+
+   **Every repository the run reads gets this, not only the one you are sitting in.** A second repo reached by `git -C <abs path>` gets the same three commands against **its own** default branch. The real failure involved two repos and the second stale one was caught by accident.
+2. **Restate it in one sentence** and show the user: "You want X." Your reading of the request, not a paraphrase of their words. If your sentence is longer than theirs, you have not understood it yet — ask.
+3. **Separate the symptom from the guess.** A freeform statement is usually a symptom plus a hypothesis about the cause ("the sync is slow, probably the N+1 in the loader"). The symptom is the requirement; the hypothesis is a thing to test. Implementing the hypothesis and leaving the symptom in place is the most common way this skill fails, and it fails while looking finished.
+4. **Verify every factual claim in the statement against the code, before planning.** `fix-linear` has to do this to tickets because a ticket written during research routinely overstates ("every row is wrong", "X carries no Y") or describes a pre-implementation design that shipped narrower. A statement typed into a prompt in ten seconds is **more** prone to that, not less — nobody reviewed it, not even its author, and there is no description field where a second thought could have landed. Concretely:
    - Every path, symbol, function, flag, and config key the statement names: confirm it exists and is spelled that way. Glob or `rg` for it; do not trust the name. Half the paths quoted from memory are wrong in a way that still reads plausibly (`registry.py` for `rule_registry.py`).
    - Every count ("three call sites", "only used by the CLI"): count it yourself.
    - Every behavioural claim ("it retries forever", "the default is 30s"): read the line that sets it.
 
-   **Where the statement and the code disagree, implement what the code says and say so** — quote the claim, name the file and line that contradicts it, and state what you are doing instead. Never correct it silently: that gap is often the most interesting thing in the request, and it is sometimes the actual bug.
-4. If the request is still ambiguous in a way that changes the implementation, use `AskUserQuestion` before planning. Asking is cheaper here than on a ticket — the author is right there — and a wrong guess costs exactly as much to review either way.
+   **Where the statement and the code disagree, implement what the code says and say so** — quote the claim, name the file and line that contradicts it, and state what you are doing instead. Never correct it silently: that gap is often the most interesting thing in the request, and it is sometimes the actual bug. **None of that is authoritative until the tree is known current.** If item 1 reported a gap and you have not read the contradicting line through `origin/<DEFAULT_BRANCH>`, say the tree is behind and read it there before you quote the claim back. Telling the user their statement is wrong on the strength of a stale checkout is worse than never checking it, because they believe you.
+5. If the request is still ambiguous in a way that changes the implementation, use `AskUserQuestion` before planning. Asking is cheaper here than on a ticket — the author is right there — and a wrong guess costs exactly as much to review either way.
 
-State the result of this step in a few lines before moving on: the one-sentence restatement, anything the code contradicted, and anything you asked about.
+State the result of this step in a few lines before moving on: the gap between `HEAD` and `origin/<DEFAULT_BRANCH>`, the one-sentence restatement, anything the code contradicted, and anything you asked about.
 
 ### 1c. Compute the branch name
 
@@ -234,7 +251,7 @@ Tests and lint run correctly this way. **Type-checking does not** — the borrow
 
 **The Bash working directory persists between calls, and a bare `cd` will strand you.** After `cd apps/portal`, a later `cd apps/portal` fails and a relative `ln -s packages/…` lands in the wrong place. Either issue every path absolutely, or re-`cd` to the worktree root as its own command before any step whose relative paths matter. `pwd` when a relative path fails unexpectedly.
 
-**Work that spans two repos is still workable from one worktree-isolated session — use `git -C <abs path>`.** `cd ~/other-repo && git status` is refused ("changes directory to a location computed at runtime before running git"), but `git -C /Users/…/other-repo status` is accepted, and so is `git -C <repo> worktree add -b <branch> <path> origin/main`. Read/Edit/Write against absolute paths in the other repo are not blocked either. Ask the user early whether they want the second repo driven in the same session or left as a follow-up — it changes how much gets done here.
+**Work that spans two repos is still workable from one worktree-isolated session — use `git -C <abs path>`.** `cd ~/other-repo && git status` is refused ("changes directory to a location computed at runtime before running git"), but `git -C /Users/…/other-repo status` is accepted, and so is `git -C <repo> worktree add -b <branch> <path> origin/main`. Read/Edit/Write against absolute paths in the other repo are not blocked either. Ask the user early whether they want the second repo driven in the same session or left as a follow-up — it changes how much gets done here. **Give that repo Step 1b's freshness check before you read anything in it** — the same three commands under `git -C <abs path>`, against that repo's own default branch.
 
 **Two more shapes the isolation guard refuses.** A `for` loop over scenarios (`for m in a b c; do terraform … -var mode=$m; done`), and a compound `A; echo ---; B; echo ---; C` that merely *inspects* things outside the worktree. Neither touches git and neither writes outside, but the guard is static: any multi-command shape it cannot unroll gets refused. Issue them as separate plain calls — batch the independent ones into one message so they still run in parallel. Note `terraform -chdir=<abs path>` *is* accepted, which is how to drive a scratchpad harness without `cd`.
 
@@ -301,7 +318,7 @@ So **never call `EnterPlanMode` or `ExitPlanMode` in this skill.** Explore and p
 
 **Nothing is created or modified before the plan is approved.** Plan mode used to enforce that and now it is a rule you keep yourself. Read, Glob, Grep and read-only shell are the whole toolkit of this step: no Edit, no Write, no `git` command that changes state, no install, no network write.
 
-Carry Step 1b's findings with you — the restatement, and anything the code already contradicted — and then:
+Carry Step 1b's findings with you — the restatement, anything the code already contradicted, and whether the tree is current — and then:
 
 1. **Explore the codebase** — use Glob, Grep, and Read to understand the relevant files, existing patterns, and architecture. Step 1b checked the statement's claims; this step is where you find what it never mentioned, which on a freeform request is most of it. The statement names what the user noticed; the plan has to cover what the change actually touches.
 
