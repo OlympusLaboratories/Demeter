@@ -825,6 +825,26 @@ main() {
       if [[ "$link_target" == "$REPO_DIR/"* && ! -e "$existing" ]]; then
         warn "Removing stale symlink: $existing -> $link_target"
         rm -f "$existing"
+        continue
+      fi
+
+      # A skill directory with no SKILL.md is not a skill. This is the shape a
+      # deleted skill leaves behind when an earlier run created a gitignored data
+      # directory inside it: git removes the tracked SKILL.md on pull but leaves
+      # the directory, so the symlink still resolves and the dangling test above
+      # never fires. Claude Code then lists a skill it cannot load.
+      if [[ "$link_target" == "$REPO_DIR/"* && -d "$existing" && ! -f "$existing/SKILL.md" ]]; then
+        warn "Removing symlink to a skill with no SKILL.md: $existing -> $link_target"
+        rm -f "$existing"
+        # Reclaim the leftover only when it holds no files at all, anywhere. That
+        # is exactly the empty data directory a previous run created; anything a
+        # human put there keeps the directory and gets reported instead.
+        if [[ -z "$(find "$link_target" -type f -print -quit 2>/dev/null)" ]]; then
+          rm -rf "$link_target"
+          info "Reclaimed empty skill directory: $link_target"
+        else
+          warn "Left $link_target in place — it still holds files"
+        fi
       fi
     done
   fi
