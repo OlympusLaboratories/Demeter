@@ -917,6 +917,45 @@ def append_change_request(body, transcript_path, state, cwd):
     return ((body or "").rstrip() + "\n" + link).strip(), True
 
 
+GATE_HOLD = (
+    "Do not end this turn yet. A plan was published at %s and nothing has asked"
+    " the user to approve it \u2014 publishing a plan is a promise of a question."
+    " Send the link as a message on its own, then call AskUserQuestion with"
+    " Approve and Change something, in this turn. If the plan was already"
+    " approved, or it needs no approval, run"
+    " `~/.claude/hooks/notify.py --gate-clear` and end the turn again."
+)
+
+
+def plan_gate(payload):
+    if payload.get("agent_id") or payload.get("agent_type"):
+        return None
+    session_id = payload.get("session_id") or ""
+    if not session_id:
+        return None
+    path = session_path(session_id)
+    state = read_json(path, {}) or {}
+    if not isinstance(state, dict):
+        return None
+    gate = state.get("gate_pending")
+    if not isinstance(gate, dict) or not gate.get("url"):
+        return None
+
+    event = payload.get("hook_event_name")
+    if event == "PreToolUse" and payload.get("tool_name") in QUESTION_TOOLS:
+        state.pop("gate_pending", None)
+        write_json(path, state)
+        log("gate cleared by %s" % payload.get("tool_name"))
+        return None
+    if event != "Stop" or payload.get("stop_hook_active") or gate.get("held"):
+        return None
+
+    state["gate_pending"] = dict(gate, held=time.time())
+    if not write_json(path, state):
+        return None
+    return GATE_HOLD % gate["url"]
+
+
 def handle(payload):
     if payload.get("agent_id") or payload.get("agent_type"):
         return "skip: subagent"
@@ -1265,6 +1304,11 @@ def main():
             " [--body <text>|-] [--session <id>]]", file=sys.stderr)
         return 2
     payload = json.load(sys.stdin)
+    hold = plan_gate(payload)
+    if hold:
+        print(json.dumps({"decision": "block", "reason": hold}))
+        log("Stop held: a plan was published and no question was asked")
+        return 0
     log("%s %s" % (payload.get("hook_event_name"), handle(payload)))
     return 0
 

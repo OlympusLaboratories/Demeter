@@ -168,6 +168,85 @@ def case_question_clears_marker(module):
     return None
 
 
+def case_stop_is_held_before_it_ends(module):
+    arm(module, gate_pending={"url": PLAN, "at": 0})
+    reason = module.plan_gate(stop_payload())
+    if not reason:
+        return "a turn ending with a plan published was allowed to end"
+    if PLAN not in reason:
+        return "the hold reason does not carry the plan url"
+    if "AskUserQuestion" not in reason:
+        return "the hold reason does not name the tool to call"
+    if not state_of(module).get("gate_pending", {}).get("held"):
+        return "the hold was not recorded, so it cannot be bounded"
+    return None
+
+
+def case_stop_is_held_only_once(module):
+    arm(module, gate_pending={"url": PLAN, "at": 0})
+    if not module.plan_gate(stop_payload()):
+        return "the first turn end was not held"
+    if module.plan_gate(stop_payload()):
+        return "a second turn end was held again, which is an infinite loop"
+    return None
+
+
+def case_stop_hook_active_is_honoured(module):
+    arm(module, gate_pending={"url": PLAN, "at": 0})
+    payload = dict(stop_payload(), stop_hook_active=True)
+    if module.plan_gate(payload):
+        return "a stop already continuing from a hook block was held again"
+    return None
+
+
+def case_unrecordable_hold_does_not_block(module):
+    module.write_json = lambda path, value: False
+    arm(module, gate_pending={"url": PLAN, "at": 0})
+    if module.plan_gate(stop_payload()):
+        return "a hold that could not be recorded still blocked, so it will repeat"
+    return None
+
+
+def case_no_gate_is_never_held(module):
+    arm(module)
+    if module.plan_gate(stop_payload()):
+        return "a turn with no plan published was held"
+    return None
+
+
+def case_subagent_stop_is_never_held(module):
+    arm(module, gate_pending={"url": PLAN, "at": 0})
+    payload = dict(stop_payload(), agent_id="agent-1", agent_type="Explore")
+    if module.plan_gate(payload):
+        return "a subagent's stop was held against the session's plan gate"
+    return None
+
+
+def case_question_clears_marker_before_config(module):
+    module.load_config = lambda: (None, "no config on this machine")
+    arm(module, gate_pending={"url": PLAN, "at": 0})
+    if module.plan_gate(question_payload()):
+        return "asking the question held the turn"
+    if "gate_pending" in state_of(module):
+        return "the marker survived the question, so a later turn would be held"
+    return None
+
+
+def case_held_gate_still_notifies(module):
+    sent = []
+
+    def record(envelope):
+        sent.append(envelope)
+        return 900, None
+
+    module.send = record
+    arm(module, gate_pending={"url": PLAN, "at": 0, "held": 1})
+    result = module.handle(stop_payload())
+    if "stranded plan gate" not in result:
+        return "a held gate lost the notification behind the block: %s" % result
+    return None
+
+
 def case_permission_keeps_marker(module):
     module.send = lambda envelope: (900, None)
     arm(module, gate_pending={"url": PLAN, "at": 0})
@@ -199,6 +278,22 @@ CASES = (
      case_question_clears_marker),
     ("an unrelated permission prompt leaves the marker alone",
      case_permission_keeps_marker),
+    ("a turn ending with a plan published is held before it can end",
+     case_stop_is_held_before_it_ends),
+    ("the hold fires at most once, so it cannot loop",
+     case_stop_is_held_only_once),
+    ("a stop already continuing from a hook block is not held again",
+     case_stop_hook_active_is_honoured),
+    ("a hold that cannot be recorded is not applied",
+     case_unrecordable_hold_does_not_block),
+    ("a turn with no plan published is never held",
+     case_no_gate_is_never_held),
+    ("a subagent's stop is never held",
+     case_subagent_stop_is_never_held),
+    ("asking the question clears the marker without consulting the config",
+     case_question_clears_marker_before_config),
+    ("a gate that was already held still notifies at the turn end",
+     case_held_gate_still_notifies),
 )
 
 
@@ -217,18 +312,26 @@ def run(profile, directory):
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "rules":
-        print("the plan gate's notification contract, over every profile copy:")
+        print("the plan gate's contract, over every profile copy:")
         print()
         print("  A published plan is a promise of a question. publish-artifact.sh")
-        print("  --purpose plan records the url in the session state, and a turn that")
-        print("  ends while that marker is set notifies REGARDLESS of arming -- the")
-        print("  same exception a blocking question already gets, because the user is")
-        print("  owed a decision either way.")
+        print("  --purpose plan records the url in the session state, and the Stop hook")
+        print("  REFUSES the first turn end that leaves the marker set: it returns")
+        print("  {\"decision\": \"block\", \"reason\": ...} and the run is sent back to ask")
+        print("  in the turn it was about to end.")
         print()
-        print("  The marker is cleared only when a notification actually reaches the")
-        print("  user: a failed send, a rate-limited turn or quiet hours all leave it")
-        print("  set so the next turn retries. Asking the gate question clears it,")
-        print("  since the question notifies on its own.")
+        print("  The block is bounded three ways, because a blocking hook that repeats")
+        print("  is a hang: a `held` stamp in the marker, the payload's")
+        print("  stop_hook_active, and a refusal to block at all when the stamp cannot")
+        print("  be written. A question clears the marker BEFORE the notification")
+        print("  config is read, so quiet hours cannot leave a correct turn blocked.")
+        print()
+        print("  Behind the block, a turn that ends with the marker set anyway still")
+        print("  notifies REGARDLESS of arming -- the same exception a blocking")
+        print("  question gets, because the user is owed a decision either way. That")
+        print("  marker is cleared only when a notification actually reaches the user:")
+        print("  a failed send, a rate-limited turn or quiet hours all leave it set so")
+        print("  the next turn retries.")
         print()
         print("cases:")
         for label, _ in CASES:

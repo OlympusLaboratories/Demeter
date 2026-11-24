@@ -107,7 +107,7 @@ Four rules for that poller, each one a way it silently fails:
 
 - **Condition on wall-clock against `resetsAt`, not on the usage percentage.** Once the editor windows are closed, nothing refreshes the usage cache — a poller waiting for the percentage to drop waits forever, with no notification. Compare `date +%s` against the recorded reset time; treat the percentage as corroboration only.
 - **Compare timestamps; never count iterations.** A `sleep` loop stops accumulating while the laptop is suspended, so counting sleeps fires late by however long the lid was shut.
-- **Emit on every terminal state, not just a clean reset.** Cache missing, cache far too old, `retryUntil` still in the future, max-wait backstop reached — each gets a line. Silence must never be indistinguishable from success.
+- **Emit on every terminal state, not just a clean reset.** Cache missing, cache far too old, `retryUntil` still in the future, max-wait backstop reached — each gets a line. Silence must never be indistinguishable from success. Age the cache off `snapshot.fetchedAt`, falling back to the top-level `updatedAt`, against the file's own `intervalMs`: the top-level field is when the file was last written, not how old the numbers are.
 - **Keep any single-shot API fallback outside the loop.** Inside it, a poller hammers the usage endpoint every iteration while the account is already rate-limited.
 
 Record in the file whether the return is armed and the reset timestamp it is waiting for.
