@@ -934,10 +934,10 @@ anything. Expected steady state at 30 days is roughly 450 MB rather than 1,056 M
 ## 8. Repo and install integration
 
 - Lives at `tools/agent-watch/`, profile-independent, symlinked into `~/.claude/tools/`
-  by installer step 9 like the other tools.
+  by installer step 12 like the other tools.
 - `Makefile` with `setup` / `build` / `test` / `typecheck` / `check` / `link` / `package` /
   `install`, copied from `tools/claude-usage/Makefile`, including the `CODE ?=` resolution
-  so `make install` works over Remote-SSH. Installer step 10 then offers the build.
+  so `make install` works over Remote-SSH. Installer step 13 then offers the build.
 - Publisher `dylanlarrabee`, id `dylanlarrabee.agent-watch`. `vscode/sync-extensions.sh`
   already excludes ids published from `tools/*/package.json`, so it stays out of
   `vscode/extensions.txt` automatically.
