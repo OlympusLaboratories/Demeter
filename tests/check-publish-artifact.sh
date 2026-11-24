@@ -38,6 +38,8 @@ publish-artifact.sh, checked over every profile copy:
   no --purpose                                no gate call
   --purpose plan, publish failed              no gate call
   --purpose plan, no notify.py present        still exits 0
+  every call site in this file                stubs NOTIFY_HOOK, so none reaches the
+                                              real hook and no session state is written
 
 exit 3 is the "no self-hosted store here" answer and must never be confused with a
 failure: the callers fall through to the Artifact tool on 3, and report on anything else.
@@ -46,12 +48,29 @@ The gate call is what stops a published plan stranding the run. A plan is publis
 can be approved, so the hook records the url and notifies even on an unarmed session when
 the turn ends without the approval question being asked. Marking must never be able to fail
 a publish, and must never fire for a page nobody is waiting on.
+
+That is also why this file runs against a scratch HOME with a tripwire where mark_gate
+looks for the real hook. A call site that forgets to stub NOTIFY_HOOK marks the gate on the
+developer's own session, and the next turn end then claims a plan is waiting for approval —
+so the omission has to fail the suite rather than be made harmless.
 RULES
   exit 0
 fi
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+
+export HOME="$WORK/home"
+UNSTUBBED_GATE_CALLS="$WORK/unstubbed-gate-calls.txt"
+export UNSTUBBED_GATE_CALLS
+mkdir -p "$HOME/.claude/hooks"
+cat >"$HOME/.claude/hooks/notify.py" <<'TRIPWIRE_HOOK'
+import os
+import sys
+
+with open(os.environ["UNSTUBBED_GATE_CALLS"], "a", encoding="utf-8") as handle:
+    handle.write(" ".join(sys.argv[1:]) + "\n")
+TRIPWIRE_HOOK
 
 fake_env() {
   local dir="$1" store="$2" host="$3"
@@ -392,7 +411,9 @@ REMOTEFAIL
       SCP_LOG='$WORK/scp.log' SCP_SOURCE='$WORK/scp-source.txt'
       SSH_LOG='$WORK/ssh.log' REMOTE_ARGS='$WORK/remote-args.txt'
       FAKE_REMOTE_BIN='$WORK/remotebin'
+      GATE_CALLS='$WORK/gate-calls.txt' NOTIFY_HOOK='$WORK/fake-notify.py'
       export SCP_LOG SCP_SOURCE SSH_LOG REMOTE_ARGS FAKE_REMOTE_BIN
+      export GATE_CALLS NOTIFY_HOOK
       PATH='$WORK/fake:/usr/bin:/bin' SKILL_ENV='$WORK/purpose/skill-env.sh' \
         '$script' '$page' --purpose plan --expires 7d >/dev/null 2>&1
     "
@@ -422,6 +443,16 @@ REMOTEFAIL
   fi
   checked=$((checked + 1))
 done
+
+checked=$((checked + 1))
+if [[ -s "$UNSTUBBED_GATE_CALLS" ]]; then
+  printf '  fail — a call site reached the real notify.py instead of a stub,\n'
+  printf '         so on a developer machine it would write gate_pending into\n'
+  printf '         the live session state and the next Stop hook would claim a\n'
+  printf '         plan is waiting. Set NOTIFY_HOOK and GATE_CALLS on it.\n'
+  printf '         calls: %s\n' "$(tr '\n' '|' <"$UNSTUBBED_GATE_CALLS")"
+  failures=$((failures + 1))
+fi
 
 echo "publish-artifact.sh"
 echo
