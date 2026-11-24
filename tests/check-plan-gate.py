@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import importlib.util
+import io
 import json
 import os
 import sys
@@ -168,6 +169,63 @@ def case_question_clears_marker(module):
     return None
 
 
+def drive_main(module, payload):
+    saved = (sys.stdin, sys.stdout, sys.argv)
+    sys.stdin = io.StringIO(json.dumps(payload))
+    sys.stdout = io.StringIO()
+    sys.argv = ["notify.py"]
+    try:
+        return module.main(), sys.stdout.getvalue()
+    finally:
+        sys.stdin, sys.stdout, sys.argv = saved
+
+
+def case_main_emits_the_block_decision_on_stdout(module):
+    arm(module, gate_pending={"url": PLAN, "at": 0})
+    code, out = drive_main(module, stop_payload())
+    if code != 0:
+        return "main() exited %r; Claude Code needs 0 alongside the decision" % code
+    if not out.strip():
+        return "main() printed nothing to stdout, so no block reaches Claude Code"
+    try:
+        decision = json.loads(out)
+    except ValueError as error:
+        return "stdout is not the JSON Claude Code parses: %s" % error
+    if decision.get("decision") != "block":
+        return "stdout carries decision=%r, not a block" % (decision.get("decision"),)
+    if PLAN not in (decision.get("reason") or ""):
+        return "the block reason does not carry the plan url"
+    return None
+
+
+def case_main_stays_silent_with_no_gate(module):
+    module.send = lambda envelope: (900, None)
+    arm(module)
+    code, out = drive_main(module, stop_payload())
+    if code != 0:
+        return "main() exited %r on an ordinary turn end" % code
+    if out.strip():
+        return "main() printed %r with no plan pending, which would block the turn" % out.strip()
+    return None
+
+
+def case_a_stale_write_cannot_resurrect_the_gate(module):
+    arm(module, gate_pending={"url": PLAN, "at": 0})
+    stale = state_of(module)
+    if not module.plan_gate(stop_payload()):
+        return "the first turn end was not held"
+    module.plan_gate(question_payload())
+    module.record_sent(SESSION, stale, 123.0, kind="permission", thread=900)
+    after = state_of(module)
+    if "gate_pending" in after:
+        return "a slow handle() write resurrected the cleared gate, so the next turn is held again"
+    if after.get("last_kind") != "permission":
+        return "the merge dropped a key record_sent owns"
+    if after.get("thread") != 900:
+        return "the merge dropped the thread record_sent owns"
+    return None
+
+
 def case_stop_is_held_before_it_ends(module):
     arm(module, gate_pending={"url": PLAN, "at": 0})
     reason = module.plan_gate(stop_payload())
@@ -294,6 +352,12 @@ CASES = (
      case_question_clears_marker_before_config),
     ("a gate that was already held still notifies at the turn end",
      case_held_gate_still_notifies),
+    ("main() prints the block decision Claude Code parses, on stdout, at exit 0",
+     case_main_emits_the_block_decision_on_stdout),
+    ("main() prints nothing when no plan is pending",
+     case_main_stays_silent_with_no_gate),
+    ("a stale snapshot written late cannot resurrect a cleared gate",
+     case_a_stale_write_cannot_resurrect_the_gate),
 )
 
 
@@ -320,11 +384,21 @@ def main():
         print("  {\"decision\": \"block\", \"reason\": ...} and the run is sent back to ask")
         print("  in the turn it was about to end.")
         print()
+        print("  The decision is asserted through main() on real stdout, not off the")
+        print("  helper's return value: renaming the key or printing it to stderr")
+        print("  ships a hook that blocks nothing, and only the process's own output")
+        print("  catches that.")
+        print()
         print("  The block is bounded three ways, because a blocking hook that repeats")
         print("  is a hang: a `held` stamp in the marker, the payload's")
         print("  stop_hook_active, and a refusal to block at all when the stamp cannot")
         print("  be written. A question clears the marker BEFORE the notification")
         print("  config is read, so quiet hours cannot leave a correct turn blocked.")
+        print()
+        print("  Every writer MERGES rather than clobbers: it re-reads the file and")
+        print("  applies only the keys it owns. A notification handle() can sit in")
+        print("  summarize for 180s holding a stale snapshot, and writing that back")
+        print("  whole would resurrect a gate another process had already cleared.")
         print()
         print("  Behind the block, a turn that ends with the marker set anyway still")
         print("  notifies REGARDLESS of arming -- the same exception a blocking")
