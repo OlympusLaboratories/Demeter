@@ -774,6 +774,75 @@ def cmd_rerun_check(token, args):
     emit({'ok': True})
 
 
+def cmd_pr_review_list(token, args):
+    if len(args) < 3:
+        sys.exit('Usage: github_api.py pr-review-list <owner> <repo> <pr_number>')
+    owner, repo, number = args[0], args[1], args[2]
+    try:
+        reviews = api_get_all(token, f'/repos/{owner}/{repo}/pulls/{number}/reviews')
+    except urllib.error.HTTPError as err:
+        emit({'error': http_error_message(err)})
+        sys.exit(1)
+    for review in reviews:
+        emit({
+            'review_id': review.get('id'),
+            'state': review.get('state'),
+            'author': (review.get('user') or {}).get('login'),
+            'submitted_at': review.get('submitted_at'),
+            'body': review.get('body') or '',
+            'commit_sha': review.get('commit_id'),
+        })
+
+
+def cmd_dismiss_review(token, args):
+    if len(args) < 4:
+        sys.exit('Usage: github_api.py dismiss-review <owner> <repo> <pr_number> <review_id> [message]\n'
+                 '       review_id comes from pr-review-list, not pr-reviews.\n'
+                 '       The message is read from stdin when the argument is omitted.')
+    owner, repo, number, review_id = args[0], args[1], args[2], args[3]
+    message = args[4] if len(args) > 4 else sys.stdin.read()
+    message = message.strip()
+    if not message:
+        sys.exit('dismiss-review: a dismissal message is required')
+    try:
+        api_post(
+            token,
+            f'/repos/{owner}/{repo}/pulls/{number}/reviews/{review_id}/dismissals',
+            {'message': message, 'event': 'DISMISS'},
+            method='PUT')
+    except urllib.error.HTTPError as err:
+        emit({'error': http_error_message(err)})
+        sys.exit(1)
+    emit({'review_id': review_id, 'dismissed': True})
+
+
+def cmd_request_review(token, args):
+    if len(args) < 4:
+        sys.exit('Usage: github_api.py request-review <owner> <repo> <pr_number> <reviewer>')
+    owner, repo, number, reviewer = args[0], args[1], args[2], args[3]
+    try:
+        api_post(token, f'/repos/{owner}/{repo}/pulls/{number}/requested_reviewers',
+                 {'reviewers': [reviewer]})
+    except urllib.error.HTTPError as err:
+        emit({'error': http_error_message(err)})
+        sys.exit(1)
+    emit({'requested': reviewer})
+
+
+def cmd_rerun_workflow(token, args):
+    if len(args) < 3:
+        sys.exit('Usage: github_api.py rerun-workflow <owner> <repo> <run_id>\n'
+                 '       run_id is an Actions workflow run, not a check run. Use this when\n'
+                 '       rerun-check answers "not rerequestable".')
+    owner, repo, run_id = args[0], args[1], args[2]
+    try:
+        api_post(token, f'/repos/{owner}/{repo}/actions/runs/{run_id}/rerun', {})
+    except urllib.error.HTTPError as err:
+        emit({'error': http_error_message(err)})
+        sys.exit(1)
+    emit({'run_id': run_id, 'rerun': True})
+
+
 def cmd_job_log(token, args):
     if len(args) < 3:
         sys.exit('Usage: github_api.py job-log <owner> <repo> <job_id> [lines|all]')
@@ -859,6 +928,10 @@ COMMANDS = {
     'pr-status':       cmd_pr_status,
     'pr-notes':        cmd_pr_notes,
     'rerun-check':     cmd_rerun_check,
+    'rerun-workflow':  cmd_rerun_workflow,
+    'pr-review-list':  cmd_pr_review_list,
+    'dismiss-review':  cmd_dismiss_review,
+    'request-review':  cmd_request_review,
     'job-log':         cmd_job_log,
 }
 

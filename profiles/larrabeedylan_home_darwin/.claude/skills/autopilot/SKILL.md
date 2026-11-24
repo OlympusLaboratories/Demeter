@@ -474,6 +474,33 @@ So read the review verdict and the open threads **again, in this step**, in the 
 
 A verdict that blocks sends you to **Step 6 branch 1** — it is review feedback and goes through `fix-feedback` — never to Step 11 and never to the merge. If the merge has already landed when you notice, say so plainly and do not revert it; the recovery is a follow-up change, per Step 4b.
 
+**Read the verdict from the status call, not from the thread list.** A reviewer can submit a blocking review with an **empty body**, and `pr-reviews` drops empty-bodied reviews by design — so the thread list shows one ordinary inline comment, `mergeable_state` reads `clean`, and the only trace of the block is the `review_decision` field. Observed exactly that way on this repo. Use the helper's review-list subcommand (`pr-review-list`) when you need the reviews themselves with their ids and states; `pr-reviews` is for threads.
+
+### A blocking verdict is a problem to clear, not a reason to stop
+
+**Handing the user a button to press is not an escalation — it is the run giving up one step from the end.** This went wrong exactly once and must not again: a run drove a change to three green checks, got a single review finding that was *provably false*, rejected it with the evidence, then stopped and asked the user to dismiss the review by hand. Everything hard was already done. The user was away from the terminal, which is the entire premise of this skill, and the thing they came back to do took one click.
+
+So when a verdict blocks, first decide whether the **finding** is right, because that is the only question that matters:
+
+- **The finding is right, or you cannot show it is wrong** → it is review feedback. Step 6 branch 1, through `fix-feedback`, and fix the code. A finding you merely dislike is a finding you fix.
+- **The finding is wrong, and you can prove it** — the claim is contradicted by the repository, by the diff, or by this change's own CI — then the verdict is stale and clearing it is yours to do. Answer it on the thread first, with the evidence, so the reasoning is on the record where a human reads it. Then work down the ladder below and keep going until one rung works.
+
+Ask the helper's `help` for what this forge actually offers, and take the first rung it has:
+
+1. **Re-run the review job** (`rerun-check`). Often answers `not rerequestable`, which is not the end of the ladder.
+2. **Re-run the whole workflow run** (`rerun-workflow`). A check run and its workflow run are different objects, and the second is re-runnable when the first is not.
+3. **Re-request the review** (`request-review`). This fires a reviewer whose workflow triggers on `review_requested` — check the repository's own trigger list rather than assuming it does not.
+4. **Dismiss the stale review** (`dismiss-review`), with a message naming the evidence that disproves it. The thread, your reply and the dismissal message all stay on the change request, so the judgment is auditable rather than hidden.
+
+Three hard limits on that ladder:
+
+- **Never dismiss a finding you have not disproved.** Dismissal is the assertion that the reviewer is factually wrong about this code, and making it because the verdict is inconvenient is the one abuse of this section that would be worse than stopping. If you cannot point at the repository, the diff or a CI log, you do not have the proof, and it is an escalation.
+- **Never push an empty or no-op commit to shake the verdict loose.** It pollutes the history of a change that did not need it, and rung 2 or 4 does the same job honestly.
+- **Where the helper has no rung at all** — no re-run, no re-request, no dismissal — the capability is absent on this forge and *that* is the escalation. Say which subcommands you looked for, per the empty-value rule in Step 0.
+
+Record the clearing in the decision ledger either way: which rung worked, and the evidence the finding was wrong.
+
+
 Check `require_human_approval` first. When it is true, a review bot's approval **is not sufficient** — wait for at least one human approver. The user driving this run counts as a human; other bots do not. This is the one gate autonomy never waives, and it is the reason this skill is safe to leave running.
 
 - **Infrastructure repos** (the Step 8 gate applied): merge **directly**. Never enable auto-merge here — auto-merge fires the instant the pipeline is green and can beat the apply, merging a plan that was never applied.

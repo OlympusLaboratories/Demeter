@@ -58,3 +58,6 @@ jobs:
 
       - name: Plan gate notification
         run: tests/check-plan-gate.py
+
+      - name: Verdict-clearing subcommands
+        run: tests/check-verdict-commands.sh
