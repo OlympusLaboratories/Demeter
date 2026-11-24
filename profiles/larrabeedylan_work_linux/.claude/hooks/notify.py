@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.parse
 
 HOME = os.path.expanduser("~")
 CLAUDE = os.path.join(HOME, ".claude")
@@ -851,7 +852,10 @@ def plausible_url(url):
     text = (url or "").strip()
     if not re.match(r"^https?://\S+$", text):
         return False
-    host = text.split("://", 1)[1].split("/")[0].split("@")[-1].split(":")[0].lower()
+    try:
+        host = (urllib.parse.urlparse(text).hostname or "").lower()
+    except ValueError:
+        return False
     if "." not in host or host.endswith("."):
         return False
     return host.rsplit(".", 1)[-1] not in RESERVED_TLDS

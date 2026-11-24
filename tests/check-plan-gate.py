@@ -28,6 +28,17 @@ REJECTED = (
     "ftp://artifacts.example.dev/abc123",
     "https://artifacts.example.dev/a b",
     "notaurl",
+    "https://[::1]/page",
+    "https://127.0.0.1.invalid/page",
+    "https://host./page",
+)
+
+ACCEPTED = (
+    PLAN,
+    "http://artifacts.example.dev/abc123",
+    "https://user@artifacts.example.dev:8443/abc123",
+    "https://ARTIFACTS.EXAMPLE.DEV/abc123",
+    "https://a.b.c.artifacts.example.dev/abc123",
 )
 
 
@@ -403,10 +414,11 @@ def case_gate_rejects_an_implausible_url(module):
 
 def case_gate_still_accepts_a_real_url(module):
     module.session_from_env = lambda: SESSION
-    arm(module)
-    module.cmd_gate([PLAN])
-    if state_of(module).get("gate_pending", {}).get("url") != PLAN:
-        return "the validation rejected a url the publisher really prints"
+    for url in ACCEPTED:
+        arm(module)
+        quietly(module.cmd_gate, [url])
+        if state_of(module).get("gate_pending", {}).get("url") != url:
+            return "the validation rejected %r, which a publisher may print" % url
     return None
 
 
