@@ -830,11 +830,11 @@ main() {
   fi
 
   # ── ensure data directories for skills that accumulate context ───────────
-  for data_dir in \
-    "$claude_dst/skills/reflect-self/context" \
-    "$claude_dst/skills/reflect-peer/context" \
-  ; do
-    if [[ ! -d "$data_dir" ]]; then
+  local skill_name skill_dir data_dir
+  for skill_name in reflect-self reflect-peer; do
+    skill_dir="$claude_dst/skills/$skill_name"
+    data_dir="$skill_dir/context"
+    if [[ -d "$skill_dir" && ! -d "$data_dir" ]]; then
       mkdir -p "$data_dir"
       success "Created data directory: $data_dir"
     fi

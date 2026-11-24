@@ -91,7 +91,7 @@ The script will:
 - Symlink `vscode/settings.json` over VS Code's user settings (see [Editor Settings](#editor-settings))
 - Install any extensions in `vscode/extensions.txt` that are missing (prompts first)
 - Clean stale skill symlinks (e.g. after a skill is renamed or removed from the repo)
-- Create data directories for skills that accumulate context
+- Create data directories for skills that accumulate context, only for the skills the selected profile actually ships
 - Back up any existing real files before replacing them
 - Skip already-correct symlinks
 
@@ -475,7 +475,7 @@ Any directory under `.claude/skills/` is linked individually into `~/.claude/ski
 
 `aidr` is the counterpart to that third rule. The rule asks every response to be scannable; `/aidr` re-renders one that was not — "artificial intelligence; didn't read", after `tl;dr`. It sorts the source into what you have to do, what was already done, facts, and background; puts the exact command at the step that needs it; makes every path and URL clickable; applies the ASD-STE100 Simplified Technical English writing rules; and ends with a short list of things it could expand on so depth is offered rather than dumped. It is a **compression, not a rewrite** — it may drop anything and add nothing, and where the source is silent about who runs a step it says so rather than inventing a chore. Running it never starts the work it describes.
 
-Some skills accumulate user data (weekly reports, Slack context, the `plan-initiative` team roster) that is gitignored and lives in the repo directory but is not tracked. The install script creates necessary data directories automatically.
+Some skills accumulate user data (weekly reports, Slack context, the `plan-initiative` team roster) that is gitignored and lives in the repo directory but is not tracked. The install script creates the necessary data directories automatically, and creates one only when the profile links the skill that reads it — the `reflect-*` skills are work-only, so a home machine gets no `reflect-*/context` directory.
 
 ### Per-machine skill environment
 

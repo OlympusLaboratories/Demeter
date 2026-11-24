@@ -1,0 +1,263 @@
+#!/usr/bin/env python3
+import importlib.util
+import json
+import os
+import sys
+import tempfile
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROFILES = (
+    "larrabeedylan_work_darwin",
+    "larrabeedylan_work_linux",
+    "larrabeedylan_home_darwin",
+)
+
+SESSION = "11111111-2222-3333-4444-555555555555"
+PLAN = "https://artifacts.example.dev/abc123"
+LATER = "https://artifacts.example.dev/def456"
+
+
+def load(profile, directory):
+    path = os.path.join(REPO, "profiles", profile, ".claude", "hooks", "notify.py")
+    spec = importlib.util.spec_from_file_location("gate_" + profile, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    sessions = os.path.join(directory, profile)
+    os.makedirs(sessions, exist_ok=True)
+    module.session_path = lambda sid: os.path.join(sessions, (sid or "none") + ".json")
+    module.load_config = lambda: (dict(module.DEFAULTS), None)
+    module.in_quiet_hours = lambda config: False
+    module.away_until = lambda: (None, False)
+    module.repo_label = lambda cwd, host_label="": "Demeter"
+    module.branch_label = lambda cwd: "dylan/OLY-14"
+    module.session_title = lambda *a, **k: "Fix and merge OLY-14"
+    module.change_request_for = lambda *a, **k: None
+    module.turn_seconds = lambda path: 5.0
+    module.shorten = lambda raw, kind, config: (raw, "already short")
+    module.log = lambda message: None
+    return module
+
+
+def arm(module, **fields):
+    state = dict(fields)
+    path = module.session_path(SESSION)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(state, handle)
+    return path
+
+
+def state_of(module):
+    path = module.session_path(SESSION)
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def stop_payload():
+    return {
+        "hook_event_name": "Stop",
+        "session_id": SESSION,
+        "cwd": REPO,
+        "transcript_path": None,
+        "last_assistant_message": "Published the plan.",
+    }
+
+
+def question_payload():
+    return {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "AskUserQuestion",
+        "session_id": SESSION,
+        "cwd": REPO,
+        "transcript_path": None,
+        "tool_input": {"questions": [{"question": "Approve the plan?"}]}
+    }
+
+
+def case_cli_round_trip(module):
+    module.session_from_env = lambda: SESSION
+    arm(module)
+    module.cmd_gate([PLAN])
+    if state_of(module).get("gate_pending", {}).get("url") != PLAN:
+        return "--gate-pending did not record the url"
+    module.cmd_gate([LATER])
+    if state_of(module).get("gate_pending", {}).get("url") != LATER:
+        return "--gate-pending did not replace an earlier url"
+    module.cmd_gate([""])
+    if "gate_pending" in state_of(module):
+        return "--gate-clear left the marker in place"
+    return None
+
+
+def case_stranded_gate_notifies_unarmed(module):
+    sent = []
+
+    def record(envelope):
+        sent.append(envelope)
+        return 900, None
+
+    module.send = record
+    arm(module, gate_pending={"url": PLAN, "at": 0})
+    result = module.handle(stop_payload())
+    if not result.startswith("sent"):
+        return "an unarmed Stop with a pending gate was not sent: %s" % result
+    if "stranded plan gate" not in result:
+        return "the send was not reported as a stranded gate: %s" % result
+    if not any(PLAN in (e.get("body") or "") for e in sent):
+        return "the notification body does not carry the plan url"
+    if "gate_pending" in state_of(module):
+        return "the marker survived a successful send"
+    return None
+
+
+def case_no_gate_stays_silent(module):
+    sent = []
+
+    def record(envelope):
+        sent.append(envelope)
+        return 900, None
+
+    module.send = record
+    arm(module)
+    result = module.handle(stop_payload())
+    if not result.startswith("skip"):
+        return "an unarmed Stop with no pending gate was sent: %s" % result
+    return None
+
+
+def case_failed_send_keeps_marker(module):
+    module.send = lambda envelope: (None, "could not reach telegram")
+    arm(module, gate_pending={"url": PLAN, "at": 0})
+    result = module.handle(stop_payload())
+    if not result.startswith("error"):
+        return "a failed send was not reported as an error: %s" % result
+    if state_of(module).get("gate_pending", {}).get("url") != PLAN:
+        return "a failed send dropped the marker, so nothing will retry"
+    return None
+
+
+def case_rate_limit_keeps_marker(module):
+    import time
+
+    module.send = lambda envelope: (900, None)
+    arm(module, gate_pending={"url": PLAN, "at": 0}, last_sent=time.time())
+    result = module.handle(stop_payload())
+    if "rate limited" not in result:
+        return "a rate-limited turn was not skipped: %s" % result
+    if state_of(module).get("gate_pending", {}).get("url") != PLAN:
+        return "a rate-limited turn dropped the marker, so nothing will retry"
+    return None
+
+
+def case_question_clears_marker(module):
+    sent = []
+
+    def record(envelope):
+        sent.append(envelope)
+        return 900, None
+
+    module.send = record
+    arm(module, gate_pending={"url": PLAN, "at": 0})
+    result = module.handle(question_payload())
+    if not result.startswith("sent"):
+        return "the gate question was not sent: %s" % result
+    if "gate_pending" in state_of(module):
+        return "asking the gate question left the marker pending"
+    return None
+
+
+def case_permission_keeps_marker(module):
+    module.send = lambda envelope: (900, None)
+    arm(module, gate_pending={"url": PLAN, "at": 0})
+    module.handle({
+        "hook_event_name": "Notification",
+        "notification_type": "permission_prompt",
+        "session_id": SESSION,
+        "cwd": REPO,
+        "transcript_path": None,
+        "message": "Claude needs your permission to use Bash",
+    })
+    if state_of(module).get("gate_pending", {}).get("url") != PLAN:
+        return "an unrelated permission prompt consumed the pending gate"
+    return None
+
+
+CASES = (
+    ("--gate-pending and --gate-clear round-trip through the session state",
+     case_cli_round_trip),
+    ("an unarmed turn ending with a plan published notifies anyway",
+     case_stranded_gate_notifies_unarmed),
+    ("an unarmed turn with no plan published stays silent",
+     case_no_gate_stays_silent),
+    ("a failed send keeps the marker so the next turn retries",
+     case_failed_send_keeps_marker),
+    ("a rate-limited turn keeps the marker so the next turn retries",
+     case_rate_limit_keeps_marker),
+    ("asking the gate question clears the marker",
+     case_question_clears_marker),
+    ("an unrelated permission prompt leaves the marker alone",
+     case_permission_keeps_marker),
+)
+
+
+def run(profile, directory):
+    failures = []
+    for label, case in CASES:
+        module = load(profile, directory)
+        try:
+            problem = case(module)
+        except Exception as error:
+            problem = "raised %r" % (error,)
+        if problem:
+            failures.append("  %s\n      %s" % (label, problem))
+    return failures
+
+
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "rules":
+        print("the plan gate's notification contract, over every profile copy:")
+        print()
+        print("  A published plan is a promise of a question. publish-artifact.sh")
+        print("  --purpose plan records the url in the session state, and a turn that")
+        print("  ends while that marker is set notifies REGARDLESS of arming -- the")
+        print("  same exception a blocking question already gets, because the user is")
+        print("  owed a decision either way.")
+        print()
+        print("  The marker is cleared only when a notification actually reaches the")
+        print("  user: a failed send, a rate-limited turn or quiet hours all leave it")
+        print("  set so the next turn retries. Asking the gate question clears it,")
+        print("  since the question notifies on its own.")
+        print()
+        print("cases:")
+        for label, _ in CASES:
+            print("  %s" % label)
+        return 0
+
+    broken = {}
+    with tempfile.TemporaryDirectory() as directory:
+        for profile in PROFILES:
+            failures = run(profile, directory)
+            if failures:
+                broken[profile] = failures
+
+    print("plan gate notification")
+    print()
+    for profile in PROFILES:
+        if profile in broken:
+            print("  fail — %s" % profile)
+            for line in broken[profile]:
+                print(line)
+        else:
+            print("  ok   — %s (%d cases)" % (profile, len(CASES)))
+    print()
+    if broken:
+        print("failed")
+        return 1
+    print("passed (%d checks)" % (len(CASES) * len(PROFILES)))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

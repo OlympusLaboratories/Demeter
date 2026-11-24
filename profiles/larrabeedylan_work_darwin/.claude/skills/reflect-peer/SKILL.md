@@ -13,11 +13,3 @@ The peer name is provided as an argument (e.g., `reflect-peer mark`). Read all w
 ## Step 3: Pull Peer's MRs for Context
 
 Use the GitLab helper script or MCP tools to fetch the peer's merged MRs for the review period. This helps understand their code contributions and relate them to the collaboration evidence in the context reports.
-
-## TODO
-
-- parameterize by peer name
-- pull MRs for the peer for time range to understand code contributions and relate to collaboration done in context reports to write perfomance review prompt answers
-- Define output format and sections
-- Define review period selection (quarterly, half, custom range)
-- Add instructions for synthesizing across multiple weeks

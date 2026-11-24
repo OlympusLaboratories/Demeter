@@ -940,10 +940,17 @@ def handle(payload):
     session_id = payload.get("session_id") or "unknown"
     state = read_json(session_path(session_id), {}) or {}
 
+    gate = state.get("gate_pending")
+    gate_url = gate.get("url") if isinstance(gate, dict) else None
+    stranded_gate = bool(gate_url) and payload.get("hook_event_name") == "Stop"
+    if stranded_gate:
+        label = "published a plan and is waiting on you"
+
     unarmed_blocking = False
     if not away:
         armed, reason = armed_state(state)
-        if not armed and kind in BLOCKING_KINDS and config["notify_when_blocked"]:
+        if (not armed and config["notify_when_blocked"]
+                and (kind in BLOCKING_KINDS or stranded_gate)):
             unarmed_blocking = True
         elif config["only_when_armed"]:
             if not armed:
@@ -992,6 +999,10 @@ def handle(payload):
     # from a phone, and every rule telling a skill to include one is an
     # instruction a model can forget. The transcript already holds the URL, so
     # the hook appends it rather than trusting the body to carry it.
+    if stranded_gate and gate_url not in (envelope.get("body") or ""):
+        envelope["body"] = (
+            (envelope.get("body") or "").rstrip() + "\n" + gate_url).strip()
+
     envelope["body"], appended = append_change_request(
         envelope.get("body"), payload.get("transcript_path"), state, cwd)
     if appended:
@@ -1001,10 +1012,37 @@ def handle(payload):
     if problem:
         return "error: %s" % problem
 
+    if stranded_gate or kind == "question":
+        state.pop("gate_pending", None)
     record_sent(session_id, state, now, kind=kind, thread=thread)
     if unarmed_blocking:
         how += "; unarmed: blocking gate"
+    if stranded_gate:
+        how += "; stranded plan gate"
     return "sent %s for %s (%s)" % (kind, repo, how)
+
+
+def cmd_gate(args):
+    url = (args[0] if args else "").strip()
+    session_id = (args[1] if len(args) > 1 else "").strip() or session_from_env()
+    if not session_id:
+        print("no session id resolved: the gate was not recorded", file=sys.stderr)
+        return 0
+
+    path = session_path(session_id)
+    state = read_json(path, {}) or {}
+    if not isinstance(state, dict):
+        state = {}
+
+    if url:
+        state["gate_pending"] = {"url": url, "at": time.time()}
+    else:
+        state.pop("gate_pending", None)
+    if not write_json(path, state):
+        print("could not write %s" % path, file=sys.stderr)
+        return 0
+    log("gate %s for session %s" % ("pending" if url else "cleared", session_id[:8]))
+    return 0
 
 
 def cmd_away(args):
@@ -1181,6 +1219,10 @@ def main():
         return cmd_disarm(args[1:])
     if args and args[0] == "--ping":
         return cmd_ping(args[1:])
+    if args and args[0] == "--gate-pending":
+        return cmd_gate(args[1:])
+    if args and args[0] == "--gate-clear":
+        return cmd_gate([""] + args[1:])
     if args and args[0] == "--change-request":
         session_id = args[1] if len(args) > 1 else ""
         path = session_path(session_id) if session_id else None
@@ -1217,6 +1259,8 @@ def main():
             "usage: notify.py [--test | --away [<duration>|off|status]"
             " | --disarm <session-id>|all | --label <session-id>"
             " | --repo [<cwd>] | --change-request <session-id>"
+            " | --gate-pending <url> [<session-id>]"
+            " | --gate-clear [<session-id>]"
             " | --ping --level <level> --title <title>"
             " [--body <text>|-] [--session <id>]]", file=sys.stderr)
         return 2

@@ -22,11 +22,11 @@ Each skill is a subdirectory containing a `SKILL.md` file that defines the skill
 | `ping` | Send yourself a push notification carrying what this session is doing and what it needs. Invoked directly, or by another skill handing over a status, a question, a blocker or a finished run. The notification is one-way — answering from a phone is Remote Control, which is armed at session startup because no skill can run a slash command, and which `/ping off` therefore does not disconnect |
 | `plan-initiative` | Sequence a Linear initiative's subtasks and delegate them across named engineers — dependency graph, parallelism verdict, swimlane chart, per-person work orders |
 | `plan-subtasks` | Turn a design doc + implementation breakdown into a Linear ticket tree — one parent, one PR-sized subtask per reviewable slice, both doc links on every ticket; confirms team/project/assignee and writes to Linear only after the plan is approved |
-| `reflect-peer` | Peer assessment generator (stub) |
-| `reflect-self` | Self-assessment generator (stub) |
 | `review-code` | Adversarial multi-agent review of proposed local changes, or of an incoming branch someone else pushed — the latter is fetched into a detached review worktree and comes back with a pack of ready-to-paste review comments (uses the Workflow tool; prints a `wf_…` run ID to watch live with `wfwatch <id>`) |
 | `review-kludge` | Adversarial swarm that reviews recent large features for accumulated kludge/AI-slop and proposes refactors (uses the Workflow tool; prints a `wf_…` run ID to watch live with `wfwatch <id>`) |
 | `workflow-resume` | Rescue a `Workflow` swarm that died mid-run — diagnoses why (spend limit, kill, API errors), then either resumes it from the on-disk agent cache or harvests the finished agents' results |
+
+**This profile ships no `reflect-*` skill, and that is deliberate.** All three are work-only. `reflect-week` reads Slack and is the sole producer of the input the other two consume — `reflect-self` reads its weekly reports out of `reflect-self/context/`, and `reflect-peer` reads its per-peer collaboration profiles out of `reflect-peer/context/`. Nothing here writes either directory, so `reflect-self` and `reflect-peer` could only ever report an empty context directory while still occupying a slot in every session's skill index, where a user reading the listing would reasonably assume they work. They were removed rather than left present and broken. `profiles/check-transform.py` carries all three in `PRESENCE_EXEMPT` with that reason, so the absence is *reported* on every drift run rather than silently tolerated, and `install.sh` creates a `context/` directory only for a `reflect-*` skill the profile actually linked. Read the absence the way the Pi profile's three documented absences read: a scoping decision with a reason, not an unfinished migration.
 
 ## Worktrees
 
@@ -47,12 +47,9 @@ PR-related skills (`changes-explain`, `fix-feedback`, `fix-linear`, `fix-freefor
 ## User Data
 
 Some skills accumulate context data that is NOT tracked in git:
-- `reflect-self/context/` — weekly self-reports
-- `reflect-peer/context/` — per-peer collaboration profiles
-- `reflect-self/prompts.md`, `reflect-peer/prompts.md` — review questions pasted per cycle
 - `plan-initiative/team.md` — team roster (seniority, specialties, ramp areas, capacity); `team.example.md` is the tracked template
 
-These files are gitignored, and the paths above are the ones the root `.gitignore` actually names — an entry here that does not appear there is tracking a file somebody will commit by accident. The installer creates the two `context/` directories; the rest are created on first use. `reflect-week/slack-context.md` is on that list too, but this profile ships no `reflect-week`.
+This file is gitignored, and the path above is the one the root `.gitignore` actually names — an entry here that does not appear there is tracking a file somebody will commit by accident. It is created on first use. The root `.gitignore` also names `reflect-week/slack-context.md`, `reflect-self/context/`, `reflect-peer/context/` and the two `reflect-*/prompts.md` files, but those are work-only paths: this profile ships no `reflect-*` skill, so nothing here creates or reads them. They stay in `.gitignore` because its entries are globbed `profiles/*/` and the work profiles still need them.
 
 ## Skill Environment
 
