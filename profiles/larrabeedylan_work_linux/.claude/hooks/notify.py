@@ -897,15 +897,30 @@ def build_envelope(level, title, body, repo, branch, session_id, label, cwd, thr
     return envelope
 
 
-def record_sent(session_id, state, now, kind=None, thread=None, arm=False):
+STATE_CARRIED = ("title", "change_request", "thread")
+
+
+def merge_state(path, updates=(), drop=()):
+    state = read_json(path, {}) or {}
+    if not isinstance(state, dict):
+        state = {}
+    for key, value in (updates.items() if isinstance(updates, dict) else updates):
+        state[key] = value
+    for key in drop:
+        state.pop(key, None)
+    return write_json(path, state)
+
+
+def record_sent(session_id, state, now, kind=None, thread=None, arm=False, drop=()):
+    updates = dict((key, state[key]) for key in STATE_CARRIED if key in state)
     if kind is not None:
-        state["last_sent"] = now
-        state["last_kind"] = kind
+        updates["last_sent"] = now
+        updates["last_kind"] = kind
     if arm:
-        state["armed_at"] = now
+        updates["armed_at"] = now
     if thread:
-        state["thread"] = thread
-    return write_json(session_path(session_id), state)
+        updates["thread"] = thread
+    return merge_state(session_path(session_id), updates, drop)
 
 
 def append_change_request(body, transcript_path, state, cwd):
@@ -915,6 +930,43 @@ def append_change_request(body, transcript_path, state, cwd):
     if not link:
         return body, False
     return ((body or "").rstrip() + "\n" + link).strip(), True
+
+
+GATE_HOLD = (
+    "Do not end this turn yet. A plan was published at %s and nothing has asked"
+    " the user to approve it \u2014 publishing a plan is a promise of a question."
+    " Send the link as a message on its own, then call AskUserQuestion with"
+    " Approve and Change something, in this turn. If the plan was already"
+    " approved, or it needs no approval, run"
+    " `~/.claude/hooks/notify.py --gate-clear` and end the turn again."
+)
+
+
+def plan_gate(payload):
+    if payload.get("agent_id") or payload.get("agent_type"):
+        return None
+    session_id = payload.get("session_id") or ""
+    if not session_id:
+        return None
+    path = session_path(session_id)
+    state = read_json(path, {}) or {}
+    if not isinstance(state, dict):
+        return None
+    gate = state.get("gate_pending")
+    if not isinstance(gate, dict) or not gate.get("url"):
+        return None
+
+    event = payload.get("hook_event_name")
+    if event == "PreToolUse" and payload.get("tool_name") in QUESTION_TOOLS:
+        merge_state(path, drop=("gate_pending",))
+        log("gate cleared by %s" % payload.get("tool_name"))
+        return None
+    if event != "Stop" or payload.get("stop_hook_active") or gate.get("held"):
+        return None
+
+    if not merge_state(path, {"gate_pending": dict(gate, held=time.time())}):
+        return None
+    return GATE_HOLD % gate["url"]
 
 
 def handle(payload):
@@ -1012,9 +1064,8 @@ def handle(payload):
     if problem:
         return "error: %s" % problem
 
-    if stranded_gate or kind == "question":
-        state.pop("gate_pending", None)
-    record_sent(session_id, state, now, kind=kind, thread=thread)
+    spent = ("gate_pending",) if (stranded_gate or kind == "question") else ()
+    record_sent(session_id, state, now, kind=kind, thread=thread, drop=spent)
     if unarmed_blocking:
         how += "; unarmed: blocking gate"
     if stranded_gate:
@@ -1232,7 +1283,7 @@ def main():
         before = state.get("change_request")
         print(change_request_for(transcript_for(session_id), state, os.getcwd()) or "")
         if path and state.get("change_request") and state.get("change_request") != before:
-            write_json(path, state)
+            merge_state(path, {"change_request": state["change_request"]})
         return 0
     if args and args[0] == "--label":
         session_id = args[1] if len(args) > 1 else ""
@@ -1244,7 +1295,7 @@ def main():
         before = state.get("title")
         print(session_title(transcript_for(session_id), config, state) or "")
         if path and state.get("title") and state.get("title") != before:
-            write_json(path, state)
+            merge_state(path, {"title": state["title"]})
         return 0
     if args and args[0] == "--repo":
         # The ping skill resolves the same field for a message it sends itself.
@@ -1265,6 +1316,11 @@ def main():
             " [--body <text>|-] [--session <id>]]", file=sys.stderr)
         return 2
     payload = json.load(sys.stdin)
+    hold = plan_gate(payload)
+    if hold:
+        print(json.dumps({"decision": "block", "reason": hold}))
+        log("Stop held: a plan was published and no question was asked")
+        return 0
     log("%s %s" % (payload.get("hook_event_name"), handle(payload)))
     return 0
 

@@ -47,7 +47,7 @@ If several runs were paused, several pollers may fire at once. Handle them one a
 
 ## Step 4: Check There Is Budget To Resume Into
 
-Read the usage cache — `$CLAUDE_USAGE_CACHE_DIR`, else `~/Library/Caches/claude-usage/usage.json` on macOS, else `${XDG_CACHE_HOME:-~/.cache}/claude-usage/usage.json`. Read it; never take `usage.lock`, and never write into that directory.
+Read the usage cache — `$CLAUDE_USAGE_CACHE_DIR`, else `~/Library/Caches/claude-usage/usage.json` on macOS, else `${XDG_CACHE_HOME:-~/.cache}/claude-usage/usage.json`. Read it; never take `usage.lock`, and never write into that directory. Freshness is `snapshot.fetchedAt`, falling back to the top-level `updatedAt`; the top-level field is when the file was last written, not how old the numbers are, and the cadence to judge it against is the file's own `intervalMs`.
 
 **A reset session window is necessary, not sufficient.** Check all of it:
 

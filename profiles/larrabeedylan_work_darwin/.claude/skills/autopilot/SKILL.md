@@ -230,10 +230,17 @@ On Linux the default is `${XDG_CACHE_HOME:-$HOME/.cache}/claude-usage/usage.json
 - `snapshot.meters[]`, each `{id, percent, severity, resetsAt}`. `percent` is quota **used**, 0–100. `resetsAt` is absolute epoch **milliseconds**.
 - Meter ids: `session`, `weekly`, `scoped:<Model>`, `spend`.
 - Writes are atomic, so a read needs no lock. **Never take `usage.lock`** — holding it makes every open editor window skip its own refresh, and a dead holder stalls them for a minute. **Never write into that directory**, either: a file-watch there fires in every window.
-- `snapshot.fetchedAt` says how old the numbers are. `retryUntil` in the future means the account is already rate-limited — do not fetch.
+- **Freshness is `snapshot.fetchedAt`**, falling back to the top-level `updatedAt` when the snapshot carries none. That is the value the extension's own freshness chip shows, so it is the one to quote.
+- The top-level `updatedAt` is when the file was last **written**, which is a different question. The extension pairs it with `intervalMs` to decide whether to refetch, and a refresh that *failed* rewrites the file with the previous snapshot still attached — so `updatedAt` can be newer than the numbers beside it. Never read it as the age of the numbers.
+- Cadence is the file's own `intervalMs`. Read it rather than assuming a value — it is a setting, not a constant.
+- `retryUntil` in the future means the account is already rate-limited — do not fetch.
 - Only if the cache is missing or badly stale, fetch **once**: read the token from the macOS keychain service `Claude Code-credentials`, else `~/.claude/.credentials.json` → `claudeAiOauth.accessToken`, and `GET https://api.anthropic.com/api/oauth/usage` with `Authorization: Bearer <token>`, `anthropic-beta: oauth-2025-04-20`, `Accept: application/json`. Never write the result into the cache directory.
 
 **Check all four meter kinds, not just the headline.** A `session` meter at 40% with a `scoped:<Model>` meter at 100% fails every agent you launch while the number you looked at says healthy.
+
+**Name the meter with every percentage you quote.** `62%` is not a reading; `weekly 62%` is. The extension's status bar draws one chip per meter, so an unlabelled number is one nobody can check against it — including you, a step later.
+
+**This is the same file the Claude Usage extension displays**, so if your number disagrees with the extension's, check you are comparing the same meter and then assume the bug is in how you are reading the file.
 
 ### When to pause
 
