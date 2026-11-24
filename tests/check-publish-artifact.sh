@@ -29,6 +29,9 @@ publish-artifact.sh, checked over every profile copy:
   --purpose nonsense                          exits 1
   --purpose under zsh and under bash          identical remote argv
   --purpose on the local path                 --folder reaches the local argv too
+  --purpose anything                          --public reaches the argv as well
+  --purpose plan, plan_folder empty           --public still reaches the argv
+  no --purpose                                no --public anywhere
 
 exit 3 is the "no self-hosted store here" answer and must never be confused with a
 failure: the callers fall through to the Artifact tool on 3, and report on anything else.
@@ -239,6 +242,12 @@ ENVSCRIPT
     failures=$((failures + 1))
   fi
   checked=$((checked + 1))
+  if ! grep -qx -- '--public' "$WORK/args.txt" 2>/dev/null; then
+    printf '  fail — %s: --purpose plan did not send --public to the local argv\n      got: %s\n' \
+      "$profile" "$(tr '\n' '|' <"$WORK/args.txt" 2>/dev/null)"
+    failures=$((failures + 1))
+  fi
+  checked=$((checked + 1))
   rm -f "$WORK/args.txt"
 
   run_remote "$WORK/purpose/skill-env.sh" "$page" --purpose plan --expires 7d
@@ -246,6 +255,12 @@ ENVSCRIPT
   if ! grep -qx -- '--folder' "$WORK/remote-args.txt" 2>/dev/null \
     || ! grep -qx 'P/Plans' "$WORK/remote-args.txt" 2>/dev/null; then
     printf '  fail — %s: --purpose plan did not send --folder P/Plans\n      got: %s\n' \
+      "$profile" "$(tr '\n' '|' <"$WORK/remote-args.txt" 2>/dev/null)"
+    failures=$((failures + 1))
+  fi
+  checked=$((checked + 1))
+  if ! grep -qx -- '--public' "$WORK/remote-args.txt" 2>/dev/null; then
+    printf '  fail — %s: --purpose plan did not send --public\n      got: %s\n' \
       "$profile" "$(tr '\n' '|' <"$WORK/remote-args.txt" 2>/dev/null)"
     failures=$((failures + 1))
   fi
@@ -261,6 +276,19 @@ ENVSCRIPT
   run_remote "$WORK/nofolders/skill-env.sh" "$page" --purpose plan
   if grep -qx -- '--folder' "$WORK/remote-args.txt" 2>/dev/null; then
     printf '  fail — %s: an empty plan_folder still sent --folder\n' "$profile"
+    failures=$((failures + 1))
+  fi
+  checked=$((checked + 1))
+  if ! grep -qx -- '--public' "$WORK/remote-args.txt" 2>/dev/null; then
+    printf '  fail — %s: an empty plan_folder suppressed --public\n' "$profile"
+    failures=$((failures + 1))
+  fi
+  checked=$((checked + 1))
+
+  run_remote "$WORK/purpose/skill-env.sh" "$page" --expires 7d
+  if grep -qx -- '--public' "$WORK/remote-args.txt" 2>/dev/null; then
+    printf '  fail — %s: a publish with no --purpose sent --public\n      got: %s\n' \
+      "$profile" "$(tr '\n' '|' <"$WORK/remote-args.txt" 2>/dev/null)"
     failures=$((failures + 1))
   fi
   checked=$((checked + 1))
@@ -280,7 +308,8 @@ ENVSCRIPT
         '$script' '$page' --purpose plan --expires 7d >/dev/null 2>&1
     "
     if ! grep -qx -- '--folder' "$WORK/remote-args.txt" 2>/dev/null \
-      || ! grep -qx 'P/Plans' "$WORK/remote-args.txt" 2>/dev/null; then
+      || ! grep -qx 'P/Plans' "$WORK/remote-args.txt" 2>/dev/null \
+      || ! grep -qx -- '--public' "$WORK/remote-args.txt" 2>/dev/null; then
       printf '  fail — %s: --purpose plan is wrong under %s\n      got: %s\n' \
         "$profile" "$shell" "$(tr '\n' '|' <"$WORK/remote-args.txt" 2>/dev/null)"
       failures=$((failures + 1))
