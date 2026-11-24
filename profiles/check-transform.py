@@ -56,6 +56,10 @@ PRESENCE_EXEMPT = {
         'the GitHub adapter; gitlab-api.sh is a separate implementation, not its transform',
     'skills/reflect-week/SKILL.md':
         'reads Slack; work-only by design',
+    'skills/reflect-peer/SKILL.md':
+        "consumes reflect-week's peer profiles; work-only by design",
+    'skills/reflect-self/SKILL.md':
+        "consumes reflect-week's weekly reports; work-only by design",
 }
 
 WORK_PAIR_EXEMPT = {

@@ -36,6 +36,31 @@ env_get() {
   "$ENV_SCRIPT" get "$1" 2>/dev/null || true
 }
 
+NOTIFY_HOOK="${NOTIFY_HOOK:-${HOME}/.claude/hooks/notify.py}"
+
+mark_gate() {
+  local url="$1"
+  [[ "$PURPOSE" == "plan" && -n "$url" ]] || return 0
+  [[ -f "$NOTIFY_HOOK" ]] || return 0
+  python3 "$NOTIFY_HOOK" --gate-pending "$url" >/dev/null 2>&1 || true
+}
+
+publish_and_report() {
+  local output status
+  set +e
+  output=$("$@")
+  status=$?
+  set -e
+  if [[ -n "$output" ]]; then
+    printf '%s\n' "$output"
+  fi
+  if [[ "$status" -eq 0 ]]; then
+    mark_gate "$(printf '%s\n' "$output" \
+      | grep -oE 'https?://[^[:space:]]+' | tail -1 || true)"
+  fi
+  return "$status"
+}
+
 if [[ $# -eq 0 ]]; then
   usage >&2
   exit 1
@@ -94,7 +119,8 @@ if [[ -n "$PURPOSE" ]]; then
 fi
 
 if command -v publish-artifact >/dev/null 2>&1; then
-  exec publish-artifact "$@"
+  publish_and_report publish-artifact "$@"
+  exit $?
 fi
 
 HOST=$(env_get mnemosyne_host)
@@ -146,4 +172,4 @@ if [[ -n "$OWNER" ]]; then
   ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "chmod a+r '$REMOTE_PATH'" || true
 fi
 
-remote_publish "$REMOTE_PATH" "$@"
+publish_and_report remote_publish "$REMOTE_PATH" "$@"

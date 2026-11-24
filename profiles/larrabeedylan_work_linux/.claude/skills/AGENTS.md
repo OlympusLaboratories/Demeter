@@ -22,12 +22,26 @@ Each skill is a subdirectory containing a `SKILL.md` file that defines the skill
 | `ping` | Send yourself a push notification carrying what this session is doing and what it needs. Invoked directly, or by another skill handing over a status, a question, a blocker or a finished run. The notification is one-way — answering from a phone is Remote Control, which is armed at session startup because no skill can run a slash command, and which `/ping off` therefore does not disconnect |
 | `plan-initiative` | Sequence a Linear initiative's subtasks and delegate them across named engineers — dependency graph, parallelism verdict, swimlane chart, per-person work orders |
 | `plan-subtasks` | Turn a design doc + implementation breakdown into a Linear ticket tree — one parent, one MR-sized subtask per reviewable slice, both doc links on every ticket; confirms team/project/assignee and writes to Linear only after the plan is approved |
-| `reflect-peer` | Peer assessment generator (stub) |
-| `reflect-self` | Self-assessment generator (stub) |
+| `reflect-peer` | Peer assessment generator. Unfinished — it has no output contract, and what is left to build is under Backlog below |
+| `reflect-self` | Performance-review self-assessment generator |
 | `reflect-week` | Generate weekly engineering snippets |
 | `review-code` | Adversarial multi-agent review of proposed local changes, or of an incoming branch someone else pushed — the latter is fetched into a detached review worktree and comes back with a pack of ready-to-paste review comments (uses the Workflow tool; prints a `wf_…` run ID to watch live with `wfwatch <id>`) |
 | `review-kludge` | Adversarial swarm that reviews recent large features for accumulated kludge/AI-slop and proposes refactors (uses the Workflow tool; prints a `wf_…` run ID to watch live with `wfwatch <id>`) |
 | `workflow-resume` | Rescue a `Workflow` swarm that died mid-run — diagnoses why (spend limit, kill, API errors), then either resumes it from the on-disk agent cache or harvests the finished agents' results |
+
+The three `reflect-*` skills ship **only in the two work profiles**, and that is deliberate rather than an oversight. `reflect-week` reads Slack and is the sole producer of the input the other two consume — `reflect-self` reads its weekly reports out of `reflect-self/context/`, and `reflect-peer` reads its per-peer collaboration profiles out of `reflect-peer/context/`. Nothing on a home machine writes either directory, so shipping the consumers there would put two skills in every session's skill index that can only ever report an empty context directory, and a user who reads the listing would reasonably assume they work. `profiles/check-transform.py` carries all three in `PRESENCE_EXEMPT` with that reason, so the absence is *reported* on every drift run rather than silently tolerated, and `install.sh` creates a `context/` directory only for a `reflect-*` skill the profile actually linked.
+
+## Backlog
+
+**`reflect-peer` is unfinished, and this is what is left.** It has three steps and no output contract — no output format, no sections, no review-period selection. The list lives here rather than as a `## TODO` at the end of `SKILL.md`, because a TODO list inside a skill body is text the model reads and tries to act on: an invocation would work through the unbuilt items as if they were instructions. As documentation it is a backlog; as a skill step it was a trap.
+
+- Parameterize by peer name, rather than naming the argument and never using it.
+- Pull the peer's merged merge requests for the review period, to tie code contributions to the collaboration evidence already in the context reports.
+- Define the output format and sections. `reflect-self` is the template worth copying — it states where the answers go, how the word count is shown, and how an unverified claim is flagged.
+- Define review-period selection (quarterly, half, custom range).
+- Add instructions for synthesizing across multiple weekly profiles.
+
+Finishing it is a feature build, not a cleanup. Until somebody does, the skill stays listed and unfinished on work only.
 
 ## Worktrees
 

@@ -55,3 +55,6 @@ jobs:
 
       - name: Artifact publish seam
         run: tests/check-publish-artifact.sh
+
+      - name: Plan gate notification
+        run: tests/check-plan-gate.py

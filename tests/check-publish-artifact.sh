@@ -32,9 +32,20 @@ publish-artifact.sh, checked over every profile copy:
   --purpose anything                          --public reaches the argv as well
   --purpose plan, plan_folder empty           --public still reaches the argv
   no --purpose                                no --public anywhere
+  --purpose plan, publish succeeded           notify.py --gate-pending <url> is called
+  --purpose plan on the local path            the same, with the local url
+  --purpose diagram                           no gate call
+  no --purpose                                no gate call
+  --purpose plan, publish failed              no gate call
+  --purpose plan, no notify.py present        still exits 0
 
 exit 3 is the "no self-hosted store here" answer and must never be confused with a
 failure: the callers fall through to the Artifact tool on 3, and report on anything else.
+
+The gate call is what stops a published plan stranding the run. A plan is published so it
+can be approved, so the hook records the url and notifies even on an unarmed session when
+the turn ends without the approval question being asked. Marking must never be able to fail
+a publish, and must never fire for a page nobody is waiting on.
 RULES
   exit 0
 fi
@@ -222,11 +233,49 @@ ENVSCRIPT
     rm -f "$WORK/remote-args.txt"
     SCP_LOG="$WORK/scp.log" SCP_SOURCE="$WORK/scp-source.txt" \
     SSH_LOG="$WORK/ssh.log" REMOTE_ARGS="$WORK/remote-args.txt" \
-    FAKE_REMOTE_BIN="$WORK/remotebin" \
+    FAKE_REMOTE_BIN="${REMOTE_BIN:-$WORK/remotebin}" \
+    GATE_CALLS="$WORK/gate-calls.txt" NOTIFY_HOOK="$WORK/fake-notify.py" \
     PATH="$WORK/fake:/usr/bin:/bin" \
     SKILL_ENV="$env_file" \
     "$script" "$@" >/dev/null 2>&1
   }
+
+  cat >"$WORK/fake-notify.py" <<'NOTIFY'
+import os
+import sys
+with open(os.environ["GATE_CALLS"], "a", encoding="utf-8") as handle:
+    handle.write(" ".join(sys.argv[1:]) + "\n")
+NOTIFY
+
+  mkdir -p "$WORK/binurl"
+  cat >"$WORK/binurl/publish-artifact" <<'LOCALURL'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >"$LOCAL_ARGS"
+echo "https://example.invalid/local"
+LOCALURL
+  chmod +x "$WORK/binurl/publish-artifact"
+
+  mkdir -p "$WORK/remotefail"
+  cat >"$WORK/remotefail/publish-artifact" <<'REMOTEFAIL'
+#!/usr/bin/env bash
+echo "the store refused it" >&2
+exit 1
+REMOTEFAIL
+  chmod +x "$WORK/remotefail/publish-artifact"
+
+  gate_calls() {
+    cat "$WORK/gate-calls.txt" 2>/dev/null | tr '\n' '|'
+  }
+
+  no_gate_call() {
+    local label="$1"
+    checked=$((checked + 1))
+    if [[ -s "$WORK/gate-calls.txt" ]]; then
+      printf '  fail — %s: %s\n      got: %s\n' "$profile" "$label" "$(gate_calls)"
+      failures=$((failures + 1))
+    fi
+  }
+
 
   purpose_env "$WORK/purpose" 'P/Plans' 'P/Diagrams'
   purpose_env "$WORK/nofolders" '' ''
@@ -292,6 +341,46 @@ ENVSCRIPT
     failures=$((failures + 1))
   fi
   checked=$((checked + 1))
+
+  rm -f "$WORK/gate-calls.txt"
+  run_remote "$WORK/purpose/skill-env.sh" "$page" --purpose plan
+  checked=$((checked + 1))
+  if [[ "$(gate_calls)" != "--gate-pending https://example.invalid/abc|" ]]; then
+    printf '  fail — %s: --purpose plan did not record the gate\n      got: %s\n' \
+      "$profile" "$(gate_calls)"
+    failures=$((failures + 1))
+  fi
+
+  rm -f "$WORK/gate-calls.txt"
+  run_remote "$WORK/purpose/skill-env.sh" "$page" --purpose diagram
+  no_gate_call "--purpose diagram recorded a gate"
+
+  rm -f "$WORK/gate-calls.txt"
+  run_remote "$WORK/purpose/skill-env.sh" "$page" --expires 7d
+  no_gate_call "a publish with no --purpose recorded a gate"
+
+  rm -f "$WORK/gate-calls.txt"
+  REMOTE_BIN="$WORK/remotefail" run_remote "$WORK/purpose/skill-env.sh" "$page" --purpose plan
+  no_gate_call "a failed publish recorded a gate"
+
+  rm -f "$WORK/gate-calls.txt" "$WORK/args.txt"
+  LOCAL_ARGS="$WORK/args.txt" PATH="$WORK/binurl:$PATH" \
+    GATE_CALLS="$WORK/gate-calls.txt" NOTIFY_HOOK="$WORK/fake-notify.py" \
+    SKILL_ENV="$WORK/purpose/skill-env.sh" "$script" "$page" --purpose plan >/dev/null 2>&1
+  check "$profile: --purpose plan on the local path still exits 0" 0 $?
+  checked=$((checked + 1))
+  if [[ "$(gate_calls)" != "--gate-pending https://example.invalid/local|" ]]; then
+    printf '  fail — %s: the local path did not record the gate\n      got: %s\n' \
+      "$profile" "$(gate_calls)"
+    failures=$((failures + 1))
+  fi
+
+  rm -f "$WORK/gate-calls.txt"
+  GATE_CALLS="$WORK/gate-calls.txt" NOTIFY_HOOK="$WORK/absent-notify.py" \
+    PATH="$WORK/binurl:$PATH" LOCAL_ARGS="$WORK/args.txt" \
+    SKILL_ENV="$WORK/purpose/skill-env.sh" "$script" "$page" --purpose plan >/dev/null 2>&1
+  check "$profile: a missing notify.py never fails the publish" 0 $?
+  rm -f "$WORK/gate-calls.txt"
 
   run_remote "$WORK/purpose/skill-env.sh" "$page" --purpose nonsense
   check "$profile: --purpose nonsense" 1 $?

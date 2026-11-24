@@ -93,7 +93,7 @@ The installer does the following in order:
 15. Symlinks `git/ignore` to the machine-wide gitignore git actually reads, and verifies it took
 16. Prompts to install any extension in `vscode/extensions.txt` missing from the editor. Each `--install-extension` runs under a timeout (`EXTENSION_INSTALL_TIMEOUT`, default 180s) and is then judged by `--list-extensions`, because the server CLI can finish installing and never exit
 17. Cleans stale skill symlinks (removes symlinks pointing to deleted repo paths)
-18. Creates data directories for skills that accumulate context
+18. Creates data directories for skills that accumulate context, gated on the skill being linked — a profile that ships no `reflect-*` gets no `reflect-*/context`
 19. Runs `profiles/check-transform.py` to report profile drift — **warning-only**, and skipped without complaint when `python3` is absent
 
 Key behaviors:
@@ -167,6 +167,7 @@ anything in its subtree.
 - **A notification is only as good as its gate**: `agent_id` events are suppressed, `min_interval_seconds` always applies, and turn length is measured from the **last handoff back to you**. → `profiles/<p>/.claude/hooks/AGENTS.md`
 - **Notifications are opt-in per session, and `/ping` is the opt-in**: `armed_at` is a latch only `/ping off` clears, written only on a successful send. → `profiles/<p>/.claude/hooks/AGENTS.md`
 - **The latch gates news, never stuck**: `question` and `permission` notify **without** arming; `idle` is excluded, and an explicit off switch and quiet hours still outrank it. → `profiles/<p>/.claude/hooks/AGENTS.md`
+- **A published plan is a promise of a question**: `publish-artifact.sh --purpose plan` records the URL, and a turn ending with that marker set notifies **regardless of arming**. It is a smoke alarm, not a safety net — the publish and the `AskUserQuestion` belong in **one turn**. → `profiles/<p>/.claude/hooks/AGENTS.md`
 - **The notification body is summarized by a model**: via `claude -p` on the subscription, never an API key; every failure degrades to a mechanical condense and still sends. → `profiles/<p>/.claude/hooks/AGENTS.md`
 - **Only a thread’s first message repeats its context**: the root is `<repo> · <title>`, anchored before the first event; replies are `<glyph> <body>`. An absolute URL survives `strip_markdown`. → `profiles/<p>/.claude/hooks/AGENTS.md`
 - **Composition is shared across transports; only delivery is not**: both senders use one layout, and the `ping` skill's budget moves with `SUMMARY_MAX_WORDS`. → `profiles/<p>/.claude/hooks/AGENTS.md`
