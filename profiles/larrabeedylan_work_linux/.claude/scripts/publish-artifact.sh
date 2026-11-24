@@ -45,6 +45,13 @@ mark_gate() {
   python3 "$NOTIFY_HOOK" --gate-pending "$url" >/dev/null 2>&1 || true
 }
 
+published_url() {
+  local last
+  last=$(printf '%s\n' "$1" | tail -1 | awk '{$1=$1; print}')
+  [[ "$last" =~ ^https?://[^[:space:]]+$ ]] || return 0
+  printf '%s\n' "$last"
+}
+
 publish_and_report() {
   local output status
   set +e
@@ -55,8 +62,7 @@ publish_and_report() {
     printf '%s\n' "$output"
   fi
   if [[ "$status" -eq 0 ]]; then
-    mark_gate "$(printf '%s\n' "$output" \
-      | grep -oE 'https?://[^[:space:]]+' | tail -1 || true)"
+    mark_gate "$(published_url "$output")"
   fi
   return "$status"
 }
