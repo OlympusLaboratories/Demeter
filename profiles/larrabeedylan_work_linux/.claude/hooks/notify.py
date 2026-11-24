@@ -1066,7 +1066,7 @@ def cmd_ping(args):
     rest = list(args)
     while rest:
         flag = rest.pop(0)
-        if flag not in given or not rest:
+        if flag not in given or not rest or rest[0].startswith("--"):
             print(PING_USAGE, file=sys.stderr)
             return 2
         given[flag] = rest.pop(0)
