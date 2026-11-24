@@ -688,6 +688,8 @@ It stops the notifications and nothing else. In particular it does not disconnec
 
 From the shell, `notify.py --disarm <session-id>` does the same thing, and `--disarm all` clears every session.
 
+Sending is the same one owner: `notify.py --ping --level <level> --title <title> --body -` composes the envelope, resolves the repo and the session's title and thread, sends, and arms the session — which is what the `/ping` skill runs. The body comes in on stdin so prose with quotes and newlines survives, and a failed send exits non-zero with the sender's stderr and leaves the session unarmed.
+
 Arming is per-session: three sessions running and a ping from one opts in only that one. `away` is the global override.
 
 Setting `only_when_armed` to `false` restores the old always-on behaviour, where any turn longer than `min_turn_seconds` notifies whether or not you asked for it.

@@ -20,6 +20,7 @@ LOG_PATH = os.path.join(STATE, "notify.log")
 LOG_LIMIT = 1024 * 1024
 PLACEHOLDER = "REPLACE_ME"
 SEND_TIMEOUT = 30
+SENDER_ERR_LIMIT = 500
 BODY_LIMIT = 1200
 TAIL_CHUNK = 262144
 TAIL_LIMIT = 8 * 1024 * 1024
@@ -774,7 +775,8 @@ def send(envelope):
     except (OSError, subprocess.SubprocessError) as error:
         return None, "sender failed: %s" % error
     if done.returncode != 0:
-        return None, "sender exit %d: %s" % (done.returncode, (done.stderr or "").strip()[:200])
+        return None, "sender exit %d: %s" % (
+            done.returncode, (done.stderr or "").strip()[:SENDER_ERR_LIMIT])
     reply = {}
     try:
         reply = json.loads(done.stdout or "{}")
@@ -876,6 +878,45 @@ def body_for(kind, payload):
     return payload.get("message") or payload.get("last_assistant_message") or ""
 
 
+def build_envelope(level, title, body, repo, branch, session_id, label, cwd, thread):
+    envelope = {
+        "title": title,
+        "body": body,
+        "level": level,
+        "repo": repo,
+        "cwd": cwd,
+    }
+    if label:
+        envelope["session_label"] = label
+    if branch:
+        envelope["branch"] = branch
+    if session_id:
+        envelope["session"] = session_id[:8]
+    if thread:
+        envelope["thread"] = thread
+    return envelope
+
+
+def record_sent(session_id, state, now, kind=None, thread=None, arm=False):
+    if kind is not None:
+        state["last_sent"] = now
+        state["last_kind"] = kind
+    if arm:
+        state["armed_at"] = now
+    if thread:
+        state["thread"] = thread
+    return write_json(session_path(session_id), state)
+
+
+def append_change_request(body, transcript_path, state, cwd):
+    if "http" in (body or ""):
+        return body, False
+    link = change_request_for(transcript_path, state, cwd)
+    if not link:
+        return body, False
+    return ((body or "").rstrip() + "\n" + link).strip(), True
+
+
 def handle(payload):
     if payload.get("agent_id") or payload.get("agent_type"):
         return "skip: subagent"
@@ -924,19 +965,11 @@ def handle(payload):
     repo = repo_label(cwd, config["host_label"])
     branch = branch_label(cwd)
     body, how = shorten(body_for(kind, payload), kind, config)
-    envelope = {
-        "title": "%s %s" % (repo, label),
-        "body": body,
-        "session": session_id[:8],
-        "repo": repo,
-        "branch": branch,
-        "level": kind,
-        "session_label": session_title(
-            payload.get("transcript_path"), config, state),
-        "cwd": cwd,
-        "thread": state.get("thread"),
-        "away": away,
-    }
+    envelope = build_envelope(
+        kind, "%s %s" % (repo, label), body, repo, branch, session_id,
+        session_title(payload.get("transcript_path"), config, state),
+        cwd, state.get("thread"))
+    envelope["away"] = away
 
     # A session's first notification becomes the thread root, and the root is
     # the only message carrying the repo and the title. When that first event is
@@ -959,21 +992,16 @@ def handle(payload):
     # from a phone, and every rule telling a skill to include one is an
     # instruction a model can forget. The transcript already holds the URL, so
     # the hook appends it rather than trusting the body to carry it.
-    if "http" not in (envelope.get("body") or ""):
-        link = change_request_for(payload.get("transcript_path"), state, cwd)
-        if link:
-            envelope["body"] = ((envelope.get("body") or "").rstrip() + "\n" + link).strip()
-            log("appended change request link for %s" % repo)
+    envelope["body"], appended = append_change_request(
+        envelope.get("body"), payload.get("transcript_path"), state, cwd)
+    if appended:
+        log("appended change request link for %s" % repo)
 
     thread, problem = send(envelope)
     if problem:
         return "error: %s" % problem
 
-    state["last_sent"] = now
-    state["last_kind"] = kind
-    if thread:
-        state["thread"] = thread
-    write_json(session_path(session_id), state)
+    record_sent(session_id, state, now, kind=kind, thread=thread)
     if unarmed_blocking:
         how += "; unarmed: blocking gate"
     return "sent %s for %s (%s)" % (kind, repo, how)
@@ -1016,6 +1044,74 @@ def cmd_disarm(args):
         return 0
     write_json(path, state)
     print("disarmed session %s" % target[:8])
+    return 0
+
+
+PING_USAGE = (
+    "usage: notify.py --ping --level <level> --title <title>"
+    " [--body <text>|-] [--session <id>]"
+    "\n       the body is read from stdin when --body is absent or -")
+
+
+def session_from_env():
+    for name in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"):
+        value = (os.environ.get(name) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def cmd_ping(args):
+    given = {"--level": "", "--title": "", "--session": "", "--body": None}
+    rest = list(args)
+    while rest:
+        flag = rest.pop(0)
+        if flag not in given or not rest:
+            print(PING_USAGE, file=sys.stderr)
+            return 2
+        given[flag] = rest.pop(0)
+
+    level = given["--level"].strip()
+    title = given["--title"].strip()
+    body = given["--body"]
+    if body is None or body == "-":
+        body = sys.stdin.read()
+    body = body.strip()
+    if not level or not title or not body:
+        print(PING_USAGE, file=sys.stderr)
+        return 2
+
+    session_id = given["--session"].strip() or session_from_env()
+    config, _ = load_config()
+    cwd = os.getcwd()
+    repo = repo_label(cwd, (config or DEFAULTS)["host_label"])
+    transcript_path = transcript_for(session_id) if session_id else None
+    state = (read_json(session_path(session_id), {}) or {}) if session_id else {}
+    if not isinstance(state, dict):
+        state = {}
+    label = session_title(transcript_path, config, state) if session_id else ""
+    body, appended = append_change_request(body, transcript_path, state, cwd)
+
+    envelope = build_envelope(
+        level, title, body, repo, branch_label(cwd), session_id, label,
+        cwd, state.get("thread"))
+    thread, problem = send(envelope)
+    if problem:
+        log("--ping %s failed: %s" % (level, problem))
+        print(problem, file=sys.stderr)
+        return 1
+
+    if session_id:
+        if not record_sent(session_id, state, time.time(), thread=thread, arm=True):
+            print("sent, but %s could not be written: this session is NOT armed"
+                  % session_path(session_id), file=sys.stderr)
+    else:
+        print("no session id resolved: sent unthreaded, and this session is"
+              " NOT armed for automatic notifications", file=sys.stderr)
+    log("--ping sent %s for %s (%s%s)" % (
+        level, repo, "armed" if session_id else "unarmed, no session id",
+        ", link appended" if appended else ""))
+    print("sent %s for %s" % (level, repo))
     return 0
 
 
@@ -1083,6 +1179,8 @@ def main():
         return cmd_test()
     if args and args[0] == "--disarm":
         return cmd_disarm(args[1:])
+    if args and args[0] == "--ping":
+        return cmd_ping(args[1:])
     if args and args[0] == "--change-request":
         session_id = args[1] if len(args) > 1 else ""
         path = session_path(session_id) if session_id else None
@@ -1118,7 +1216,9 @@ def main():
         print(
             "usage: notify.py [--test | --away [<duration>|off|status]"
             " | --disarm <session-id>|all | --label <session-id>"
-            " | --repo [<cwd>]]", file=sys.stderr)
+            " | --repo [<cwd>] | --change-request <session-id>"
+            " | --ping --level <level> --title <title>"
+            " [--body <text>|-] [--session <id>]]", file=sys.stderr)
         return 2
     payload = json.load(sys.stdin)
     log("%s %s" % (payload.get("hook_event_name"), handle(payload)))
@@ -1129,7 +1229,7 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Exception as error:
-        if "--test" in sys.argv:
+        if "--test" in sys.argv or "--ping" in sys.argv:
             raise
         log("crash: %r" % (error,))
         sys.exit(0)
