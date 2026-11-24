@@ -120,12 +120,15 @@ Re-running for the same branch: rebuild, then publish **the same file path**. Th
   --description '<one sentence, naming the branch>'
 ```
 
-It prints the URL on stdout. `--purpose diagram` makes the script look up
-`diagram_folder` itself and omit the flag when that key is empty — **never pass
-`--folder` with a name of your own**, because publishing refuses a folder that does not
-exist and the run loses its diagram to a guess. The conditional form this replaced,
-`${FOLDER:+--folder "$FOLDER"}`, is not shell-portable: bash splits it into two
-arguments and zsh keeps it as one, so it fused the flag onto its value.
+It prints the URL on stdout. `--purpose diagram` is the whole of the configuration. The
+script looks up `diagram_folder` itself and omits the folder flag when that key is empty
+— **never pass `--folder` with a name of your own**, because publishing refuses a folder
+that does not exist and the run loses its diagram to a guess. The conditional form this
+replaced, `${FOLDER:+--folder "$FOLDER"}`, is not shell-portable: bash splits it into two
+arguments and zsh keeps it as one, so it fused the flag onto its value. The purpose also
+publishes the page **public**, which is what makes the link worth attaching: a private
+artifact is a 404 to everyone without an admin session, so the merge request reader it was
+drawn for would have got a login screen.
 
 **Exit status 3 is not a failure.** It means this machine has no self-hosted store, which
 is the ordinary answer on most of them. Fall through to the next option. Any other

@@ -10,6 +10,7 @@ on:
       - 'shell/**'
       - 'tests/**'
       - 'profiles/*/.claude/hooks/**'
+      - 'profiles/*/.claude/scripts/**'
       - '.github/workflows/shell-checks.yml'
 
 concurrency:

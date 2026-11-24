@@ -25,7 +25,7 @@ Demeter/
     check_link_roots.py   # the static half of the above
     uninstall-roundtrip.sh # plant a link under every root, sweep, assert none survive
     check-change-request.py # the ping's link resolution order, over every profile copy; `rules` prints it
-    check-publish-artifact.sh # the artifact publish seam's exit codes and arg forwarding; `rules` prints it
+    check-publish-artifact.sh # the artifact publish seam's exit codes, visibility and arg forwarding; `rules` prints it
   tools/                  # First-party projects shared by every profile
     claude-usage/         # VS Code extension, linked into ~/.claude/tools/
     worktree-sync/        # VS Code extension, linked into ~/.claude/tools/
@@ -59,7 +59,7 @@ Demeter/
         hooks/            # Hook scripts, synced to ~/.claude/hooks/
         scripts/          # Helper scripts used by skills
           skill-env.sh    # the per-machine seam; `check` prints what a skill will see
-          publish-artifact.sh # publishes HTML to the self-hosted store, or exits 3 if absent
+          publish-artifact.sh # publishes HTML to the self-hosted store, public when a --purpose is named, or exits 3 if absent
 ```
 
 ## Context Discovery
@@ -144,7 +144,8 @@ anything in its subtree.
 - **An empty diagram is worse than no diagram**: `changes-diagram` guarantees a non-empty diff produces a non-empty chart, and records which mode it drew. → `profiles/<p>/.claude/skills/AGENTS.md`
 - **The diagram's publish target is configuration**: a new external resource must clear the Artifact tool's CSP allowlist or it fails invisibly, a local file is a success, and the self-hosted branch goes through `publish-artifact.sh` rather than discovering a command at runtime. → `profiles/<p>/.claude/skills/AGENTS.md`
 - **A skill must never hardcode what differs between machines**: `scripts/skill-env.sh` is the seam, and **an empty value means the capability is absent here, never "go and guess"**. → `profiles/<p>/.claude/skills/AGENTS.md`
-- **One script reaches the self-hosted artifact store, and four keys carry the machine difference**: `publish-artifact.sh` prints the URL or exits **3** to mean "no such store here", which is the ordinary answer on a work box rather than a failure. A caller passes `--purpose plan|diagram` and the script resolves the folder, because `${FOLDER:+--folder "$FOLDER"}` in a skill body yields two arguments under bash and **one** under zsh. → `profiles/<p>/.claude/skills/AGENTS.md`
+- **One script reaches the self-hosted artifact store, and four keys carry the machine difference**: `publish-artifact.sh` prints the URL or exits **3** to mean "no such store here", which is the ordinary answer on a work box rather than a failure. A caller passes `--purpose plan|diagram` and the script resolves the folder, because `${FOLDER:+--folder "$FOLDER"}` in a skill body yields two arguments under bash and **one** under zsh. The purpose also makes the page **public** — a private artifact is a 404 without an admin session and the management URL redirects to `/login`, so every plan and diagram was unreadable by the only person it was published for. → `profiles/<p>/.claude/skills/AGENTS.md`
+- **A published link reaches the user as a chat message, never inside the question**: `AskUserQuestion` renders no links, so the plan gate sends the URL on its own immediately before asking, and the question carries no plan summary at all. → `profiles/<p>/.claude/skills/AGENTS.md`
 - **A forge helper's subcommand list is derived from its own source**: it is the skills' only discovery mechanism, so never hand-maintain it. → `profiles/<p>/.claude/skills/AGENTS.md`
 - **A clip has to announce itself**: `job-log` bounds its output and every path prints the total and what it dropped. → `profiles/<p>/.claude/skills/AGENTS.md`
 - **Profile divergence is a mechanical transform, not prose rewriting**: a work skill becomes its home counterpart through exactly these ten substitutions, in order — `an MR`→`a PR`, `An MR`→`A PR`, `merge requests`→`pull requests`, `merge request`→`pull request`, `Merge Request`→`Pull Request`, `Merge request`→`Pull request`, `GitLab`→`GitHub`, `\bMR(?=\d)`→`PR`, `\bMRs\b`→`PRs`, `\bMR\b`→`PR` — plus `gitlab-api.sh`→`github-api.sh`. **`profiles/check-transform.py` is where that list now lives in code**, and it is the authority — this prose is the explanation, not the implementation. Three traps. **`\bMR\b` cannot see `MR2`** — the digit is a word character — so stack labels like `MR1`…`MR5` in `plan-subtasks` survive untransformed without the lookahead rule. **`\b` silently no-ops in BSD `sed` on macOS**, producing output that looks transformed and is not; use `perl`, GNU sed, or python `re`. And **never add a URL-rewriting rule**: `reflect-peer`'s context files carry real `gitlab.com/-/merge_requests/…` links that are evidence, not vocabulary, and rewriting the host turns them into 404s. Write the **work** copy so the transform yields clean English on the other side — never `an \`MR<n>\``, and no literal example URLs — since the transform cannot see through a backtick or into a hostname. Say "merge request" in the work copy wherever the home copy should say "pull request"
