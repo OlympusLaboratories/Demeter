@@ -32,7 +32,10 @@ publish-artifact.sh, checked over every profile copy:
   --purpose anything                          --public reaches the argv as well
   --purpose plan, plan_folder empty           --public still reaches the argv
   no --purpose                                no --public anywhere
-  --purpose plan, publish succeeded           notify.py --gate-pending <url> is called
+  --purpose plan, publish succeeded           notify.py --gate-pending <url> is called,
+                                              with the publisher's LAST line and only when
+                                              that whole line is a url - never a url
+                                              grepped out of surrounding chatter
   --purpose plan on the local path            the same, with the local url
   --purpose diagram                           no gate call
   no --purpose                                no gate call
@@ -274,6 +277,25 @@ echo "https://example.invalid/local"
 LOCALURL
   chmod +x "$WORK/binurl/publish-artifact"
 
+  mkdir -p "$WORK/binchatty"
+  cat >"$WORK/binchatty/publish-artifact" <<'CHATTY'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >"$LOCAL_ARGS"
+echo "uploading page.html"
+echo "see https://artifacts.example.dev/sneaky for the index"
+CHATTY
+  chmod +x "$WORK/binchatty/publish-artifact"
+
+  mkdir -p "$WORK/binnoisy"
+  cat >"$WORK/binnoisy/publish-artifact" <<'NOISY'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >"$LOCAL_ARGS"
+echo "uploading page.html"
+echo "stored 4.1 KiB"
+echo "  https://artifacts.example.dev/real  "
+NOISY
+  chmod +x "$WORK/binnoisy/publish-artifact"
+
   mkdir -p "$WORK/remotefail"
   cat >"$WORK/remotefail/publish-artifact" <<'REMOTEFAIL'
 #!/usr/bin/env bash
@@ -390,6 +412,23 @@ REMOTEFAIL
   checked=$((checked + 1))
   if [[ "$(gate_calls)" != "--gate-pending https://example.invalid/local|" ]]; then
     printf '  fail — %s: the local path did not record the gate\n      got: %s\n' \
+      "$profile" "$(gate_calls)"
+    failures=$((failures + 1))
+  fi
+
+  rm -f "$WORK/gate-calls.txt" "$WORK/args.txt"
+  LOCAL_ARGS="$WORK/args.txt" PATH="$WORK/binchatty:$PATH" \
+    GATE_CALLS="$WORK/gate-calls.txt" NOTIFY_HOOK="$WORK/fake-notify.py" \
+    SKILL_ENV="$WORK/purpose/skill-env.sh" "$script" "$page" --purpose plan >/dev/null 2>&1
+  no_gate_call "a url buried in the publisher's last line was recorded as the page"
+
+  rm -f "$WORK/gate-calls.txt" "$WORK/args.txt"
+  LOCAL_ARGS="$WORK/args.txt" PATH="$WORK/binnoisy:$PATH" \
+    GATE_CALLS="$WORK/gate-calls.txt" NOTIFY_HOOK="$WORK/fake-notify.py" \
+    SKILL_ENV="$WORK/purpose/skill-env.sh" "$script" "$page" --purpose plan >/dev/null 2>&1
+  checked=$((checked + 1))
+  if [[ "$(gate_calls)" != "--gate-pending https://artifacts.example.dev/real|" ]]; then
+    printf '  fail — %s: a url printed last among progress lines was not recorded\n      got: %s\n' \
       "$profile" "$(gate_calls)"
     failures=$((failures + 1))
   fi

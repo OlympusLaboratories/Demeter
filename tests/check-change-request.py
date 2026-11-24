@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROFILES = (
@@ -13,9 +14,12 @@ PROFILES = (
 )
 
 REAL = "https://github.com/owner/repo/pull/7"
+BASE = "https://github.com/owner/repo/pull/6"
 OTHER = "https://github.com/elsewhere/other/pull/99"
+SECOND = "https://github.com/elsewhere/other/pull/100"
 FIXTURE = "https://github.com/o/r/pull/9"
 SLUG = "owner/repo"
+BRANCH = "dylan/OLY-21"
 
 
 def load(profile):
@@ -40,6 +44,17 @@ def answered(url):
 
 def answered_escaped(url):
     return '{"content":"{\\"number\\": 7, \\"html_url\\": \\"%s\\"}"}' % url
+
+
+def opened_from(url, branch):
+    return ('tool result: {"number": 7, "html_url": "%s", "title": "t",'
+            ' "draft": false, "head": "%s", "base": "main"}' % (url, branch))
+
+
+def answered_with_state(url, state, branch="somebody/else"):
+    return ('tool result: {"title": "t", "description": "d", "state": "%s",'
+            ' "author": "a", "web_url": "%s", "source_branch": "%s",'
+            ' "target_branch": "main"}' % (state, url, branch))
 
 
 CASES = [
@@ -91,12 +106,80 @@ CASES = [
         OTHER,
         REAL,
     ),
+    (
+        "the record opened from the session's branch beats a later entry",
+        [opened_from(REAL, BRANCH), answered(BASE)],
+        None,
+        REAL,
+    ),
+    (
+        "the session's remote filters another repository out of the forge's answer",
+        [answered(REAL), answered(OTHER)],
+        None,
+        REAL,
+    ),
+    (
+        "a closed change request is never offered",
+        [answered_with_state(REAL, "closed")],
+        None,
+        None,
+    ),
+    (
+        "a merged change request is never offered",
+        [answered_with_state(REAL, "merged")],
+        None,
+        None,
+    ),
+    (
+        "a record carrying no state is not treated as closed",
+        [opened_from(REAL, "somebody/else")],
+        None,
+        REAL,
+    ),
+    (
+        "a cross-repository answer still wins when it is the only one",
+        [answered(OTHER)],
+        None,
+        OTHER,
+    ),
+    (
+        "a listing of other repositories' change requests answers nothing",
+        [answered(OTHER), answered(SECOND)],
+        None,
+        None,
+    ),
+    (
+        "the cache cannot resurrect a change request the scans rejected as closed",
+        [answered_with_state(REAL, "merged")],
+        REAL,
+        None,
+    ),
+    (
+        "a cached url the transcript says nothing about still answers",
+        ["nothing resembling a change request here"],
+        REAL,
+        REAL,
+    ),
+    (
+        "a cache older than the threshold is not an answer",
+        ["nothing resembling a change request here"],
+        {"url": OTHER, "at": 0},
+        None,
+    ),
+    (
+        "a cache inside the threshold still answers",
+        ["nothing resembling a change request here"],
+        {"url": OTHER, "at": time.time()},
+        OTHER,
+    ),
 ]
 
 
 def run(profile, directory):
     module = load(profile)
     module.remote_slug = lambda cwd=None: SLUG
+    module.branch_label = lambda cwd=None: BRANCH
+    module.log = lambda message: None
     failures = []
     for index, (label, lines, cached, want) in enumerate(CASES):
         path = transcript(directory, "%s-%d" % (profile, index), lines)
@@ -105,9 +188,10 @@ def run(profile, directory):
         if got != want:
             failures.append("  %s\n      want %r\n      got  %r" % (label, want, got))
             continue
-        if want and state.get("change_request") != want:
+        if want and module.cached_change_request(state) != want:
             failures.append(
-                "  %s\n      cache not updated: %r" % (label, state.get("change_request"))
+                "  %s\n      cache does not read back: %r"
+                % (label, state.get("change_request"))
             )
     return failures
 
@@ -115,9 +199,17 @@ def run(profile, directory):
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "rules":
         print("change_request_for resolution order, checked over every profile copy:")
-        print("  1. the forge's own answer   — an html_url/web_url key in a tool result")
+        print("  1. the forge's own answer   — an html_url/web_url key in a tool result,")
+        print("     preferring the record opened from the session's current branch, then")
+        print("     one carrying the session remote's owner/repo, then a lone")
+        print("     cross-repository answer; a listing matching neither answers nothing")
         print("  2. prose carrying the session remote's owner/repo")
-        print("  3. the value cached in the session state")
+        print("  3. the value cached in the session state, until it ages out")
+        print()
+        print("a record the transcript shows as closed or merged is dropped at every")
+        print("tier, including the prose scan that would otherwise re-find its url")
+        print("inside the very answer that declared it closed. an absent state is")
+        print("unknown, not closed, so the fallback tiers keep working.")
         print()
         print("cases:")
         for label, _, _, want in CASES:

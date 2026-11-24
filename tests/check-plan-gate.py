@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROFILES = (
@@ -16,6 +17,26 @@ PROFILES = (
 SESSION = "11111111-2222-3333-4444-555555555555"
 PLAN = "https://artifacts.example.dev/abc123"
 LATER = "https://artifacts.example.dev/def456"
+PLACEHOLDER_URL = "https://example.invalid/abc"
+REJECTED = (
+    "https://example.invalid/abc",
+    "http://anything.test/page",
+    "https://host.example/page",
+    "https://localhost/page",
+    "https://nodot/page",
+    "artifacts.example.dev/abc123",
+    "ftp://artifacts.example.dev/abc123",
+    "https://artifacts.example.dev/a b",
+    "notaurl",
+)
+
+
+def pending(**extra):
+    return dict({"url": PLAN, "at": time.time()}, **extra)
+
+
+def expired(**extra):
+    return dict({"url": PLAN, "at": time.time() - 48 * 3600}, **extra)
 
 
 def load(profile, directory):
@@ -100,7 +121,7 @@ def case_stranded_gate_notifies_unarmed(module):
         return 900, None
 
     module.send = record
-    arm(module, gate_pending={"url": PLAN, "at": 0})
+    arm(module, gate_pending=pending())
     result = module.handle(stop_payload())
     if not result.startswith("sent"):
         return "an unarmed Stop with a pending gate was not sent: %s" % result
@@ -130,7 +151,7 @@ def case_no_gate_stays_silent(module):
 
 def case_failed_send_keeps_marker(module):
     module.send = lambda envelope: (None, "could not reach telegram")
-    arm(module, gate_pending={"url": PLAN, "at": 0})
+    arm(module, gate_pending=pending())
     result = module.handle(stop_payload())
     if not result.startswith("error"):
         return "a failed send was not reported as an error: %s" % result
@@ -143,7 +164,7 @@ def case_rate_limit_keeps_marker(module):
     import time
 
     module.send = lambda envelope: (900, None)
-    arm(module, gate_pending={"url": PLAN, "at": 0}, last_sent=time.time())
+    arm(module, gate_pending=pending(), last_sent=time.time())
     result = module.handle(stop_payload())
     if "rate limited" not in result:
         return "a rate-limited turn was not skipped: %s" % result
@@ -160,7 +181,7 @@ def case_question_clears_marker(module):
         return 900, None
 
     module.send = record
-    arm(module, gate_pending={"url": PLAN, "at": 0})
+    arm(module, gate_pending=pending())
     result = module.handle(question_payload())
     if not result.startswith("sent"):
         return "the gate question was not sent: %s" % result
@@ -181,7 +202,7 @@ def drive_main(module, payload):
 
 
 def case_main_emits_the_block_decision_on_stdout(module):
-    arm(module, gate_pending={"url": PLAN, "at": 0})
+    arm(module, gate_pending=pending())
     code, out = drive_main(module, stop_payload())
     if code != 0:
         return "main() exited %r; Claude Code needs 0 alongside the decision" % code
@@ -210,7 +231,7 @@ def case_main_stays_silent_with_no_gate(module):
 
 
 def case_a_stale_write_cannot_resurrect_the_gate(module):
-    arm(module, gate_pending={"url": PLAN, "at": 0})
+    arm(module, gate_pending=pending())
     stale = state_of(module)
     if not module.plan_gate(stop_payload()):
         return "the first turn end was not held"
@@ -227,7 +248,7 @@ def case_a_stale_write_cannot_resurrect_the_gate(module):
 
 
 def case_stop_is_held_before_it_ends(module):
-    arm(module, gate_pending={"url": PLAN, "at": 0})
+    arm(module, gate_pending=pending())
     reason = module.plan_gate(stop_payload())
     if not reason:
         return "a turn ending with a plan published was allowed to end"
@@ -241,7 +262,7 @@ def case_stop_is_held_before_it_ends(module):
 
 
 def case_stop_is_held_only_once(module):
-    arm(module, gate_pending={"url": PLAN, "at": 0})
+    arm(module, gate_pending=pending())
     if not module.plan_gate(stop_payload()):
         return "the first turn end was not held"
     if module.plan_gate(stop_payload()):
@@ -250,7 +271,7 @@ def case_stop_is_held_only_once(module):
 
 
 def case_stop_hook_active_is_honoured(module):
-    arm(module, gate_pending={"url": PLAN, "at": 0})
+    arm(module, gate_pending=pending())
     payload = dict(stop_payload(), stop_hook_active=True)
     if module.plan_gate(payload):
         return "a stop already continuing from a hook block was held again"
@@ -259,7 +280,7 @@ def case_stop_hook_active_is_honoured(module):
 
 def case_unrecordable_hold_does_not_block(module):
     module.write_json = lambda path, value: False
-    arm(module, gate_pending={"url": PLAN, "at": 0})
+    arm(module, gate_pending=pending())
     if module.plan_gate(stop_payload()):
         return "a hold that could not be recorded still blocked, so it will repeat"
     return None
@@ -273,7 +294,7 @@ def case_no_gate_is_never_held(module):
 
 
 def case_subagent_stop_is_never_held(module):
-    arm(module, gate_pending={"url": PLAN, "at": 0})
+    arm(module, gate_pending=pending())
     payload = dict(stop_payload(), agent_id="agent-1", agent_type="Explore")
     if module.plan_gate(payload):
         return "a subagent's stop was held against the session's plan gate"
@@ -282,7 +303,7 @@ def case_subagent_stop_is_never_held(module):
 
 def case_question_clears_marker_before_config(module):
     module.load_config = lambda: (None, "no config on this machine")
-    arm(module, gate_pending={"url": PLAN, "at": 0})
+    arm(module, gate_pending=pending())
     if module.plan_gate(question_payload()):
         return "asking the question held the turn"
     if "gate_pending" in state_of(module):
@@ -298,7 +319,7 @@ def case_held_gate_still_notifies(module):
         return 900, None
 
     module.send = record
-    arm(module, gate_pending={"url": PLAN, "at": 0, "held": 1})
+    arm(module, gate_pending=pending(held=1))
     result = module.handle(stop_payload())
     if "stranded plan gate" not in result:
         return "a held gate lost the notification behind the block: %s" % result
@@ -307,7 +328,7 @@ def case_held_gate_still_notifies(module):
 
 def case_permission_keeps_marker(module):
     module.send = lambda envelope: (900, None)
-    arm(module, gate_pending={"url": PLAN, "at": 0})
+    arm(module, gate_pending=pending())
     module.handle({
         "hook_event_name": "Notification",
         "notification_type": "permission_prompt",
@@ -321,9 +342,100 @@ def case_permission_keeps_marker(module):
     return None
 
 
+def case_expired_gate_is_not_held(module):
+    arm(module, gate_pending=expired())
+    if module.plan_gate(stop_payload()):
+        return "a plan published two days ago still held the turn"
+    if "gate_pending" in state_of(module):
+        return "the expired marker was not dropped"
+    return None
+
+
+def case_expired_gate_does_not_notify(module):
+    module.send = lambda envelope: (900, None)
+    arm(module, gate_pending=expired())
+    result = module.handle(stop_payload())
+    if "stranded plan gate" in result:
+        return "an expired gate still sent a stranded-gate notification: %s" % result
+    if not result.startswith("skip"):
+        return "an expired gate on an unarmed session was sent anyway: %s" % result
+    if "gate_pending" in state_of(module):
+        return "the expired marker survived the turn"
+    return None
+
+
+def case_a_gate_with_no_timestamp_is_kept(module):
+    arm(module, gate_pending={"url": PLAN})
+    if not module.plan_gate(stop_payload()):
+        return "a marker written without a timestamp was treated as expired"
+    return None
+
+
+def case_quiet_hours_do_not_age_the_marker_out(module):
+    module.in_quiet_hours = lambda config: True
+    arm(module, gate_pending=pending())
+    result = module.handle(stop_payload())
+    if "quiet hours" not in result:
+        return "quiet hours were not honoured: %s" % result
+    if state_of(module).get("gate_pending", {}).get("url") != PLAN:
+        return "quiet hours dropped the marker, so nothing will retry"
+    return None
+
+
+def quietly(call, *args):
+    saved = sys.stderr
+    sys.stderr = io.StringIO()
+    try:
+        return call(*args)
+    finally:
+        sys.stderr = saved
+
+
+def case_gate_rejects_an_implausible_url(module):
+    module.session_from_env = lambda: SESSION
+    for url in REJECTED:
+        arm(module)
+        quietly(module.cmd_gate, [url])
+        if "gate_pending" in state_of(module):
+            return "cmd_gate recorded %r, which is not a publishable url" % url
+    return None
+
+
+def case_gate_still_accepts_a_real_url(module):
+    module.session_from_env = lambda: SESSION
+    arm(module)
+    module.cmd_gate([PLAN])
+    if state_of(module).get("gate_pending", {}).get("url") != PLAN:
+        return "the validation rejected a url the publisher really prints"
+    return None
+
+
+def case_a_rejected_url_does_not_clear_a_pending_gate(module):
+    module.session_from_env = lambda: SESSION
+    arm(module, gate_pending=pending())
+    quietly(module.cmd_gate, [PLACEHOLDER_URL])
+    if state_of(module).get("gate_pending", {}).get("url") != PLAN:
+        return "a rejected url overwrote or cleared the gate already pending"
+    return None
+
+
 CASES = (
     ("--gate-pending and --gate-clear round-trip through the session state",
      case_cli_round_trip),
+    ("a plan gate older than the threshold is not held",
+     case_expired_gate_is_not_held),
+    ("a plan gate older than the threshold does not notify either",
+     case_expired_gate_does_not_notify),
+    ("a marker carrying no timestamp is kept rather than aged out",
+     case_a_gate_with_no_timestamp_is_kept),
+    ("quiet hours still retain a marker inside the threshold",
+     case_quiet_hours_do_not_age_the_marker_out),
+    ("cmd_gate rejects a placeholder and every other unpublishable shape",
+     case_gate_rejects_an_implausible_url),
+    ("cmd_gate still accepts the url the publisher prints",
+     case_gate_still_accepts_a_real_url),
+    ("a rejected url leaves an already-pending gate alone",
+     case_a_rejected_url_does_not_clear_a_pending_gate),
     ("an unarmed turn ending with a plan published notifies anyway",
      case_stranded_gate_notifies_unarmed),
     ("an unarmed turn with no plan published stays silent",
@@ -399,6 +511,22 @@ def main():
         print("  applies only the keys it owns. A notification handle() can sit in")
         print("  summarize for 180s holding a stale snapshot, and writing that back")
         print("  whole would resurrect a gate another process had already cleared.")
+        print()
+        print("  The marker is bounded in time as well as in repetition. `at` is")
+        print("  load-bearing: a marker older than GATE_TTL is dropped with a log line")
+        print("  rather than appended to an unrelated notification turns later. The")
+        print("  threshold has a floor rather than being free -- retention across a")
+        print("  failed send, a rate-limited turn and quiet hours is a contract, and a")
+        print("  quiet-hours window can run eight hours or more, so a TTL shorter than")
+        print("  that would silently break the guarantee above. A marker carrying no")
+        print("  timestamp at all is kept, not aged out.")
+        print()
+        print("  cmd_gate validates the shape before recording anything, because it")
+        print("  used to accept any non-empty string: a test running against the real")
+        print("  $HOME wrote https://example.invalid/abc into live session state and the")
+        print("  next Stop appended it to a real notification. http(s) only, a host with")
+        print("  a dot, no whitespace, and the RFC 2606 reserved TLDs refused. A")
+        print("  rejection logs, exits 0, and leaves any gate already pending alone.")
         print()
         print("  Behind the block, a turn that ends with the marker set anyway still")
         print("  notifies REGARDLESS of arming -- the same exception a blocking")

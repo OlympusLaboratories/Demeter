@@ -22,6 +22,9 @@ PLACEHOLDER = "REPLACE_ME"
 SEND_TIMEOUT = 30
 SENDER_ERR_LIMIT = 500
 BODY_LIMIT = 1200
+GATE_TTL = 12 * 3600
+CHANGE_REQUEST_TTL = 4 * 3600
+RESERVED_TLDS = ("invalid", "test", "example", "localhost")
 TAIL_CHUNK = 262144
 TAIL_LIMIT = 8 * 1024 * 1024
 TITLE_MAX = 48
@@ -709,6 +712,13 @@ def window(text, limit=SUMMARY_MAX_INPUT):
     return text[:head].rstrip() + " [...] " + text[-(limit - head):].lstrip()
 
 
+def restore_urls(line, source):
+    missing = [url for url in urls_in(source) if url not in line]
+    if not missing:
+        return line
+    return (line.rstrip() + " " + " ".join(dict.fromkeys(missing))).strip()
+
+
 def summarize(text, config):
     settings = config.get("summarize")
     if not isinstance(settings, dict):
@@ -729,7 +739,8 @@ def summarize(text, config):
     bare = summarizer_settings()
     if bare:
         argv += ["--settings", bare]
-    argv.append(SUMMARY_PROMPT % (words, window(strip_markdown(text))))
+    prepared = window(strip_markdown(text))
+    argv.append(SUMMARY_PROMPT % (words, prepared))
     try:
         done = subprocess.run(
             argv, input="", capture_output=True, text=True,
@@ -748,7 +759,7 @@ def summarize(text, config):
     parts = line.split()
     if len(parts) > words:
         line = " ".join(parts[:words]).rstrip(",;:") + "\u2026"
-    return line, None
+    return restore_urls(line, prepared), None
 
 
 def shorten(raw, kind, config):
@@ -807,6 +818,39 @@ CHANGE_REQUEST_RE = re.compile(
 CHANGE_REQUEST_ANSWERED_RE = re.compile(
     r"\\?\"(?:html_url|web_url)\\?\"\s*:\s*\\?\""
     r"(https?://[^\s<>\"'\\)\]]+?/(?:pull/|-/merge_requests/)\d+)")
+CHANGE_REQUEST_OBJECT_RE = re.compile(
+    r"\{[^{}]*?\\?\"(?:html_url|web_url)\\?\"\s*:\s*\\?\""
+    r"(https?://[^\s<>\"'\\)\]]+?/(?:pull/|-/merge_requests/)\d+)"
+    r"[^{}]*\}")
+RECORD_BRANCH_RE = re.compile(
+    r"\\?\"(?:head|source_branch)\\?\"\s*:\s*\\?\"([^\"\\]+)")
+RECORD_STATE_RE = re.compile(
+    r"\\?\"state\\?\"\s*:\s*\\?\"([^\"\\]+)")
+CHANGE_REQUEST_NAMED_RE = re.compile(
+    r"\b[MP]R\b"
+    r"|(?i:\b[MP]Rs?\s*#?\d+)"
+    r"|#\d+"
+    r"|(?i:\b(?:pull|merge)\s+requests?\b)")
+CLOSED_STATES = ("closed", "merged")
+URL_RE = re.compile(r"https?://[^\s<>\"')\]]+")
+
+
+def urls_in(text):
+    return [url.rstrip(".,;:") for url in URL_RE.findall(text or "")]
+
+
+def closed_change_request(state):
+    return isinstance(state, str) and state.strip().lower() in CLOSED_STATES
+
+
+def plausible_url(url):
+    text = (url or "").strip()
+    if not re.match(r"^https?://\S+$", text):
+        return False
+    host = text.split("://", 1)[1].split("/")[0].split("@")[-1].split(":")[0].lower()
+    if "." not in host or host.endswith("."):
+        return False
+    return host.rsplit(".", 1)[-1] not in RESERVED_TLDS
 
 
 def remote_slug(cwd):
@@ -820,9 +864,39 @@ def remote_slug(cwd):
     return match.group(1).lower() if match else None
 
 
-def change_request_answered_in(chunk):
-    found = CHANGE_REQUEST_ANSWERED_RE.findall(chunk or "")
-    return found[-1] if found else None
+def change_request_records(chunk):
+    text = chunk or ""
+    detail = {}
+    for match in CHANGE_REQUEST_OBJECT_RE.finditer(text):
+        body = match.group(0)
+        branch = RECORD_BRANCH_RE.search(body)
+        state = RECORD_STATE_RE.search(body)
+        detail[match.group(1)] = (
+            branch.group(1) if branch else None,
+            state.group(1) if state else None,
+        )
+    records = []
+    for url in CHANGE_REQUEST_ANSWERED_RE.findall(text):
+        branch, state = detail.get(url, (None, None))
+        records.append({"url": url, "branch": branch, "state": state})
+    return records
+
+
+def change_request_answered_in(chunk, slug=None, branch=None):
+    records = [r for r in change_request_records(chunk)
+               if not closed_change_request(r["state"])]
+    if not records:
+        return None
+    if branch:
+        mine = [r for r in records if r["branch"] and r["branch"] == branch]
+        if mine:
+            return mine[-1]["url"]
+    if slug:
+        local = [r for r in records if slug in r["url"].lower()]
+        if local:
+            return local[-1]["url"]
+    distinct = list(dict.fromkeys(r["url"] for r in records))
+    return distinct[0] if len(distinct) == 1 else None
 
 
 def change_request_in(chunk, slug=None):
@@ -830,12 +904,40 @@ def change_request_in(chunk, slug=None):
     # change request, or this hook's own test fixtures all match the shape.
     # Only a URL carrying the session's own owner/repo can be this run's, and
     # where no remote resolves the honest answer is none rather than a guess.
+    closed = set(r["url"] for r in change_request_records(chunk)
+                 if closed_change_request(r["state"]))
     found = [u.rstrip(".,;:") for u in CHANGE_REQUEST_RE.findall(chunk or "")]
     if slug:
-        found = [u for u in found if slug in u.lower()]
+        found = [u for u in found
+                 if slug in u.lower() and u not in closed]
     else:
         found = []
     return found[-1] if found else None
+
+
+def change_request_closed_in(chunk, url):
+    for record in change_request_records(chunk):
+        if record["url"] == url and closed_change_request(record["state"]):
+            return True
+    return None
+
+
+def cached_change_request(state):
+    if not isinstance(state, dict):
+        return None
+    cached = state.get("change_request")
+    if isinstance(cached, str):
+        return cached.strip() or None
+    if not isinstance(cached, dict):
+        return None
+    url = cached.get("url")
+    if not isinstance(url, str) or not url.strip():
+        return None
+    at = cached.get("at")
+    if isinstance(at, (int, float)) and time.time() - at > CHANGE_REQUEST_TTL:
+        log("dropped a change request cached %s ago" % human_duration(time.time() - at))
+        return None
+    return url.strip()
 
 
 def change_request_for(transcript_path, state, cwd=None):
@@ -844,19 +946,27 @@ def change_request_for(transcript_path, state, cwd=None):
     # the current one, and it feeds itself: once the state file is read back
     # into the transcript, the stale URL is also the most recent URL in it.
     # The cache is therefore only a fallback for a scan that found nothing.
-    found = scan_tail(transcript_path, change_request_answered_in)
+    where = cwd or os.getcwd()
+    slug = remote_slug(where)
+    branch = branch_label(where)
+    found = scan_tail(
+        transcript_path,
+        lambda chunk: change_request_answered_in(chunk, slug, branch),
+    )
+    if not found and slug:
+        found = scan_tail(
+            transcript_path, lambda chunk: change_request_in(chunk, slug)
+        )
     if not found:
-        slug = remote_slug(cwd)
-        if slug:
-            found = scan_tail(
-                transcript_path, lambda chunk: change_request_in(chunk, slug)
-            )
-    if not found and isinstance(state, dict):
-        cached = state.get("change_request")
-        if isinstance(cached, str) and cached.strip():
-            return cached.strip()
-    if found and isinstance(state, dict):
-        state["change_request"] = found
+        cached = cached_change_request(state)
+        if cached and scan_tail(
+                transcript_path,
+                lambda chunk: change_request_closed_in(chunk, cached)):
+            log("dropped a cached change request the transcript shows closed")
+            return None
+        return cached
+    if isinstance(state, dict):
+        state["change_request"] = {"url": found, "at": time.time()}
     return found
 
 
@@ -924,12 +1034,15 @@ def record_sent(session_id, state, now, kind=None, thread=None, arm=False, drop=
 
 
 def append_change_request(body, transcript_path, state, cwd):
-    if "http" in (body or ""):
+    text = body or ""
+    if CHANGE_REQUEST_RE.search(text):
+        return body, False
+    if not CHANGE_REQUEST_NAMED_RE.search(text):
         return body, False
     link = change_request_for(transcript_path, state, cwd)
     if not link:
         return body, False
-    return ((body or "").rstrip() + "\n" + link).strip(), True
+    return (text.rstrip() + "\n" + link).strip(), True
 
 
 GATE_HOLD = (
@@ -940,6 +1053,23 @@ GATE_HOLD = (
     " approved, or it needs no approval, run"
     " `~/.claude/hooks/notify.py --gate-clear` and end the turn again."
 )
+
+
+def gate_expired(gate):
+    at = gate.get("at") if isinstance(gate, dict) else None
+    if not isinstance(at, (int, float)):
+        return 0
+    age = time.time() - at
+    return age if age > GATE_TTL else 0
+
+
+def drop_expired_gate(path, gate):
+    age = gate_expired(gate)
+    if not age:
+        return False
+    merge_state(path, drop=("gate_pending",))
+    log("dropped a plan gate published %s ago" % human_duration(age))
+    return True
 
 
 def plan_gate(payload):
@@ -954,6 +1084,8 @@ def plan_gate(payload):
         return None
     gate = state.get("gate_pending")
     if not isinstance(gate, dict) or not gate.get("url"):
+        return None
+    if drop_expired_gate(path, gate):
         return None
 
     event = payload.get("hook_event_name")
@@ -993,6 +1125,9 @@ def handle(payload):
     state = read_json(session_path(session_id), {}) or {}
 
     gate = state.get("gate_pending")
+    if isinstance(gate, dict) and drop_expired_gate(session_path(session_id), gate):
+        state.pop("gate_pending", None)
+        gate = None
     gate_url = gate.get("url") if isinstance(gate, dict) else None
     stranded_gate = bool(gate_url) and payload.get("hook_event_name") == "Stop"
     if stranded_gate:
@@ -1075,6 +1210,11 @@ def handle(payload):
 
 def cmd_gate(args):
     url = (args[0] if args else "").strip()
+    if url and not plausible_url(url):
+        log("gate rejected an implausible url: %r" % url[:120])
+        print("not a plausible artifact url, so the gate was not recorded: %s"
+              % url[:120], file=sys.stderr)
+        return 0
     session_id = (args[1] if len(args) > 1 else "").strip() or session_from_env()
     if not session_id:
         print("no session id resolved: the gate was not recorded", file=sys.stderr)
