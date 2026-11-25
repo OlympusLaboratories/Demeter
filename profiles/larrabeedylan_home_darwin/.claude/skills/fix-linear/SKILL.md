@@ -121,6 +121,39 @@ The target branch name is `FIRST_NAME/TICKET_ID` — e.g., `dylan/ENG-123`. Stor
 
 The identifier must survive into the branch name literally. It is one of the two things the forge integration matches to link the pull request back to the ticket — the other is the identifier in the pull request title, which `autopilot` Step 4b sets — and a link that never forms means the ticket stays in its pre-review state after the work merges, with nothing reporting it.
 
+### 1d. Confirm the ticket is still work to do — before the worktree exists
+
+A completed or canceled ticket is not a change to implement, and nothing later in this skill will notice. Step 3d reads the ticket's status and only *prints* it; Step 3e branches on the ticket's content and never on its state. So settle the state here, where the answer is still free: Step 2 cuts a branch and a worktree, and a ticket read after that has already cost both.
+
+Load `mcp__claude_ai_Linear__get_issue` via `ToolSearch` (query: `select:mcp__claude_ai_Linear__get_issue`) and call it with `id: TICKET_ID` and a narrow selection:
+
+```
+fields: ["id", "title", "status", "statusType", "completedAt", "canceledAt", "url", "attachments"]
+```
+
+The selection is deliberately narrow — no description, no relations — because Step 3a still makes the full call. Two fields are the reason it is spelled out. **Read `statusType`, never `status`**: `status` is the team's own display name for the column and teams rename those, while `statusType` is a fixed enum (`backlog`, `unstarted`, `started`, `completed`, `canceled`, `triage`). And **`attachments` is where the closing pull request lives**, as a `title` and a `url`; it is the one field that names what shipped the work.
+
+**`statusType` of `completed` or `canceled` — do not proceed to Step 2.**
+
+Verify the claim from the repository rather than trusting the field, using the trick Step 2e already documents: a squash merge leaves `git merge-base --is-ancestor` false while the commit subject is present in the log, so grep for the identifier.
+
+```bash
+git fetch origin <DEFAULT_BRANCH> --quiet
+git log origin/<DEFAULT_BRANCH> --oneline --grep='<TICKET_ID>'
+```
+
+Compute `DEFAULT_BRANCH` as in Step 2a first. Then report, in one short block:
+
+- the status and `statusType`, and the `completedAt` or `canceledAt` date,
+- every attachment's title and url — the pull request that closed it,
+- the landed commit where the grep confirms one, or a plain statement that none could be confirmed from the repository.
+
+**An unconfirmed merge is not evidence of an open ticket.** The grep finds nothing when the work landed with no identifier in its subject, when it shipped from another repository, or when the ticket was canceled rather than completed. Say the repository could not confirm it and let the state field stand; never upgrade a silent grep into permission to carry on.
+
+Then ask with `AskUserQuestion` — options `Stop` and `Work it anyway` — and treat anything short of a clear "work it anyway" as a stop. **The ask is the point, not a formality.** Legitimate reasons to work a closed ticket exist: a follow-up, a revert, or a criterion the original run deliberately did not meet. That last one is the sharp edge and the reason this is a stop rather than a heuristic — **a completed ticket whose implementation deviated from its acceptance criteria reads, to a fresh run, exactly like an unfinished ticket.** Re-reading the criteria cannot tell the two apart, so the state field is the only signal there is, and a run that re-implements merged work would "fix" the deviation back.
+
+**Any other `statusType` — say so in one line and continue to Step 2.** Name the status, because that line is the record that the state was checked rather than skipped.
+
 ## Step 2: Choose the Branch Mode
 
 `--branch` decides where the work lands, and it has exactly two values.
@@ -128,7 +161,9 @@ The identifier must survive into the branch name literally. It is one of the two
 - **`new`** — cut `BRANCH_NAME` off the up-to-date default branch and work in its own **git worktree**: a separate working directory on its own branch sharing the repo's `.git`, so several fixes can run in parallel (one session per worktree) without branch checkouts colliding. Continue at **2d**.
 - **`default`** — commit straight onto the repository's default branch. No feature branch, no worktree, and no pull request, so an autopilot run pushes the default branch and ends there. Continue at **2c**.
 
-`fix-freeform` resolves `--branch` with exactly these two values and the same three escalation checks. That is deliberate: the flag means the same thing in both skills, so neither one has a branch mode the other lacks.
+`fix-freeform` resolves `--branch` with exactly these two values and the same three escalation checks. That is deliberate: the flag means the same thing in both skills, so neither one has a branch mode the other lacks. It carries no equivalent of Step 1d, and needs none — a freeform run has no ticket and so no state to be stale.
+
+**Nothing here runs until Step 1d has found the ticket open.** Both branch modes commit, and `new` also cuts a worktree, so this is the step whose cost a closed ticket cannot be refunded. If a `completed` or `canceled` ticket somehow surfaces after a worktree exists — a run that skipped 1d, or a stack detour that reached Step 3 by another route — stop as 1d directs and **name the worktree path in the stop so the user can remove it**. Never remove it yourself: Important Rule 1 makes worktree cleanup the user's call, and that rule does not carve out a worktree this run created.
 
 **No-worktree fallback.** If the repo cannot host worktrees (`git worktree list` errors), use **Step 2-FALLBACK**, which takes `BRANCH_NAME` in the current checkout instead. That is a capability fallback, not a mode anybody selects — there is no flag for it, and `--branch` has no third value.
 
@@ -337,6 +372,8 @@ Load the `get_issue` tool via `ToolSearch` (query: `select:mcp__claude_ai_Linear
 
 Use `mcp__claude_ai_Linear__get_issue` with `id: TICKET_ID` and `includeRelations: true` (e.g., `PLAT-1180`). This returns the full issue including title, description, status, labels, assignee, relations, and — critically — the **`parent`** field.
 
+**This is the full fetch; the ticket's state was already settled at Step 1d.** That step read `statusType` with a narrow `fields` selection and either stopped the run or recorded that the ticket is open, so do not re-litigate it here. The two calls are deliberately separate rather than one: 1d has to answer before Step 2 spends a branch and a worktree, and this one wants the description and the relations that 1d omitted.
+
 **`get_issue`'s default response omits `parentId` entirely.** `includeRelations: true` adds blocks/blocked-by/related but *not* the parent, so the field is simply absent and reads as "no parent" when there may well be one. Make a second call passing `fields: ["id", "title", "parentId", "projectId"]` — a nonempty `fields` selection is the only way to surface it. Do this before concluding a ticket is parentless, and note that a project-level PR stack (siblings sharing the `PR<n>` title prefix with no shared parent) needs `list_issues` with `project:` rather than `parentId:`.
 
 **Record the `parent` field now.** Explicitly note whether the issue has a parent and, if so, capture the parent's identifier. This determines whether Step 3f applies, and Step 3f is mandatory whenever a parent exists — do not lose this information between steps.
@@ -366,6 +403,10 @@ Display a brief summary:
 > **TICKET_ID: Title**
 > Priority: ... | Status: ...
 > Description (first ~3 sentences or 200 chars)
+
+**Status is printed here because Step 1d acted on it, not instead of acting on it.** For a long time this list ended at a status nothing anywhere read, which is how a `Done` ticket reached planning: the field was on the screen and the run walked past it. Restate 1d's verdict beside the status so the line records a decision rather than a value.
+
+**Backstop — if Step 1d did not run, settle the state now, before Step 3e.** Go back and do 1d in full: the narrow fetch, the `git log` grep, the report, and the ask. Then follow the Step 2 rule for a worktree that already exists — name its path in the stop and leave the removal to the user.
 
 If comments were fetched, display them below the summary:
 > **Comments** (N total):
@@ -430,7 +471,9 @@ Treat the Notion content as first-class context alongside the ticket description
 
 ## Step 4: Plan the Implementation
 
-**Gate: do not start planning until the Step 3f and Step 3g checkpoints are satisfied** — you have stated the parent/sibling/related context (or confirmed no parent), *and* you have loaded any linked Notion pages (or confirmed none are linked / could not be fetched). If you cannot yet do either, return to the relevant step before continuing.
+**Gate: do not start planning until the Step 1d, Step 3f and Step 3g checkpoints are satisfied** — the ticket is open or the user has confirmed working a closed one, you have stated the parent/sibling/related context (or confirmed no parent), *and* you have loaded any linked Notion pages (or confirmed none are linked / could not be fetched). If you cannot yet do any of them, return to the relevant step before continuing.
+
+Step 1d is listed here as well as at its own step because planning is the expensive thing it protects. A closed ticket that reaches this point gets a plan, a published page, an approval and an implementation of work that already shipped — so the gate that guards planning is the right place to require the answer a second time.
 
 **Do not use plan mode at all.** The approval gate is the point; plan mode is one way to get it and it is the wrong one here, for two independent reasons. Inside it, **`permissions.allow` cannot cover a shell construct** — a `for` loop or a pipeline has no single command head to match, so Claude Code cannot even offer to remember it: the prompt reads `Yes`/`No` with no "allow for this project" option, and an unattended run stops dead on a command that only reads files. And leaving it is worse: `ExitPlanMode` drops the session into whichever mode the approval prompt offers, which is `acceptEdits` wherever auto mode is unavailable — and `acceptEdits` auto-approves edits while **prompting for every single `Bash` call** for the rest of the run. Both were observed repeatedly on runs whose whole purpose was to need nothing from anybody. Widening the allowlist fixes neither and never will.
 
