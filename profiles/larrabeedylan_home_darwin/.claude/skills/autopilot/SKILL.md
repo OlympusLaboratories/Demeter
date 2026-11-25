@@ -135,7 +135,7 @@ So the run keeps a checklist, and the checklist is a **published page**. `~/.cla
 
 The template is seeded from the **resolved flags**, so the page can neither list a diagram this run will not draw nor omit a merge it will perform. **Arming is item 1.**
 
-**Adopt the existing checklist; do not publish a second.** On a hand-off the fix skill published it and handed over the url and the hash — use them. On a direct invocation the fix skill called at Step 1 does the same. The one route with no checklist to adopt is a mid-run amendment arriving on work that was never a fix-skill run, and that is the only route that publishes one here.
+**Adopt the existing checklist; do not publish a second.** On a hand-off the fix skill published it and handed over the items file, its url and its hash — use them. The items file is the one to keep hold of: besides the obligations it carries `plan_page`, which Step 4b writes into the change request's description. On a direct invocation the fix skill called at Step 1 does the same. The one route with no checklist to adopt is a mid-run amendment arriving on work that was never a fix-skill run, and that is the only route that publishes one here.
 
 ### The decision record
 
@@ -194,7 +194,7 @@ Rules, all mechanical:
 
 **The fold sits outside the description's word budget.** `changes-description` measures its prose mechanically and the ledger would blow that budget, which is exactly why the fold is appended afterwards rather than handed to that skill as input. Do not ask it to include the ledger, and do not count the fold against its budget.
 
-**A regenerated description loses the fold.** If a `--quick-description false` amendment re-runs `changes-description` and replaces the description, re-append the fold afterwards from the ledger, which is still on disk. The ledger is the source of truth; the fold is a rendering of it. **It loses the run checklist's link the same way**, and that one is worse because nothing later re-adds it: put the Step 4b line back in the same edit, from the url in the run state.
+**A regenerated description loses the fold.** If a `--quick-description false` amendment re-runs `changes-description` and replaces the description, re-append the fold afterwards from the ledger, which is still on disk. The ledger is the source of truth; the fold is a rendering of it. **It loses the plan link and the run checklist's link the same way**, and those are worse because nothing later re-adds them: put both Step 4b lines back in the same edit, from `plan_page` and the url in the items file.
 
 **On a `--branch default` run there is no description**, so the ledger goes into the Step 11 report and the ticket comment instead — same filter, same budget, same bullets, minus the fold, since there is nothing to collapse it inside.
 
@@ -419,13 +419,16 @@ So before pushing anything at Step 6 or later, **re-read the pull request's stat
 
 Open it as a normal pull request, not a draft — the review bot runs as a CI job regardless, and a draft cannot be merged or queued, so opening as a draft buys nothing and blocks Step 9.
 
-**Put the run checklist's link in the description now, not at Step 11.** A link that appears only once the run is over cannot be refreshed during the run, which is the whole point of publishing the checklist in the first place. It goes in as the change request is opened — one labelled line near the top, and the label is the whole of it:
+**Put the plan page's link and the run checklist's link in the description now, not at Step 11.** A link that appears only once the run is over cannot be refreshed during the run, which is the whole point of publishing the checklist in the first place; and the plan is what a reviewer wants *before* reading the diff, not after the merge. Both go in as the change request is opened — two labelled lines near the top, and the label is the whole of each:
 
 ```markdown
+**Plan:** <url>
 **Run checklist:** <url>
 ```
 
 The label earns its place, because a reader of the pull request who is not the user cannot tell what the link is without opening it. Nothing after the label earns anything: see Rule 17.
+
+**Both URLs come out of the items file, never out of this context.** `plan_page` is the plan's, recorded by the fix skill in the same `tick` that discharged the plan gate, and `change_request`/`url` hold the rest. `run-checklist.py items <items>.json` prints them. That is the whole reason they live there: the items file survives the hand-off and a pause, and a plan published before a compaction is otherwise a URL nothing can recover. **An empty `plan_page` writes no line and earns no remark** — the run reached this step without a published plan (the publish failed, or no store was reachable), which is an ordinary outcome the gate is already written to tolerate.
 
 **Send the user the link, in this same batch.** The pull request is the one thing this run produces that the user might want to look at *before* it lands, and until this step existed nothing guaranteed they were ever told it was there. Step 0d's ping goes out before Step 1, so before there is anything to link; Step 11's goes out after the merge. In between, the only thing that could carry the link was the automatic turn-end notification — and that appends it **only when the turn's summary happens to name a pull request**. The summary is written by a model from a turn whose headline was *arming a pipeline watcher*, so on a quiet run the user was first handed the link once the change had already merged, which is the one moment it is no longer worth opening.
 
@@ -447,7 +450,7 @@ Then tick both items and record the change request on the page, in this same bat
 
 `link=done` records the send, not the intention. If the ping failed, correct it to `skipped` with what it printed, exactly as Step 0d does for the arming item.
 
-Two later edits append to this same description — the diagram link at Step 11.2 and the decision-record fold at Step 11.3 — and both must leave this line where it is. **On a `--branch default` run there is no description**, so the link goes into the Step 11 report and the ticket comment instead, exactly as the decision ledger already degrades there.
+Two later edits append to this same description — the diagram link at Step 11.2 and the decision-record fold at Step 11.3 — and both must leave these two lines where they are. **On a `--branch default` run there is no description**, so both links go into the Step 11 report and the ticket comment instead, exactly as the decision ledger already degrades there.
 
 ## Step 5: Arm the Watcher — never poll in-turn
 
@@ -813,4 +816,4 @@ Stopping and asking are both reserved for this list. Everything else — surpris
 14. **Never hand the user a command you can run yourself.** If Step 0b found the deploy and this session can reach the target, Step 10c runs it. A run that finishes with a block of commands for the user to paste has failed at the one thing it was for, and it fails in the worst way — looking finished. The same goes for anything else in reach: pulling a repo, restarting a service, installing a file on a box you already have access to, and reclaiming the worktree and branch the merge just finished with (**Step 10d**).
 15. **A broken deploy is warned about, never fixed.** No rollback, no revert, no re-run of a deploy job, no touching the runtime. Gather the evidence, ping immediately, and stop. An unattended agent reverting production at 2am is worse than a bad deploy somebody has been told about.
 16. **Push the pull request's link the moment it exists.** Step 4b pings with the URL in the same batch that opens it, and Step 0d carries it instead on a run where it was already open. Never leave it to a turn-end notification: the hook appends a link only to a body that already **named** a pull request, and that body is a model's summary of a turn whose headline was something else, so an unmentioned pull request is simply never delivered. Pinging only at the merge hands over the link at the one moment it is no longer worth opening.
-17. **A published page is linked bare.** A label and the URL on their own line, and nothing after it — never a clause naming what the page contains, who can see it, or that it updates as the run goes. Step 4b's checklist link and Step 11.2's diagram link are both this, and so is any link added here later. Whoever reads a trailing clause is either the user, who wrote the run that produced the page, or a reviewer, who opens the link rather than reading about it. Two of them were wrong as well as redundant: the checklist clause restated the page's own heading, and the diagram's "private" note is false on a store that publishes public.
+17. **A published page is linked bare.** A label and the URL on their own line, and nothing after it — never a clause naming what the page contains, who can see it, or that it updates as the run goes. Step 4b's plan link, Step 4b's checklist link and Step 11.2's diagram link are all this, and so is any link added here later. Whoever reads a trailing clause is either the user, who wrote the run that produced the page, or a reviewer, who opens the link rather than reading about it. Two of them were wrong as well as redundant: the checklist clause restated the page's own heading, and the diagram's "private" note is false on a store that publishes public. **The fix skills' plan gate is the same rule in the chat** — the message before the approval question carries the URL and nothing else — and it is theirs to keep, not this skill's.

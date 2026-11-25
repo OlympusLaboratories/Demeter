@@ -14,7 +14,8 @@ import urllib.request
 STATES = ("pending", "in-flight", "done", "skipped")
 OPEN_STATES = ("pending", "in-flight")
 ITEM_FIELDS = ("id", "obligation", "skill", "target", "waiting_on", "state", "note")
-RUN_FIELDS = ("title", "repo", "branch", "ticket", "change_request", "url", "hash")
+RUN_FIELDS = ("title", "repo", "branch", "ticket", "plan_page", "change_request",
+              "url", "hash")
 
 BLOCK_ID = "checklist"
 BLOCK_OPEN = '<script type="application/json" id="%s">' % BLOCK_ID
@@ -103,6 +104,7 @@ def template(options):
             "repo": options.repo or "",
             "branch": options.branch or "",
             "ticket": options.ticket or "",
+            "plan_page": "",
             "change_request": "",
             "url": "",
             "hash": "",
@@ -320,6 +322,12 @@ def render(document, stamp=None):
         facts.append("branch <code>%s</code>" % escape(run["branch"]))
     if run["ticket"]:
         facts.append("ticket %s" % escape(run["ticket"]))
+    if run["plan_page"]:
+        target = run["plan_page"]
+        if re.match(r"^https?://", target):
+            facts.append('<a href="%s">plan</a>' % escape(target))
+        else:
+            facts.append("plan %s" % escape(target))
     if run["change_request"]:
         target = run["change_request"]
         if re.match(r"^https?://", target):
@@ -910,9 +918,14 @@ what it guarantees, and what each one is written against:
   extract refuses a page carrying more than one checklist block rather than
   taking the first, so a forged block is a loud error and not a silent swap
 
-  change_request is only rendered as a link when it is http(s); anything else
-  is printed as text, so a javascript: value cannot become a clickable link on
-  a page that is published public
+  change_request and plan_page are only rendered as links when they are
+  http(s); anything else is printed as text, so a javascript: value cannot
+  become a clickable link on a page that is published public
+
+  plan_page carries the plan artifact's url through the run, because the items
+  file is the only state that already survives both the hand-off to autopilot
+  and a pause - the change request's description is written from it, not from
+  whatever is still in the context window
 
   every item carries an obligation, the skill that discharges it, what it
   applies to, what it is waiting on, and one of exactly four states

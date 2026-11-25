@@ -62,6 +62,9 @@ run-checklist.py, checked over every profile copy:
   a page with two checklist blocks            exits non-zero rather than taking the first
   change_request that is not http(s)          renders as text, never as an href
   change_request that is http(s)              renders as an href
+  plan_page that is not http(s)               renders as text, never as an href
+  plan_page that is http(s)                   renders as an href
+  tick --run plan_page=<url>                  sets it, and it survives the page
   every render                                carries the updated-at stamp
   the page                                    loads nothing over the network
   publish, no store                           passes exit 3 through unchanged
@@ -286,20 +289,21 @@ def check_profile(suite, profile, work):
     suite.ok("%s a page with two checklist blocks is rejected" % tag,
              run(script, "items", two).returncode != 0)
 
-    for target, linked in (("javascript:alert(1)", False),
-                           ("not a url", False),
-                           ("https://example.invalid/pull/9", True)):
-        doc = {"run": {"title": "t", "change_request": target},
-               "items": [{"id": "a", "obligation": "o", "state": "done"}]}
-        out = os.path.join(work, "cr.html")
-        suite.exits("%s render change_request %r" % (tag, target[:20]), 0,
-                    run(script, "render",
-                        write(os.path.join(work, "cr.json"), json.dumps(doc)),
-                        out, "--stamp", "S"))
-        rendered = open(out, encoding="utf-8").read()
-        suite.ok("%s change_request %r is %s" % (tag, target[:20],
-                                                 "a link" if linked else "text only"),
-                 ('href="%s"' % target in rendered) == linked, rendered[:0] or target)
+    for field in ("change_request", "plan_page"):
+        for target, linked in (("javascript:alert(1)", False),
+                               ("not a url", False),
+                               ("https://example.invalid/pull/9", True)):
+            doc = {"run": {"title": "t", field: target},
+                   "items": [{"id": "a", "obligation": "o", "state": "done"}]}
+            out = os.path.join(work, "cr.html")
+            suite.exits("%s render %s %r" % (tag, field, target[:20]), 0,
+                        run(script, "render",
+                            write(os.path.join(work, "cr.json"), json.dumps(doc)),
+                            out, "--stamp", "S"))
+            rendered = open(out, encoding="utf-8").read()
+            suite.ok("%s %s %r is %s" % (tag, field, target[:20],
+                                         "a link" if linked else "text only"),
+                     ('href="%s"' % target in rendered) == linked, target)
 
     rejects = (
         ("an unknown state",
@@ -408,6 +412,21 @@ def check_tick(suite, tag, script, work, seed_text):
     suite.ok("%s tick --run rejects an assignment with no =" % tag,
              run(script, "tick", path, "commit=done",
                  "--run", "change_request").returncode != 0)
+
+    plan_url = "https://example.invalid/plan99"
+    suite.exits("%s tick --run plan_page" % tag, 0,
+                run(script, "tick", path, "commit=done",
+                    "--run", "plan_page=%s" % plan_url))
+    suite.ok("%s tick --run sets plan_page" % tag,
+             json.loads(open(path).read())["run"]["plan_page"] == plan_url)
+    planned = os.path.join(work, "tick-plan-page.html")
+    suite.exits("%s render with plan_page" % tag, 0,
+                run(script, "render", path, planned, "--stamp", "S"))
+    carried = run(script, "items", planned)
+    suite.exits("%s items with plan_page" % tag, 0, carried)
+    suite.ok("%s plan_page survives the page" % tag,
+             json.loads(carried.stdout)["run"]["plan_page"] == plan_url,
+             carried.stdout[:200])
 
     log = os.path.join(work, "tick-publisher-args.txt")
     fake = write(os.path.join(work, "tick-publisher.sh"),
