@@ -68,7 +68,17 @@ Produce one short block — this is the most useful thing the whole skill output
 - **Git**: HEAD then → HEAD now. Whether the tree is still dirty in the same way.
 - **Infrastructure**: for every recorded planned directory, whether its apply marker is now present.
 
+- **The run checklist**: read the page back before touching it. Its items are the run's record of what it still owes, and the file's copy is only the pause-time snapshot.
+
 Then say what changed in plain terms before acting on any of it.
+
+### Read the checklist before the first update
+
+**Read it, do not re-publish it.** On a machine using the **Artifact** tool, a publish to an artifact the conversation has not read or published is **refused** — and a fresh session after `/unpause` is exactly that case, every time. So `action: "read"` on the recorded url comes first, and the page's embedded items are what the resumed run works from. On a self-hosted store the read is cheaper still: `run-checklist.py items` on the fetched page.
+
+Then make every write an update against the recorded hash or url. The link is already in the change request description and the user may still have it open, so a resumed run that publishes afresh has silently orphaned the page they are watching — which looks, from their side, like a run that stopped at the pause.
+
+If the page is unreachable, fall back to the items in the state file, say in one line that the published checklist is stale, and carry on. The run is not contingent on the page; the user's reading of it is.
 
 ## Step 6: Restore the Swarms
 
@@ -110,6 +120,7 @@ Two things a resumed run must not do twice:
 
 - **Re-post an infrastructure apply comment.** It is posted once and idempotently. Re-read the markers per directory first; a directory that already reported its apply is done, and re-posting triggers a second apply.
 - **Re-publish the diagram or the decision ledger.** The file records whether each already happened. Appending a second collapsed fold to the description is the visible version of this mistake; a second apply is the expensive one.
+- **Mint a second run checklist.** The page is updated in place against the recorded identity, and the description already carries its link. Re-publishing is the same class of mistake as the second fold, with the user watching the wrong page afterwards.
 
 The decision ledger continues from the text in the state file. Decisions made before the pause are already in it.
 
@@ -125,5 +136,5 @@ Archive the state file once the run is genuinely back under way — not before, 
 4. **An interleaved wake authorises nothing irreversible** without announcing it.
 5. **Re-read weekly, scoped and spend quota**, not just the window that reset.
 6. **A partial review is never the answer.** Resume cheaply when the diff held still, re-run in full when it moved, and say which happened.
-7. **Never re-post an apply comment or re-publish a published artifact.**
+7. **Never re-post an apply comment or re-publish a published artifact.** The run checklist is read first and then updated in place — a publish to an artifact this conversation has not read is refused anyway, and a fresh session is the normal case here.
 8. **Recorded authority stands; recorded evidence does not.** Merge if the flag said so and the re-read gates pass.

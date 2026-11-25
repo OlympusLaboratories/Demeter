@@ -57,6 +57,7 @@ Order matters: stop what spends tokens before writing the file, because writing 
    - **Do not record `cleanPrefix`.** It stops at the first gap in launch order, so a 26-agent run missing agent 3 reports `2` while 23 results sit cached. `/unpause` recomputes it.
 3. **Stop free-standing subagents** and record their exact prompts — subagents are stateless, so a prompt is the only way back. **Workflow agents are excluded from this**: their prompts are reproduced from the script plus the journal, and writing 26 of them means writing the diff 26 times at the moment you have least budget.
 4. **Flush the decision ledger into the state file as text.** The ledger lives in the session scratchpad, which is session-scoped and reaped by the OS — a path to it is worthless after a reboot or from a fresh session. Inline the content.
+5. **Flush the run checklist the same way**, and for the same reason: its items file is in the scratchpad too. Inline the items, and record the page's **url and its update hash** beside them. The hash is what lets the resumed run write to the page the user is already holding; without it there is no way back to that link, and the resume publishes a second one. Mark the item the pause interrupted `in-flight`, with the pause itself as what it is waiting on, and write the page one last time before the final state write — a checklist left reading as mid-flight is how a paused run looks like a hung one.
 
 ## Step 3: Write the State File
 
@@ -89,6 +90,7 @@ Create `~/.claude/pause-state/` if it does not exist.
 
 **Work already published** — so `/unpause` does not do it twice:
 - `diagram_attached`, `ledger_published`, and the description's pre-append state. Without these, resume appends a second collapsed fold to the description.
+- The run checklist: its items, its url, its update hash, and whether the description already carries the link. All four, because they fail differently — losing the items loses what the run owed, and losing the hash loses the only route back to the page the user has open.
 
 **Swarms, subagents, watchers** — as gathered in Step 2.
 
@@ -122,7 +124,7 @@ Then say in chat, in one line, where the state file is and what `/unpause` will 
 
 ## Keeping the journal — what makes this affordable
 
-Pause is cheap only if the state is already on disk. During a long run, append to the state file at every step boundary — it is one small write, the same way the decision ledger is already appended to as decisions happen. Three fields are enough to keep current: **step and round**, **`next_action`**, and the **ledger text**. Everything else is read from the forge or from `git` at pause time, which is affordable; prose is not.
+Pause is cheap only if the state is already on disk. During a long run, append to the state file at every step boundary — it is one small write, the same way the decision ledger is already appended to as decisions happen. Four fields are enough to keep current: **step and round**, **`next_action`**, the **ledger text**, and the **run checklist's items, url and hash**. Everything else is read from the forge or from `git` at pause time, which is affordable; prose is not.
 
 A run that journals as it goes can pause with one atomic write. A run that does not has to compose the whole file from an almost-empty window, which is the failure this skill exists to prevent.
 
@@ -131,8 +133,9 @@ A run that journals as it goes can pause with one atomic write. A run that does 
 1. **A truncated state file is worse than none.** Write identity, `next_action` and the ledger first; enrich only if budget remains. Write by temp-file-and-rename so a partial write never replaces a good file.
 2. **Stop watchers and swarms; do not merely list them.** An armed monitor un-pauses the pause.
 3. **Never park in a "never park" state**, and never park during implementation — stop and ping instead.
-4. **Inline anything that lives in the scratchpad.** It is session-scoped and gets reaped.
-5. **Never record `cleanPrefix`** as authoritative, and never record Workflow agent prompts.
-6. **Disarm auto-merge before pausing.** It fires on green whether or not you are there.
-7. **Never discard or stash the user's uncommitted work** to make the tree tidy for a pause. Record it instead.
-8. **The ping leads with the hazard**, if there is one.
+4. **Inline anything that lives in the scratchpad.** It is session-scoped and gets reaped — the decision ledger and the run checklist's items both.
+5. **Record the checklist's update hash, not just its url.** The url says where the page is; the hash is the only way to write to it again.
+6. **Never record `cleanPrefix`** as authoritative, and never record Workflow agent prompts.
+7. **Disarm auto-merge before pausing.** It fires on green whether or not you are there.
+8. **Never discard or stash the user's uncommitted work** to make the tree tidy for a pause. Record it instead.
+9. **The ping leads with the hazard**, if there is one.

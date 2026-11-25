@@ -22,6 +22,7 @@ DEFAULTS = {
     "mnemosyne_user": "jarvis",
     "plan_folder": "PRtifacts/Plans",
     "diagram_folder": "PRtifacts/Diagrams",
+    "tasks_folder": "PRtifacts/Tasks",
     "default_remote": "origin",
     "require_human_approval": False,
     "fix_autopilot": True,

@@ -26,6 +26,8 @@ publish-artifact.sh, checked over every profile copy:
   --purpose plan, plan_folder set             --folder <value> reaches the remote argv
   --purpose plan, plan_folder empty           no --folder at all
   --purpose diagram                           uses diagram_folder, not plan_folder
+  --purpose tasks                             uses tasks_folder, not plan_folder
+  --purpose tasks, tasks_folder empty         no --folder, --public still sent
   --purpose nonsense                          exits 1
   --purpose under zsh and under bash          identical remote argv
   --purpose on the local path                 --folder reaches the local argv too
@@ -38,6 +40,7 @@ publish-artifact.sh, checked over every profile copy:
                                               grepped out of surrounding chatter
   --purpose plan on the local path            the same, with the local url
   --purpose diagram                           no gate call
+  --purpose tasks                             no gate call
   no --purpose                                no gate call
   --purpose plan, publish failed              no gate call
   --purpose plan, no notify.py present        still exits 0
@@ -51,6 +54,11 @@ The gate call is what stops a published plan stranding the run. A plan is publis
 can be approved, so the hook records the url and notifies even on an unarmed session when
 the turn ends without the approval question being asked. Marking must never be able to fail
 a publish, and must never fire for a page nobody is waiting on.
+
+That last clause is why the tasks purpose is pinned to no gate call. A run checklist is
+published before the run's first step and rewritten at every boundary afterwards, so a
+gate marker set by it would refuse the first turn end of every single run, and then one
+more per update.
 
 That is also why this file runs against a scratch HOME with a tripwire where mark_gate
 looks for the real hook. A call site that forgets to stub NOTIFY_HOOK marks the gate on the
@@ -232,7 +240,7 @@ it's fine"
   checked=$((checked + 1))
 
   purpose_env() {
-    local dir="$1" plan="$2" diagram="$3"
+    local dir="$1" plan="$2" diagram="$3" tasks="$4"
     mkdir -p "$dir"
     cat >"$dir/skill-env.sh" <<ENVSCRIPT
 #!/usr/bin/env bash
@@ -243,6 +251,7 @@ case "\$2" in
   mnemosyne_user) echo 'someuser' ;;
   plan_folder) echo '$plan' ;;
   diagram_folder) echo '$diagram' ;;
+  tasks_folder) echo '$tasks' ;;
   *) echo '' ;;
 esac
 ENVSCRIPT
@@ -318,8 +327,8 @@ REMOTEFAIL
   }
 
 
-  purpose_env "$WORK/purpose" 'P/Plans' 'P/Diagrams'
-  purpose_env "$WORK/nofolders" '' ''
+  purpose_env "$WORK/purpose" 'P/Plans' 'P/Diagrams' 'P/Tasks'
+  purpose_env "$WORK/nofolders" '' '' ''
 
   rm -f "$WORK/args.txt"
   LOCAL_ARGS="$WORK/args.txt" PATH="$WORK/bin:$PATH" \
@@ -363,6 +372,37 @@ REMOTEFAIL
   fi
   checked=$((checked + 1))
 
+  run_remote "$WORK/purpose/skill-env.sh" "$page" --purpose tasks
+  check "$profile: --purpose tasks publishes" 0 $?
+  if ! grep -qx 'P/Tasks' "$WORK/remote-args.txt" 2>/dev/null; then
+    printf '  fail — %s: --purpose tasks did not use tasks_folder\n      got: %s\n' \
+      "$profile" "$(tr '\n' '|' <"$WORK/remote-args.txt" 2>/dev/null)"
+    failures=$((failures + 1))
+  fi
+  checked=$((checked + 1))
+  if grep -qx 'P/Plans' "$WORK/remote-args.txt" 2>/dev/null; then
+    printf '  fail — %s: --purpose tasks sent plan_folder\n' "$profile"
+    failures=$((failures + 1))
+  fi
+  checked=$((checked + 1))
+  if ! grep -qx -- '--public' "$WORK/remote-args.txt" 2>/dev/null; then
+    printf '  fail — %s: --purpose tasks did not send --public\n' "$profile"
+    failures=$((failures + 1))
+  fi
+  checked=$((checked + 1))
+
+  run_remote "$WORK/nofolders/skill-env.sh" "$page" --purpose tasks
+  if grep -qx -- '--folder' "$WORK/remote-args.txt" 2>/dev/null; then
+    printf '  fail — %s: an empty tasks_folder still sent --folder\n' "$profile"
+    failures=$((failures + 1))
+  fi
+  checked=$((checked + 1))
+  if ! grep -qx -- '--public' "$WORK/remote-args.txt" 2>/dev/null; then
+    printf '  fail — %s: an empty tasks_folder suppressed --public\n' "$profile"
+    failures=$((failures + 1))
+  fi
+  checked=$((checked + 1))
+
   run_remote "$WORK/nofolders/skill-env.sh" "$page" --purpose plan
   if grep -qx -- '--folder' "$WORK/remote-args.txt" 2>/dev/null; then
     printf '  fail — %s: an empty plan_folder still sent --folder\n' "$profile"
@@ -395,6 +435,10 @@ REMOTEFAIL
   rm -f "$WORK/gate-calls.txt"
   run_remote "$WORK/purpose/skill-env.sh" "$page" --purpose diagram
   no_gate_call "--purpose diagram recorded a gate"
+
+  rm -f "$WORK/gate-calls.txt"
+  run_remote "$WORK/purpose/skill-env.sh" "$page" --purpose tasks
+  no_gate_call "--purpose tasks recorded a gate"
 
   rm -f "$WORK/gate-calls.txt"
   run_remote "$WORK/purpose/skill-env.sh" "$page" --expires 7d

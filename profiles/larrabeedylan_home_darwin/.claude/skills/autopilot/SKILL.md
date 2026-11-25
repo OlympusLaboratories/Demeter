@@ -80,7 +80,7 @@ It is still not the default. A question **stalls the run** until somebody answer
 - **A fork where both ways are defensible and one is expensive to undo.** A ledger entry explains a wrong turn; it does not undo one.
 - **A decision from the Step 11 escalation list that the run could act on immediately** — a product or policy call, a merge conflict whose intent is unclear. Asking keeps the run alive where stopping would have killed it.
 
-**The budget is never one of them, and neither is a flag the user already set.** Those are the two that look like judgment calls and are not. A quota reading is decided by Step 0c's table, whose only two answers are *pause* and *carry on* — asking the user whether to spend their own remaining quota hands back a decision this skill has already made, and it stalls a run that was handed over precisely so it would not need them. A flag belongs to whoever set it: `--review true` means the swarm runs, and noticing that it is expensive is not grounds to put it to a vote (Rule 6). Both happened on one run, together — it stopped at `weekly 85%` to ask whether to spend a review swarm, with an approved change request one step from the merge, while the user was in the middle of something else. The cost of asking is not the tokens; it is that the run stops being autopilot.
+**The budget is never one of them, and neither is a flag the user already set.** Those are the two that look like judgment calls and are not. A quota reading is decided by Step 0c's table, whose only two answers are *pause* and *carry on* — asking the user whether to spend their own remaining quota hands back a decision this skill has already made, and it stalls a run that was handed over precisely so it would not need them. A flag belongs to whoever set it: `--review true` means the swarm runs, and noticing that it is expensive is not grounds to put it to a vote (Rule 7). Both happened on one run, together — it stopped at `weekly 85%` to ask whether to spend a review swarm, with an approved change request one step from the merge, while the user was in the middle of something else. The cost of asking is not the tokens; it is that the run stops being autopilot.
 
 Three rules keep the ask usable from a phone rather than theatrical:
 
@@ -91,6 +91,40 @@ Three rules keep the ask usable from a phone rather than theatrical:
 **A question that was asked and answered earns no ledger entry.** That decision was the user's, made on the record, in the session. The ledger is for the calls made alone.
 
 **Never ask and then proceed as though it had been answered.** If the question is worth the stall it is worth the wait; if it is not worth the stall, decide it and record it.
+
+### The run checklist
+
+A run composes a dozen skills in a fixed order and has to remember, unprompted and across a context long enough to be compacted, everything it still owes. **This file is not that memory.** The arming instruction is in it twice — Step 0d and Important Rule 12 — and a real run skipped it anyway. A third sentence would not have helped; a thing the run reads and ticks does.
+
+So the run keeps a checklist, and the checklist is a **published page**. `~/.claude/scripts/run-checklist.py` renders and publishes it, and the page embeds its own items as a JSON block, so reading the artifact back hands the run its obligations as data rather than as prose to parse. Run `run-checklist.py rules` for the subcommands and the guarantees; it is generated from that script's own source.
+
+**The page is the source of truth, not the context window.** Re-read it at **every step boundary and after every notification wake**, and update it in place as items complete. A turn that changed the run's state and left the page describing the old state has not finished.
+
+**The user refreshes one link and sees where the run is.** That is the whole reason this is a published page and not a file in the scratchpad: it is readable on a phone, mid-run, by the person who is not watching the terminal. So the page carries a per-item state and an updated-at stamp, and a refresh that shows a later stamp is what proves it is live rather than frozen.
+
+| Profile | `artifact_store` | First publish | Every later write |
+|---|---|---|---|
+| home | `auto` → mnemosyne | `run-checklist.py publish`, which is `publish-artifact.sh --purpose tasks` | the recorded hash becomes `--update`, so the URL holds |
+| work | `claude` | the **Artifact** tool, on the rendered page | a publish with the same `url` |
+| anything with no store | — | exit `3`, so the rendered file stays local | rewrite that file |
+
+`--purpose tasks` is the whole of the configuration: the script looks up `tasks_folder` itself, omits the folder flag when that key is empty, and publishes the page **public** — a private artifact is a 404 to everybody but an admin, which is the one reader this page does not need to reach. Never pass `--folder` with a name of your own.
+
+**The link must never change for the life of the run.** It is written into the change request description once, early, and the user keeps it open. So the first publish records the page's identity — the mnemosyne hash, or the Artifact tool url — in the run state, and **every later write is an update against that identity**. A second plain publish is a defect, not a cosmetic one: it mints a new link, leaves the one in the description frozen at step one, and nothing reports that it happened.
+
+**Exit `3` means this machine has no self-hosted store.** That is an ordinary answer, not a failure: keep the rendered file, say so in one line, and carry on. Never guess at another store. A publish that fails mid-run must not lose the checklist either — the items are in the run state, so say the page is stale rather than letting a stale page pass as current.
+
+**What each item carries**, because an item that names only the obligation is not checkable:
+
+- the obligation, in one line;
+- **the skill that discharges it**, by name — `changes-description`, `review-code`, `changes-diagram`, `fix-feedback`, `ping`;
+- **what it applies to** — which branch, which change request, which part of the diff;
+- **what it is waiting on** — a workflow run id, a `Monitor`, a scheduled wakeup, or a human;
+- its state: `pending`, `in-flight`, `done`, or `skipped` with a reason.
+
+The template is seeded from the **resolved flags**, so the page can neither list a diagram this run will not draw nor omit a merge it will perform. **Arming is item 1.**
+
+**Adopt the existing checklist; do not publish a second.** On a hand-off the fix skill published it and handed over the url and the hash — use them. On a direct invocation the fix skill called at Step 1 does the same. The one route with no checklist to adopt is a mid-run amendment arriving on work that was never a fix-skill run, and that is the only route that publishes one here.
 
 ### The decision record
 
@@ -149,7 +183,7 @@ Rules, all mechanical:
 
 **The fold sits outside the description's word budget.** `changes-description` measures its prose mechanically and the ledger would blow that budget, which is exactly why the fold is appended afterwards rather than handed to that skill as input. Do not ask it to include the ledger, and do not count the fold against its budget.
 
-**A regenerated description loses the fold.** If a `--quick-description false` amendment re-runs `changes-description` and replaces the description, re-append the fold afterwards from the ledger, which is still on disk. The ledger is the source of truth; the fold is a rendering of it.
+**A regenerated description loses the fold.** If a `--quick-description false` amendment re-runs `changes-description` and replaces the description, re-append the fold afterwards from the ledger, which is still on disk. The ledger is the source of truth; the fold is a rendering of it. **It loses the run checklist's link the same way**, and that one is worse because nothing later re-adds it: put the Step 4b line back in the same edit, from the url in the run state.
 
 **On a `--branch default` run there is no description**, so the ledger goes into the Step 11 report and the ticket comment instead — same filter, same budget, same bullets, minus the fold, since there is nothing to collapse it inside.
 
@@ -178,7 +212,8 @@ The values that matter here:
 | `operational_bots` | Whose comments are plumbing and must never be treated as review feedback. |
 | `iac_bot`, `iac_plan_marker`, `iac_apply_marker` | The infrastructure apply gate. |
 | `require_human_approval` | Whether a bot approval alone may merge. |
-| `artifact_store` | Where the diagram goes. |
+| `artifact_store` | Where the diagram and the run checklist go. |
+| `tasks_folder` | Which folder the run checklist is filed in, on a machine with a self-hosted store. Empty means no folder, never a name to invent. |
 | `default_remote` | The remote to push to, and to delete the source branch from at Step 9a. |
 | `fix_merge`, `fix_max_rounds` | This skill's two flags, when the invocation did not set them. |
 | `fix_branch`, `fix_quick_description`, `fix_diagram`, `fix_review`, `fix_autopilot` | The fix skill's flags. **On a hand-off, take these from the values the fix skill passed, not from here** — it already resolved them and the user may have amended one since. Read them here only on a direct invocation.
@@ -265,7 +300,8 @@ The usual moment to pause is the moment there is least budget to do it with, and
 
 - the step and round you are in,
 - `next_action` — the single next thing to do, as an instruction,
-- the decision ledger text.
+- the decision ledger text,
+- the run checklist's items, url and update hash. The hash is what keeps the link stable across a pause: without it a resumed run has no way to update the page the user is holding, and publishes a second one.
 
 Everything else is read from the forge or from `git` at pause time, which is affordable. Prose is not. A run that journals as it goes pauses with one atomic write.
 
@@ -298,6 +334,8 @@ That single send does both jobs — it tells them the hand-off happened, and it 
 **Never arm when `--autopilot false`.** There is no unattended tail to notify about, and the user is at the keyboard by definition.
 
 **A failed send never fails the run.** A missing or unconfigured `~/.claude/notify.json` makes the ping a no-op, and the `ping` skill deliberately does not write `armed_at` on a failed send. Report what it said in one line and carry on — the work is not contingent on the notification.
+
+**Then tick item 1 on the run checklist**, with the outcome rather than the intention: `done` on a send, `skipped` with the reason on a failure or an already-armed session. Arming is item 1 precisely because it is the obligation this skill has demonstrably skipped while carrying the instruction twice, and an item ticked `done` on a send that never landed is worse than no item at all.
 
 ### Every route in arms, including the amendment
 
@@ -364,9 +402,17 @@ Push the branch, then open the PR with the helper's create command. Description 
 
 So before pushing anything at Step 6 or later, **re-read the pull request's state**. Found merged: do not push to the old branch, do not reopen anything. Cut a fresh branch from the updated default branch, cherry-pick only the commits that did not land, and open a second pull request for them. Say in the report who merged the first one and which commits the follow-up carries, because the user's mental model is that everything went in together.
 
-**If a pull request for this branch is already open, this step is already done.** A previous run of this skill can be killed between Step 4b and Step 9 — a rate limit, a dropped session — leaving a pushed branch, an open PR, a written description and a green pipeline, none of which this run produced and all of which it owns. Resume from state rather than re-running the flow: read the PR's diff, description and checks, treat whatever they already contain as complete, and re-enter at Step 6. Do not open a second PR, do not regenerate a description that is already on the PR, and do not re-commit a change the diff already carries. Steps 1 through 4 are skipped in that case, and Rule 5's "this run owns exactly one branch" extends to the branch and PR the interrupted run left behind.
+**If a pull request for this branch is already open, this step is already done.** A previous run of this skill can be killed between Step 4b and Step 9 — a rate limit, a dropped session — leaving a pushed branch, an open PR, a written description and a green pipeline, none of which this run produced and all of which it owns. Resume from state rather than re-running the flow: read the PR's diff, description and checks, treat whatever they already contain as complete, and re-enter at Step 6. Do not open a second PR, do not regenerate a description that is already on the PR, and do not re-commit a change the diff already carries. Steps 1 through 4 are skipped in that case, and Rule 6's "this run owns exactly one branch" extends to the branch and PR the interrupted run left behind.
 
 Open it as a normal pull request, not a draft — the review bot runs as a CI job regardless, and a draft cannot be merged or queued, so opening as a draft buys nothing and blocks Step 9.
+
+**Put the run checklist's link in the description now, not at Step 11.** A link that appears only once the run is over cannot be refreshed during the run, which is the whole point of publishing the checklist in the first place. It goes in as the change request is opened, labelled so a reader knows what it is without opening it — one line near the top, reading as a live resource rather than a trailing artifact:
+
+```markdown
+**Run checklist:** <url> — what this run still owes, updated as it goes.
+```
+
+Then record in the run state that the description carries it. Two later edits append to this same description — the diagram link at Step 11.2 and the decision-record fold at Step 11.3 — and both must leave this line where it is. **On a `--branch default` run there is no description**, so the link goes into the Step 11 report and the ticket comment instead, exactly as the decision ledger already degrades there.
 
 ## Step 5: Arm the Watcher — never poll in-turn
 
@@ -387,6 +433,10 @@ Poll the forge no more often than every 60 seconds; these are remote APIs with r
 **Never let the monitor's working directory be a path this run can delete.** A watcher running inside the worktree that Step 10d reclaims fails on the harness's trailing `pwd`, so a script that exited 0 is reported as exiting 1 — a broken watch at the exact moment the run is trying to confirm a deploy.
 
 When the monitor's notification arrives, continue from Step 6. Between arming it and that notification, the turn is over: answer anything else the user asks normally.
+
+**Never yield with nothing armed.** This step is where the rule is easiest to break, because arming the watcher and ending the turn look like the same action and are not. Before ending **any** turn, confirm something will cause the next one — a running workflow, a `Monitor`, a scheduled wakeup. The run checklist's *waiting on* column is the query: if no item is in flight, nothing is going to wake you. The page says so in as many words, which is the point of computing it there rather than trusting a reading of the transcript.
+
+With an empty queue and budget intact, **do the next item in this turn** instead of announcing it. Announcing is the specific failure: a run said *"remaining tonight: the C and D review swarms — starting the first now"* and then ended the turn without starting it, with both earlier panels already finished and nothing in flight. Had the user not replied, it would have idled until morning behind a transcript that read like work in progress. If the queue is genuinely empty because everything left is blocked, say which items are blocked and on what, then pause — so silence is never ambiguous between *working* and *stopped*.
 
 ## Step 5b: The Review Swarm — launched with the watcher, not after it
 
@@ -546,7 +596,7 @@ Five rules:
 
 - **Only after the merged state has been read back.** Never alongside arming auto-merge, and never on a refused, cancelled or still-pending merge. Until the merge actually lands, that branch is the only copy of the work.
 - **Already gone is the goal, not a failure.** The forge may have done it first — a change request here is opened with its remove-source-branch flag set where the forge has one, and a repository may carry its own delete-on-merge setting. `remote ref does not exist` means the job is done; report it that way rather than as an error.
-- **Only this run's own branch.** Never the default branch, never a branch belonging to another change request, never a branch this run did not push. Rule 5's one-branch scope covers the delete exactly as it covers the push.
+- **Only this run's own branch.** Never the default branch, never a branch belonging to another change request, never a branch this run did not push. Rule 6's one-branch scope covers the delete exactly as it covers the push.
 - **In a stack, one member's branch is the next member's base.** Delete it only once no open change request targets it. Where one still does, retarget that change request at the default branch first: some forges do that themselves when a base branch is deleted and some leave the dependent change request pointing at nothing, and *some* is not a thing to rely on. Step 10 merges in order, so in the normal case the successor has already merged or been retargeted by the time this runs.
 - **The worktree you are standing in is not yours to remove here.** Deleting the remote branch is what lets `wtclean` see it; **Step 10d** then runs that cleanup from the main working tree, where the finished worktree is no longer the one under your feet. Never remove it from inside it.
 
@@ -669,8 +719,9 @@ When the PR merges, when a `--branch default` run has pushed, or when you stop f
 1. **Record it where the work lives.** On a ticket run, comment the PR URL and what shipped — **not the decision ledger**, which belongs in the description fold at 11.3 and must not be duplicated as a wall of text on the ticket as well. Anything noteworthy beyond those two is a line, not a section. A `--branch default` run has no PR, so record the pushed commit SHA and its forge URL instead. Work you deliberately did not do becomes its own ticket, linked back — never a buried bullet in a closing comment. Check whether the forge integration already moved the ticket before moving it by hand; that integration is asynchronous.
 2. **Attach the diagram** when `--diagram` is true and the run opened a pull request. On a `--branch default` run the fix skill already produced it at its own diagram step, so do not produce a second one — carry the link it gave you into the report and the ticket comment. Invoke `changes-diagram` with the `Skill` tool and append its link to the PR description — or, on a `--branch default` run, carry the link in the report and the ticket comment, since there is no description to append to. Do this once the code has settled — a diagram of a branch that changed three more times is worse than none. **A failed or unavailable diagram never fails the run**: say so in one line and carry on.
 3. **Append the decision record.** Take the scratchpad ledger, apply the filter and the budget from **The decision record**, and append it to the end of the change request description inside the collapsed `<details>` fold — one edit, after the diagram link. An empty ledger publishes nothing. **Never post it as a comment**: if the description edit fails, say so in one line and carry the ledger in the report instead.
-4. **Ping the user.** Invoke the `ping` skill with the `Skill` tool. This is the **closing** ping — Step 0d already sent the opening one and armed the session, so this is a report rather than an announcement. It is the only message the user is guaranteed to read, so it carries what happened and whether anything is needed — a ping that says "done" wastes it. **It carries Step 10b's verdict in Step 10b's own words**: deployed and verified, deploy failed, waiting on a human, or merged and unverified. "Merged" alone is the one word that reads as finished while leaving out whether the change is actually running. **A `--branch default` run says so in the ping**: the change is on the default branch, unreviewed, and already live. That is what the user chose, and it is also the single fact most worth knowing on a phone.
-5. **Name any signal that did not prove what it was meant to.** Where Step 0b's reading of the deploy path did not match what Step 10b actually observed, say so in the report in one line — the path you expected, the path it took, and which check turned out not to answer *is this SHA running*. A signal that looks authoritative and is not is the thing most likely to make the next run report a deploy it never saw, so it is worth naming even on a run that ended confirmed.
+4. **Close the checklist.** Update the page one last time, against the identity recorded at the first publish so the link the user has open is the link that changes. Every item ends `done` or `skipped` with a reason — an item left `pending` on a finished run is the run telling the user it dropped something, which is exactly what the page is for. This is the last write, so it is also the one a stale page is most visible on.
+5. **Ping the user.** Invoke the `ping` skill with the `Skill` tool. This is the **closing** ping — Step 0d already sent the opening one and armed the session, so this is a report rather than an announcement. It is the only message the user is guaranteed to read, so it carries what happened and whether anything is needed — a ping that says "done" wastes it. **It carries Step 10b's verdict in Step 10b's own words**: deployed and verified, deploy failed, waiting on a human, or merged and unverified. "Merged" alone is the one word that reads as finished while leaving out whether the change is actually running. **A `--branch default` run says so in the ping**: the change is on the default branch, unreviewed, and already live. That is what the user chose, and it is also the single fact most worth knowing on a phone.
+6. **Name any signal that did not prove what it was meant to.** Where Step 0b's reading of the deploy path did not match what Step 10b actually observed, say so in the report in one line — the path you expected, the path it took, and which check turned out not to answer *is this SHA running*. A signal that looks authoritative and is not is the thing most likely to make the next run report a deploy it never saw, so it is worth naming even on a run that ended confirmed.
 
 ### When to stop and ping instead of continuing
 
@@ -694,16 +745,17 @@ Stopping and asking are both reserved for this list. Everything else — surpris
 ## Important Rules
 
 1. **Never hold the turn open.** Every wait is a `Monitor`, never a sleep or a poll loop. Several of these runs may be live at once, and each one that blocks costs the user a session.
-2. **The approval gate is never waived.** When `require_human_approval` is true, a bot approval alone does not merge. Everything else in this skill is a judgment call; this one is not.
-3. **Never blind-retry a failing job.** Read the log and classify it first. Twice the same way is a real failure.
-4. **Comments before CI.** Always.
-5. **This run owns exactly one branch** (or one named stack) — including when that branch is the default one. Never force-push, never amend a pushed commit, never act on a pull request this run did not open.
-6. **Never override the fix skill's flags — but always honour an amendment.** `--merge` and `--max-rounds` are this skill's; every other flag was decided before this skill was reached, `--branch` included, and automation is what this skill adds rather than a second opinion on what the change should be. The one thing that does change a flag mid-run is the user saying so with `/autopilot <flags>`, and that is not an override, it is an instruction. When one arrives, change only what they named and leave the rest at its current run value.
-7. **Capture every decision you made alone at the time you made it, and publish it exactly once.** The capture is a line in the local ledger; the publication is the collapsed fold appended to the description at Step 11.3. Never a comment, on the change request or on a thread. The record is what replaces the conversation, so it carries the reasoning and nothing about the process that produced it — see **The decision record** for what earns an entry and the budget it has to fit in.
-8. **No comments in the code.** Autonomy does not relax it.
-9. **An empty config value means the capability is absent, not that you should guess at it.** Never substitute a name you saw in an example for one the machine did not supply.
-10. **The merge is not the finish line, and "merged" is not "deployed".** Step 0b works out how the change reaches production and Step 10b confirms it got there, tied to the commit that landed rather than to a job going green. Unverified is a reportable outcome — **never** upgrade cannot-observe or timed-out into success.
-11. **Arm the notifications before the first unattended step.** A ping is the only thing that writes `armed_at`, and an unarmed session is silent through every permission prompt, question and failure in the run. Step 0d sends it once, on every route in — hand-off, direct, or a mid-run `/autopilot` amendment. Pinging only at the end arms the session at the exact moment it stops mattering.
-12. **Pause on purpose; never run out mid-flight.** Read the quota from the `claude-usage` cache at step boundaries, never from the API, and pause at 85% of the session window. Journal the step, the next action and the ledger as you go, so the pause costs one write. **`session` is the only meter that gates the run** — `weekly`, `scoped:*` and `spend` are the user's to manage, never a reason to stop and never a question to ask.
+2. **Never yield with nothing armed.** The inverse of Rule 1, and strictly worse because it is silent: a turn that ends with nothing running looks identical to a turn that ends having handed work off. Before ending a turn, confirm something will cause the next one — a running workflow, a `Monitor`, a scheduled wakeup. The run checklist's *waiting on* column is the query, and the page states "nothing armed" outright when no item is in flight. With an empty queue and budget intact, do the next item in this turn rather than announcing it. When the queue is empty because everything left is blocked, say which items are blocked and on what, then pause — silence must never be ambiguous between working and stopped.
+3. **The approval gate is never waived.** When `require_human_approval` is true, a bot approval alone does not merge. Everything else in this skill is a judgment call; this one is not.
+4. **Never blind-retry a failing job.** Read the log and classify it first. Twice the same way is a real failure.
+5. **Comments before CI.** Always.
+6. **This run owns exactly one branch** (or one named stack) — including when that branch is the default one. Never force-push, never amend a pushed commit, never act on a pull request this run did not open.
+7. **Never override the fix skill's flags — but always honour an amendment.** `--merge` and `--max-rounds` are this skill's; every other flag was decided before this skill was reached, `--branch` included, and automation is what this skill adds rather than a second opinion on what the change should be. The one thing that does change a flag mid-run is the user saying so with `/autopilot <flags>`, and that is not an override, it is an instruction. When one arrives, change only what they named and leave the rest at its current run value.
+8. **Capture every decision you made alone at the time you made it, and publish it exactly once.** The capture is a line in the local ledger; the publication is the collapsed fold appended to the description at Step 11.3. Never a comment, on the change request or on a thread. The record is what replaces the conversation, so it carries the reasoning and nothing about the process that produced it — see **The decision record** for what earns an entry and the budget it has to fit in.
+9. **No comments in the code.** Autonomy does not relax it.
+10. **An empty config value means the capability is absent, not that you should guess at it.** Never substitute a name you saw in an example for one the machine did not supply.
+11. **The merge is not the finish line, and "merged" is not "deployed".** Step 0b works out how the change reaches production and Step 10b confirms it got there, tied to the commit that landed rather than to a job going green. Unverified is a reportable outcome — **never** upgrade cannot-observe or timed-out into success.
+12. **Arm the notifications before the first unattended step.** A ping is the only thing that writes `armed_at`, and an unarmed session is silent through every permission prompt, question and failure in the run. Step 0d sends it once, on every route in — hand-off, direct, or a mid-run `/autopilot` amendment. Pinging only at the end arms the session at the exact moment it stops mattering.
+13. **Pause on purpose; never run out mid-flight.** Read the quota from the `claude-usage` cache at step boundaries, never from the API, and pause at 85% of the session window. Journal the step, the next action and the ledger as you go, so the pause costs one write. **`session` is the only meter that gates the run** — `weekly`, `scoped:*` and `spend` are the user's to manage, never a reason to stop and never a question to ask.
 14. **Never hand the user a command you can run yourself.** If Step 0b found the deploy and this session can reach the target, Step 10c runs it. A run that finishes with a block of commands for the user to paste has failed at the one thing it was for, and it fails in the worst way — looking finished. The same goes for anything else in reach: pulling a repo, restarting a service, installing a file on a box you already have access to, and reclaiming the worktree and branch the merge just finished with (**Step 10d**).
-13. **A broken deploy is warned about, never fixed.** No rollback, no revert, no re-run of a deploy job, no touching the runtime. Gather the evidence, ping immediately, and stop. An unattended agent reverting production at 2am is worse than a bad deploy somebody has been told about.
+15. **A broken deploy is warned about, never fixed.** No rollback, no revert, no re-run of a deploy job, no touching the runtime. Gather the evidence, ping immediately, and stop. An unattended agent reverting production at 2am is worse than a bad deploy somebody has been told about.
