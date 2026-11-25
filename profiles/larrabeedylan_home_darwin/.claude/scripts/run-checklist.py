@@ -599,10 +599,84 @@ def apply_ticks(document, ticks):
     return document
 
 
-OBSERVABLE = ("open", "pipeline", "threads", "merge")
+OBSERVABLE = ("arm", "open", "implement", "commit", "describe",
+              "pipeline", "threads", "ledger", "merge")
+
+LEDGER_MARK = "Relevant Decisions"
+
+
+def git_out(repo, *args):
+    try:
+        done = subprocess.run(("git", "-C", repo) + args,
+                              capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def default_branch(repo):
+    head = git_out(repo, "symbolic-ref", "refs/remotes/origin/HEAD")
+    if head:
+        return head.rsplit("/", 1)[-1]
+    for name in ("main", "master"):
+        if git_out(repo, "rev-parse", "--verify", "--quiet", "origin/" + name):
+            return name
+    return "main"
+
+
+def branch_commits(repo, branch, base):
+    if not (repo and branch):
+        return None
+    for ref in ("origin/%s" % base, base):
+        if git_out(repo, "rev-parse", "--verify", "--quiet", ref) is None:
+            continue
+        count = git_out(repo, "rev-list", "--count", "%s..%s" % (ref, branch))
+        if count is not None and count.isdigit():
+            return int(count)
+    return None
+
+
+def session_armed():
+    ident = session_id()
+    if not ident:
+        return None
+    path = session_state_path(ident)
+    if not os.path.exists(path):
+        return False
+    try:
+        with open(path) as handle:
+            state = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    return bool(isinstance(state, dict) and state.get("armed_at"))
+
+
+def observed_local(repo, branch, base, body, armed):
+    ticks = {}
+
+    def settled(ident, finished):
+        ticks[ident] = ("done", "", None) if finished else ("pending", "", "done")
+
+    if armed is not None:
+        settled("arm", armed)
+
+    commits = branch_commits(repo, branch, base)
+    if commits is not None:
+        settled("commit", commits > 0)
+        settled("implement", commits > 0)
+
+    if body is not None:
+        prose = "\n".join(line for line in body.splitlines()
+                          if not line.strip().startswith("**Run checklist:**")).strip()
+        settled("describe", bool(prose))
+        settled("ledger", LEDGER_MARK in body)
+
+    return ticks
 
 
 def observed(forge):
+    if not forge.get("url"):
+        return {}
     merged = str(forge.get("merged", "")).lower() == "true"
     state = (forge.get("state") or "").upper()
     decision = (forge.get("review") or "NONE").upper()
@@ -613,65 +687,106 @@ def observed(forge):
 
     ticks = {}
     if forge.get("url"):
-        ticks["open"] = ("done", "")
+        ticks["open"] = ("done", "", None)
 
     if merged:
-        ticks["merge"] = ("done", "")
-        ticks["pipeline"] = ("done", "")
+        ticks["merge"] = ("done", "", None)
+        ticks["pipeline"] = ("done", "", None)
     elif state == "CLOSED":
-        ticks["merge"] = ("skipped", "the change request was closed without merging")
+        ticks["merge"] = ("skipped", "the change request was closed without merging", None)
     elif total == 0:
-        ticks["pipeline"] = ("in-flight", "the forge has reported no checks yet")
+        ticks["pipeline"] = ("in-flight", "the forge has reported no checks yet", None)
     elif pending:
         ticks["pipeline"] = ("in-flight",
-                             "%d of %d check(s) still running" % (pending, total))
+                             "%d of %d check(s) still running" % (pending, total), None)
     elif failed:
-        ticks["pipeline"] = ("in-flight", "%d check(s) failed" % failed)
+        ticks["pipeline"] = ("in-flight", "%d check(s) failed" % failed, None)
     else:
-        ticks["pipeline"] = ("done", "")
+        ticks["pipeline"] = ("done", "", None)
 
     if not merged:
         if decision == "CHANGES_REQUESTED":
-            ticks["threads"] = ("in-flight", "the reviewer requested changes")
+            ticks["threads"] = ("in-flight", "the reviewer requested changes", None)
         elif unresolved:
-            ticks["threads"] = ("in-flight", "%d unresolved thread(s)" % unresolved)
+            ticks["threads"] = ("in-flight", "%d unresolved thread(s)" % unresolved, None)
         elif decision == "APPROVED":
-            ticks["threads"] = ("done", "")
+            ticks["threads"] = ("done", "", None)
+
+    if not merged and state and state != "CLOSED":
+        if pending or failed or total == 0:
+            blocker = "a green pipeline"
+        elif decision == "CHANGES_REQUESTED" or unresolved:
+            blocker = "a clean review"
+        elif decision == "APPROVED":
+            blocker = "nothing; the gates are clear"
+        else:
+            blocker = "a review verdict"
+        ticks["merge"] = ("in-flight", blocker, "in-flight")
     return ticks
 
 
-def reconcile(document, forge):
+def reconcile(document, forge, local=None):
     by_id = {entry["id"]: entry for entry in document["items"]}
+    seen = dict(observed(forge))
+    seen.update(local or {})
     changed = []
-    for ident, (state, text) in observed(forge).items():
+    for ident, (state, text, only_when) in seen.items():
         entry = by_id.get(ident)
         if entry is None or ident not in OBSERVABLE:
             continue
         if entry["state"] == "skipped":
             continue
-        if entry["state"] == state and entry.get("waiting_on", "") == (
-                text if state == "in-flight" else ""):
+        if only_when and entry["state"] != only_when:
+            continue
+        waiting = text if state == "in-flight" else ""
+        note = "" if state == "in-flight" else text
+        if entry["state"] == state:
+            if entry.get("waiting_on", "") == waiting:
+                continue
+            entry["waiting_on"] = waiting
+            entry["note"] = note
+            changed.append("%s~%s" % (ident, state))
             continue
         entry["state"] = state
-        entry["waiting_on"] = text if state == "in-flight" else ""
-        entry["note"] = "" if state == "in-flight" else text
+        entry["waiting_on"] = waiting
+        entry["note"] = note
         changed.append("%s=%s" % (ident, state))
     return changed
 
 
 def cmd_reconcile(args):
     document = read_document(args.items)
-    forge = {
-        "url": args.url or document["run"].get("change_request", ""),
-        "state": args.state,
-        "merged": args.merged,
-        "review": args.review,
-        "unresolved": args.unresolved,
-        "checks_pending": args.checks_pending,
-        "checks_failed": args.checks_failed,
-        "checks_total": args.checks_total,
-    }
-    changed = reconcile(document, forge)
+    recorded = (document["run"].get("change_request") or "").strip()
+    given = (args.url or "").strip()
+    if given and recorded and given.rstrip("/") != recorded.rstrip("/"):
+        print("this checklist is for %s, not %s; refusing to write another change "
+              "request's state onto it" % (recorded, given), file=sys.stderr)
+        return 2
+    if not recorded and not given:
+        forge = {}
+    else:
+        forge = {
+            "url": given or recorded,
+            "state": args.state,
+            "merged": args.merged,
+            "review": args.review,
+            "unresolved": args.unresolved,
+            "checks_pending": args.checks_pending,
+            "checks_failed": args.checks_failed,
+            "checks_total": args.checks_total,
+        }
+    repo = args.repo or os.getcwd()
+    base = args.default_branch or default_branch(repo)
+    body = None
+    if args.body_file:
+        try:
+            with open(args.body_file) as handle:
+                body = handle.read()
+        except OSError:
+            body = None
+    local = observed_local(repo, document["run"].get("branch", ""), base, body,
+                           session_armed())
+    changed = reconcile(document, forge, local)
     document = canonical(document, args.items)
     write(args.items, dump(document) + "\n")
     mark_outstanding(document)
@@ -810,6 +925,31 @@ what it guarantees, and what each one is written against:
   every publish expires the page, so the store does not accumulate one
   checklist per run forever - a finished run's page is a record worth keeping
   for a while and clutter after that
+
+  reconcile sets the items whose truth is observable, so the page stops
+  depending on the run remembering to tick:
+
+    from the forge      open, pipeline, threads, merge
+    from local git      commit, implement - a commit on the branch that is not
+                        on the default branch
+    from the body       describe (prose beyond the checklist link), ledger (the
+                        decision fold)
+    from session state  arm (armed_at is present)
+
+  reconcile never touches plan, review, verify or close - no signal for those
+  is solid, and deriving one badly is worse than leaving it manual
+
+  a not-done signal demotes only a done item, never a true in-flight: git can
+  see a commit, it cannot see work in progress
+
+  a skipped item is never revived, so a deliberate skip survives every pass
+
+  an owned item's blocker is refreshed on every pass, not only when it reaches
+  a terminal state, so a stale note cannot outlive what it described
+
+  reconcile refuses a url that disagrees with the recorded change request, and
+  derives nothing from the forge when no change request is recorded - the facts
+  must belong to this checklist
 """
 
 
@@ -875,6 +1015,11 @@ def main():
     sync.add_argument("--checks-pending", dest="checks_pending", default="0")
     sync.add_argument("--checks-failed", dest="checks_failed", default="0")
     sync.add_argument("--checks-total", dest="checks_total", default="0")
+    sync.add_argument("--body-file", dest="body_file", default="",
+                      help="a file holding the change request body")
+    sync.add_argument("--repo", default="",
+                      help="the repository to read git facts from (default: cwd)")
+    sync.add_argument("--default-branch", dest="default_branch", default="")
     sync.add_argument("--publish", action="store_true")
     sync.add_argument("--update", default="")
     sync.add_argument("--out", default="")

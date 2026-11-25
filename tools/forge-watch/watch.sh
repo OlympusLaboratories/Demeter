@@ -52,12 +52,13 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
-QUERY='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){state merged reviewDecision reviewThreads(first:100){nodes{isResolved}} commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){nodes{__typename ... on CheckRun{name status conclusion} ... on StatusContext{context state}}}}}}}}}}'
+QUERY='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){state merged reviewDecision body reviewThreads(first:100){nodes{isResolved}} commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){nodes{__typename ... on CheckRun{name status conclusion} ... on StatusContext{context state}}}}}}}}}}'
 
 JQ='.data.repository.pullRequest as $pr
 | (["PR", ($pr.state // ""), ($pr.merged | tostring), ($pr.reviewDecision // "NONE"),
     ([$pr.reviewThreads.nodes[] | select(.isResolved == false)] | length | tostring),
-    ($pr.commits.nodes[0].commit.oid[0:7] // "unknown")] | join("\u001f")),
+    ($pr.commits.nodes[0].commit.oid[0:7] // "unknown"),
+    (($pr.body // "") | @base64)] | join("\u001f")),
   (($pr.commits.nodes[0].commit.statusCheckRollup.contexts.nodes // [])[]
    | if .__typename == "CheckRun"
      then ["CHECK", .name, .status, (.conclusion // "")]
@@ -78,14 +79,21 @@ say() {
 
 sync_checklist() {
   [[ -n "$CHECKLIST" ]] || return 0
-  local out
+  local out body_file=""
+  if [[ -n "${8:-}" ]]; then
+    body_file="$(mktemp)"
+    printf '%s' "$8" | base64 -d > "$body_file" 2>/dev/null || : > "$body_file"
+  fi
   if ! out="$("$RUN_CHECKLIST" reconcile "$CHECKLIST" \
       --state "$1" --merged "$2" --review "$3" --unresolved "$4" \
       --checks-pending "$5" --checks-failed "$6" --checks-total "$7" \
+      ${body_file:+--body-file "$body_file"} \
       --publish 2>&1)"; then
+    [[ -n "$body_file" ]] && rm -f "$body_file"
     say "CHECKLIST ERROR $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-200)"
     return 0
   fi
+  [[ -n "$body_file" ]] && rm -f "$body_file"
   case "$out" in
     unchanged:*) return 0 ;;
     *) say "CHECKLIST $(printf '%s' "$out" | head -1 | cut -c1-200)" ;;
@@ -129,8 +137,8 @@ poll() {
   fi
 
   local pending=0 failed=() checks=0
-  local state merged decision unresolved head
-  IFS=$'\037' read -r _ state merged decision unresolved head <<<"$(head -1 <<<"$raw")"
+  local state merged decision unresolved head body64
+  IFS=$'\037' read -r _ state merged decision unresolved head body64 <<<"$(head -1 <<<"$raw")"
 
   if [[ -z "$state" || -z "$merged" ]]; then
     say "POLL ERROR the response carried no pull-request state, so $OWNER/$REPO#$PR may not exist"
@@ -153,7 +161,7 @@ poll() {
   done <<<"$raw"
 
   if [[ "$merged" == "true" ]]; then
-    sync_checklist "$state" "$merged" "$decision" "${unresolved:-0}" "$pending" "${#failed[@]}" "$checks"
+    sync_checklist "$state" "$merged" "$decision" "${unresolved:-0}" "$pending" "${#failed[@]}" "$checks" "${body64:-}"
     say "TERMINAL merged"
     return 0
   fi
@@ -166,11 +174,11 @@ poll() {
     return 2
   fi
   if [[ $pending -gt 0 ]]; then
-    sync_checklist "$state" "$merged" "$decision" "${unresolved:-0}" "$pending" "${#failed[@]}" "$checks"
+    sync_checklist "$state" "$merged" "$decision" "${unresolved:-0}" "$pending" "${#failed[@]}" "$checks" "${body64:-}"
     say_once "WAITING $pending of $checks check(s) still running"
     return 2
   fi
-  sync_checklist "$state" "$merged" "$decision" "${unresolved:-0}" "$pending" "${#failed[@]}" "$checks"
+  sync_checklist "$state" "$merged" "$decision" "${unresolved:-0}" "$pending" "${#failed[@]}" "$checks" "${body64:-}"
 
   if [[ ${#failed[@]} -gt 0 ]]; then
     say "TERMINAL checks finished with failures: ${failed[*]}"
