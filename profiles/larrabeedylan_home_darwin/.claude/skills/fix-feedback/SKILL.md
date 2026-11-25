@@ -198,7 +198,7 @@ Do this even when the conversation seems to hold the bot's comments — "what is
 
 Compare each review-agent finding against:
 - threads already on the PR, whoever wrote them — a review bot or a human;
-- comments a **previous run of this skill** posted — they carry the header from 3b.4, which is what makes them recognisable.
+- comments a **previous run of this skill** posted — they carry the hidden marker from 3b.4, which is what makes them recognisable.
 
 **Judge by substance, not wording.** The same defect in the same code is a duplicate even when one calls it a nil dereference and the other a missing guard. The same file with a different defect is not. When it is genuinely unclear, post it and name the thread it resembles in the summary — a reviewer resolves a near-duplicate in seconds, while a dropped finding costs them the bug.
 
@@ -228,7 +228,8 @@ One comment per finding — a thread is resolved as a unit, so batching several 
 
 ```bash
 ~/.claude/scripts/github-api.sh create-diff-comment <owner> <repo> <pr_number> "<file_path>" <line> << 'ENDOFBODY'
-🤖 **review-code — <dimension>**
+<!-- review-note:<dimension> -->
+**<dimension>**
 
 <one-sentence statement of the defect>
 
@@ -239,13 +240,13 @@ ENDOFBODY
 ```
 
 - `<line>` is the line in the file **as it stands now**, not the line the review quoted if the file has moved since. Pass `-` for a file-level comment.
-- Keep the `🤖 **review-code — <dimension>**` header exactly as written. It is how 3b.2 recognises this skill's own comments on a later run.
+- Keep the `<!-- review-note:<dimension> -->` marker as the body's first line, byte for byte. GitHub strips an HTML comment out of the rendered view and hands it back verbatim from the API, so it is invisible to everyone reading the pull request and still exact to match on — which is how 3b.2 recognises this skill's own comments on a later run. The visible `**<dimension>**` line is a plain categorisation and deliberately nothing more: see Rule 9.
 - The script anchors to the diff when that line is inside it; when GitHub rejects the anchor (a line outside the diff, an unpushed commit) it retries as a file-level comment and finally as a general PR comment prefixed with `` `path:line` ``. It reports which in the `anchored` and `fallback_reason` fields. **Report the fallback to the user**; do not describe a comment as anchored to the code when it landed as a general comment.
 - Do not write the finding into the source as a comment while doing this. The PR thread is the record.
 
 ### 3b.5 Record the thread IDs
 
-The REST call returns a comment id, **not** the GraphQL thread ID that Step 7b needs to reply. After the batch is posted, re-run `pr-reviews <owner> <repo> <pr_number>` once and match each new thread to its finding by the `🤖 review-code` header, capturing the thread `id`. One extra call for the whole batch.
+The REST call returns a comment id, **not** the GraphQL thread ID that Step 7b needs to reply. After the batch is posted, re-run `pr-reviews <owner> <repo> <pr_number>` once and match each new thread to its finding by its `<!-- review-note:` marker, capturing the thread `id`. One extra call for the whole batch.
 
 With the thread ID attached, the item behaves like any other PR thread: Step 4 shows it with its thread link, and **Step 7b now applies to it** — a reject or modify reply goes back into the thread this step opened, which is what leaves the finding, the decision, and the reasoning in one place for whoever reads the PR later.
 
@@ -367,6 +368,7 @@ Draft a reply that the user can post in the comment thread. The reply should be:
 - **Substantive** — explain the reasoning clearly, not just "I disagree"
 - **Specific** — reference concrete code, behavior, or constraints that support the decision
 - **Constructive** — if applicable, suggest what alternative concern you did address or offer a compromise
+- **Unattributed** — it never says where the point being answered came from: no review swarm, no review skill, no automated reviewer, no "AI" (Rule 9)
 
 Print the reply in a fenced code block so the user can copy it:
 
@@ -452,7 +454,7 @@ Resolve through `~/.claude/scripts/github-api.sh`, the same script Step 3b and S
 
 It prints `{"id": "<thread_id>", "resolved": true}` and exits 0, or `{"error": "<GitHub's own message>"}` and exits non-zero. **Read what comes back** — confirm `resolved: true` and report any thread that did not resolve, rather than assuming it did. `unresolve-thread` is the counterpart, taking the same three arguments. `<owner>` and `<repo>` are not needed by the underlying mutation — a thread node id is global — and are taken only so this command is shaped like every other one in the script; pass them anyway.
 
-**`<thread_id>` must be the node id of a review *thread*.** That is the `id` of a `pr-reviews` item whose `type` is `inline`, the same id Step 7b replies with. It is **not** what `create-diff-comment` returns: that emits `comment_id` (a REST comment id) and `node_id` (the node id of the *comment*), and neither one resolves. So for a finding this run posted in Step 3b, use the thread id **Step 3b.5 captured by re-running `pr-reviews`** — and if you do not have it, re-run `pr-reviews <owner> <repo> <pr_number>` and match on the `🤖 review-code` header before resolving. Passing a comment id fails with `Could not resolve to a node with the global id of '…'`, which reads like a thread that has vanished rather than the wrong kind of id, so check the id before you believe the error.
+**`<thread_id>` must be the node id of a review *thread*.** That is the `id` of a `pr-reviews` item whose `type` is `inline`, the same id Step 7b replies with. It is **not** what `create-diff-comment` returns: that emits `comment_id` (a REST comment id) and `node_id` (the node id of the *comment*), and neither one resolves. So for a finding this run posted in Step 3b, use the thread id **Step 3b.5 captured by re-running `pr-reviews`** — and if you do not have it, re-run `pr-reviews <owner> <repo> <pr_number>` and match on the `<!-- review-note:` marker before resolving. Passing a comment id fails with `Could not resolve to a node with the global id of '…'`, which reads like a thread that has vanished rather than the wrong kind of id, so check the id before you believe the error.
 
 The mutation only works on **inline** review threads; a `general` or `review` comment has nothing to resolve, which is not a failure. A thread that is already resolved succeeds unchanged. The other realistic failure is a token without write access to the repository — report GitHub's message as printed and move on, rather than retrying.
 
@@ -478,3 +480,4 @@ After resolving one thread, offer to address the next unresolved thread. Loop ba
 6. **Keep replies concise.** Drafted replies should be 2-5 sentences. Long replies in code review threads are rarely read.
 7. **Use the local codebase.** The user is expected to have the PR branch checked out locally. Use `Read`, `Grep`, and `Glob` to explore the actual code — don't rely solely on the diff from the API.
 8. **No comments in the code.** When you apply a change, add no explanatory comment, docstring, or note recording what the reviewer asked for — a reviewer reading the next diff does not need the last review narrated back at them. That belongs in the drafted reply. Machine-read directives (linter suppressions, build pragmas, a doc-comment CI requires) are program input, not commentary, and stay allowed.
+9. **Nothing this skill posts says where the feedback came from.** Not in a finding body, not in a drafted reply, not in a resolution note: no robot glyph, no skill name, no "automated review", no "AI", no "swarm", and no agent referring to itself. A finding on a pull request is a review note from the account that posted it, and that account is who is accountable for it to whoever reads the thread — a body that hands the point off to a tool invites the reader to discount it and tells them nothing they can act on. The single exception is 3b.4's `<!-- review-note:<dimension> -->` marker, which exists because 3b.2 and 3b.5 have to find the comment again on a later run and which no reader ever sees. **The chat side is not covered**: Step 4 still tags an item `— review-code: correctness` in the terminal, where provenance is the user's own record of their own run.
