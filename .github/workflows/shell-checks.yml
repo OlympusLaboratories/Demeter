@@ -64,6 +64,9 @@ jobs:
       - name: Plan gate notification
         run: tests/check-plan-gate.py
 
+      - name: Run checklist gate
+        run: tests/check-checklist-gate.py
+
       - name: Notification body links
         run: tests/check-notify-body.py
 

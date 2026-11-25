@@ -1070,6 +1070,63 @@ GATE_HOLD = (
 )
 
 
+CHECKLIST_STALE_STOPS = 3
+
+CHECKLIST_HOLD = (
+    "Do not end this turn yet. The run checklist at %s still shows %s, and %s."
+    " The page is what the user and the next agent read to see where this run"
+    " is, so a page behind the run is the same defect as a run with nothing in"
+    " flight. Tick what is actually done with"
+    " `~/.claude/scripts/run-checklist.py tick <items.json> <id>=<state> --publish`"
+    " in this turn. If the run is genuinely finished or abandoned, run"
+    " `~/.claude/hooks/notify.py --checklist-clear` and end the turn again."
+)
+
+
+def checklist_reason(gate):
+    stops = gate.get("stops")
+    if gate.get("verdict") == "stalled":
+        return "nothing is in flight"
+    if isinstance(stops, int) and stops >= CHECKLIST_STALE_STOPS:
+        return ("it has not been written since %d turns ended"
+                % CHECKLIST_STALE_STOPS)
+    return ""
+
+
+def checklist_gate(payload):
+    if payload.get("agent_id") or payload.get("agent_type"):
+        return None
+    session_id = payload.get("session_id") or ""
+    if not session_id:
+        return None
+    path = session_path(session_id)
+    state = read_json(path, {}) or {}
+    if not isinstance(state, dict):
+        return None
+    gate = state.get("checklist_pending")
+    if not isinstance(gate, dict) or not gate.get("open"):
+        return None
+    if gate_expired(gate):
+        merge_state(path, drop=("checklist_pending",))
+        log("dropped a stale run checklist marker")
+        return None
+    if payload.get("hook_event_name") != "Stop" or payload.get("stop_hook_active"):
+        return None
+    if gate.get("held"):
+        return None
+
+    reason = checklist_reason(gate)
+    if not reason:
+        merge_state(path, {"checklist_pending":
+                           dict(gate, stops=int(gate.get("stops") or 0) + 1)})
+        return None
+
+    if not merge_state(path, {"checklist_pending": dict(gate, held=time.time())}):
+        return None
+    open_items = ", ".join(str(entry) for entry in gate["open"][:6])
+    return CHECKLIST_HOLD % (gate.get("url") or "the published page", open_items, reason)
+
+
 def gate_expired(gate):
     at = gate.get("at") if isinstance(gate, dict) else None
     if not isinstance(at, (int, float)):
@@ -1221,6 +1278,17 @@ def handle(payload):
     if stranded_gate:
         how += "; stranded plan gate"
     return "sent %s for %s (%s)" % (kind, repo, how)
+
+
+def cmd_checklist_clear(args):
+    session_id = (args[0] if args else "").strip() or session_from_env()
+    if not session_id:
+        print("no session id resolved: nothing to clear", file=sys.stderr)
+        return 0
+    merge_state(session_path(session_id), drop=("checklist_pending",))
+    log("run checklist marker cleared for %s" % session_id)
+    print("cleared the run checklist marker")
+    return 0
 
 
 def cmd_gate(args):
@@ -1429,6 +1497,8 @@ def main():
         return cmd_gate(args[1:])
     if args and args[0] == "--gate-clear":
         return cmd_gate([""] + args[1:])
+    if args and args[0] == "--checklist-clear":
+        return cmd_checklist_clear(args[1:])
     if args and args[0] == "--change-request":
         session_id = args[1] if len(args) > 1 else ""
         path = session_path(session_id) if session_id else None
@@ -1467,6 +1537,7 @@ def main():
             " | --repo [<cwd>] | --change-request <session-id>"
             " | --gate-pending <url> [<session-id>]"
             " | --gate-clear [<session-id>]"
+            " | --checklist-clear [<session-id>]"
             " | --ping --level <level> --title <title>"
             " [--body <text>|-] [--session <id>]]", file=sys.stderr)
         return 2
@@ -1475,6 +1546,11 @@ def main():
     if hold:
         print(json.dumps({"decision": "block", "reason": hold}))
         log("Stop held: a plan was published and no question was asked")
+        return 0
+    hold = checklist_gate(payload)
+    if hold:
+        print(json.dumps({"decision": "block", "reason": hold}))
+        log("Stop held: the run checklist is behind the run")
         return 0
     log("%s %s" % (payload.get("hook_event_name"), handle(payload)))
     return 0

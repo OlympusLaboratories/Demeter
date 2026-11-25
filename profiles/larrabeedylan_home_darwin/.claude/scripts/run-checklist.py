@@ -27,6 +27,9 @@ PUBLISH_SCRIPT = os.environ.get(
 ABSENT = 3
 EXPIRES = "30d"
 
+SESSIONS = os.path.join(os.path.expanduser("~"), ".claude", "notify-state", "sessions")
+SESSION_KEYS = ("CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID")
+
 STATE_LABEL = {
     "pending": "pending",
     "in-flight": "in flight",
@@ -176,6 +179,59 @@ def standing(items):
             "%d item%s outstanding and nothing is in flight."
             % (len(outstanding), "" if len(outstanding) == 1 else "s"),
             [])
+
+
+def session_id():
+    for key in SESSION_KEYS:
+        value = os.environ.get(key)
+        if value:
+            return value
+    return ""
+
+
+def session_state_path(ident):
+    safe = re.sub(r"[^A-Za-z0-9_-]", "-", ident or "unknown")[:80]
+    return os.path.join(SESSIONS, safe + ".json")
+
+
+def mark_outstanding(document):
+    ident = session_id()
+    if not ident:
+        return False
+    items = document["items"]
+    verdict, _, in_flight = standing(items)
+    path = session_state_path(ident)
+    state = {}
+    if os.path.exists(path):
+        try:
+            with open(path) as handle:
+                state = json.load(handle)
+        except (OSError, ValueError):
+            state = {}
+    if not isinstance(state, dict):
+        state = {}
+    if verdict == "complete":
+        state.pop("checklist_pending", None)
+    else:
+        run = document["run"]
+        state["checklist_pending"] = {
+            "url": run.get("url", ""),
+            "hash": run.get("hash", ""),
+            "at": time.time(),
+            "stops": 0,
+            "verdict": verdict,
+            "open": [entry["id"] for entry in items if entry["state"] in OPEN_STATES],
+            "in_flight": [entry["id"] for entry in in_flight],
+        }
+    try:
+        os.makedirs(SESSIONS, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as handle:
+            json.dump(state, handle, indent=2, sort_keys=True)
+        os.replace(tmp, path)
+    except OSError:
+        return False
+    return True
 
 
 def dump(document):
@@ -493,7 +549,9 @@ def publish(document, items_path, update, out, stamp):
 
 def cmd_publish(args):
     document = read_document(args.items)
-    return publish(document, args.items, args.update, args.out, args.stamp)
+    status = publish(document, args.items, args.update, args.out, args.stamp)
+    mark_outstanding(document)
+    return status
 
 
 def apply_ticks(document, ticks):
@@ -543,6 +601,7 @@ def cmd_tick(args):
     document = canonical(document, args.items)
     write(args.items, dump(document) + "\n")
     verdict, sentence, _ = standing(document["items"])
+    mark_outstanding(document)
     print("%s: %s" % (verdict, sentence))
     if not args.publish:
         return 0

@@ -90,6 +90,16 @@ The user may run `/autopilot <flags>` while this skill is working — to turn on
 
 A bare `/autopilot` token inside the *initial* invocation is now redundant rather than wrong — autopilot is already on. Strip it, apply any flags it carries, and say nothing further about it.
 
+### A `/ping` token in the invocation means the user is away
+
+Strip it from the problem statement, then **send the opening ping at Step 0**, in the same tool-call batch as the checklist publish, with the checklist URL in the body. Tick `arm=done` in that batch too.
+
+Do not defer it to the `autopilot` hand-off. That is a dozen steps and often hours later, and until a ping lands the session is **mute**: `notify.py` writes `armed_at` only on a successful send, so every turn end, permission prompt and failure before the hand-off is logged as `skip: session not armed` and reaches nobody. A user who typed `/ping` typed it because they are walking away now. Observed: a run took `/ping` in its invocation, sent nothing for its whole first half, and the user's first words were that they had never received the link.
+
+Arming early is safe in both directions. `armed_at` is a latch only `/ping off` clears, and a failed send writes nothing — so an unconfigured `~/.claude/notify.json` leaves the run exactly as it would have been. Report what it said in one line and carry on; the work is never contingent on the notification.
+
+If the token carries a note — `/ping tell me when the plan is up` — pass that note to the `ping` skill as the body hint. A run **without** the token is unchanged: it still arms at the hand-off.
+
 ## Step 1: Understand What Is Being Asked
 
 ### 1a. Get the user's first name
