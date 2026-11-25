@@ -1,4 +1,5 @@
 <title>Changes Diagram</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -60,23 +61,37 @@ h1 { font-size: 21px; font-weight: 600; margin: 0; text-wrap: balance; letter-sp
 .check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--muted); margin-left: auto; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend.collapsed { display: none; }
+.legend-toggle { display: none; }
 .sw { width: 18px; height: 11px; border-radius: 3px; border: 1.5px solid; display: inline-block; }
 .ln { width: 20px; height: 0; border-top: 2px solid; display: inline-block; }
 .main { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 14px; align-items: start; }
 @media (max-width: 980px) { .main { grid-template-columns: minmax(0, 1fr); } .legend { margin-left: 0; } }
-.canvas { position: relative; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; height: min(78vh, 860px); min-height: 420px; overflow: hidden; touch-action: none; }
+@media (max-width: 700px) { .legend-toggle { display: inline-block; } .legend { flex-basis: 100%; } }
+@media (min-width: 701px) { .legend.collapsed { display: flex; } }
+.canvas { position: relative; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; height: var(--canvas-h, min(78vh, 860px)); min-height: 420px; overflow: hidden; touch-action: none; }
+.canvas.full { position: fixed; inset: 0; z-index: 60; height: auto; max-height: none; min-height: 0; border-radius: 0; border-width: 0;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
+.canvas.full .zoom { right: calc(10px + env(safe-area-inset-right, 0px)); bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
+body.no-scroll { overflow: hidden; }
 .canvas svg { width: 100%; height: 100%; display: block; cursor: grab; user-select: none; }
 .canvas svg.dragging { cursor: grabbing; }
-.zoom { position: absolute; right: 10px; top: 10px; display: flex; flex-direction: column; gap: 4px; }
+.zoom { position: absolute; right: 10px; bottom: 10px; display: flex; flex-direction: column; gap: 4px; }
 .btn { font: 500 13px var(--font-ui); color: var(--ink); background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; min-width: 30px; height: 30px; padding: 0 8px; cursor: pointer; }
 .btn:hover { border-color: var(--muted); }
+@media (pointer: coarse) {
+  .btn { min-width: 42px; height: 42px; font-size: 14px; }
+  .zoom { gap: 6px; }
+  .seg button { padding: 10px 14px; font-size: 14px; }
+  .check { font-size: 14px; padding: 4px 0; }
+}
 .status-msg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; pointer-events: none; }
 .status-msg[hidden] { display: none; }
 aside { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 14px; min-width: 0; max-height: min(78vh, 860px); overflow: auto; }
 @media (max-width: 980px) { aside { max-height: none; } }
-aside h2 { font-size: 15px; margin: 0; font-family: var(--font-code); font-weight: 600; word-break: break-word; }
+aside h2 { font-size: 15px; margin: 0; font-family: var(--font-code); font-weight: 600; overflow-wrap: anywhere; }
 aside h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); margin: 0 0 6px; font-weight: 600; }
-.kv { font-family: var(--font-code); font-size: 12px; color: var(--muted); word-break: break-all; }
+.kv { font-family: var(--font-code); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .pill { display: inline-block; font: 600 10.5px var(--font-ui); letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 7px; border-radius: 99px; border: 1px solid; }
 .pill.added { color: var(--add); background: var(--add-bg); }
 .pill.removed { color: var(--del); background: var(--del-bg); }
@@ -92,17 +107,17 @@ aside h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; c
 .diff .r { background: var(--del-bg); color: var(--del); }
 .diff .h { color: var(--accent); }
 ul.plain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
-.link { font: 12.5px var(--font-code); color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; word-break: break-all; }
+.link { font: 12.5px var(--font-code); color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; overflow-wrap: anywhere; }
 .link:hover { text-decoration: underline; }
 .edge-tag { font-size: 11px; margin-left: 6px; }
 table.files { width: 100%; border-collapse: collapse; font-family: var(--font-code); font-size: 12px; font-variant-numeric: tabular-nums; }
 table.files td { padding: 4px 0; border-top: 1px solid var(--rule); vertical-align: top; }
 table.files td.n { text-align: right; padding-left: 10px; white-space: nowrap; }
-table.files td.p { word-break: break-all; }
-.walk li { display: flex; flex-wrap: wrap; gap: 0 8px; align-items: baseline; }
-.walk .idx { font-family: var(--font-code); font-size: 11px; color: var(--muted); min-width: 18px; text-align: right; font-variant-numeric: tabular-nums; }
-.walk .cnt { font-family: var(--font-code); font-size: 11px; margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.walk .dir { flex-basis: 100%; padding-left: 26px; font-family: var(--font-code); font-size: 11px; color: var(--muted); word-break: break-all; }
+table.files td.p { overflow-wrap: anywhere; }
+.walk li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 0 8px; align-items: baseline; }
+.walk .idx { font-family: var(--font-code); font-size: 11px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.walk .cnt { font-family: var(--font-code); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.walk .dir { grid-column: 2 / -1; font-family: var(--font-code); font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
 .nav { display: flex; gap: 8px; }
 svg text { font-family: var(--font-code); }
 .node { cursor: pointer; }
@@ -130,7 +145,8 @@ svg text { font-family: var(--font-code); }
       <button id="mode-before" aria-pressed="false">Before</button>
     </div>
     <label class="check"><input type="checkbox" id="show-context" checked> Unchanged neighbours</label>
-    <div class="legend">
+    <button class="btn legend-toggle" id="legend-toggle" aria-expanded="false" aria-controls="legend">Legend</button>
+    <div class="legend" id="legend">
       <span><i class="sw" style="border-color:var(--ink);background:var(--surface)"></i>modified</span>
       <span><i class="sw" style="border-color:var(--add);background:var(--add-bg)"></i>added</span>
       <span><i class="sw" style="border-color:var(--del);background:var(--del-bg);border-style:dashed"></i>removed</span>
@@ -148,12 +164,90 @@ svg text { font-family: var(--font-code); }
       <div class="zoom">
         <button class="btn" id="zoom-in" aria-label="Zoom in">+</button>
         <button class="btn" id="zoom-out" aria-label="Zoom out">−</button>
-        <button class="btn" id="zoom-fit" aria-label="Fit to view">Fit</button>
+        <button class="btn" id="zoom-fit" aria-label="Fit everything into view">Fit</button>
+        <button class="btn" id="zoom-full" aria-label="Full screen">Full</button>
       </div>
     </div>
     <aside id="panel" aria-live="polite"></aside>
   </div>
 </div>
+
+<script id="view-math">
+const ViewMath = (() => {
+  const MIN_SPAN = 1e-6;
+  const span = (v) => Math.max(v, MIN_SPAN);
+  const sizeOf = (rect) => ({ width: Math.max(1, rect.width), height: Math.max(1, rect.height) });
+
+  function fitAll(bounds, aspect) {
+    let w = span(bounds.w), h = span(bounds.h);
+    if (w / h > aspect) h = w / aspect; else w = h * aspect;
+    return { x: bounds.x - (w - bounds.w) / 2, y: bounds.y - (h - bounds.h) / 2, w, h };
+  }
+
+  function legible(bounds, rect, minScale) {
+    const r = sizeOf(rect);
+    const fitted = fitAll(bounds, r.width / r.height);
+    if (r.width / span(fitted.w) >= minScale) return fitted;
+    const w = r.width / minScale, h = r.height / minScale, pad = 12 / minScale;
+    return {
+      x: bounds.w <= w ? bounds.x - (w - bounds.w) / 2 : bounds.x - pad,
+      y: bounds.h <= h ? bounds.y - (h - bounds.h) / 2 : bounds.y - pad,
+      w, h,
+    };
+  }
+
+  function rescale(view, oldRect, newRect) {
+    const o = sizeOf(oldRect), n = sizeOf(newRect);
+    const scale = o.width / span(view.w);
+    const cx = view.x + view.w / 2, cy = view.y + view.h / 2;
+    const w = n.width / scale, h = n.height / scale;
+    return { x: cx - w / 2, y: cy - h / 2, w, h };
+  }
+
+  function toSvg(view, rect, clientX, clientY) {
+    const r = sizeOf(rect);
+    return {
+      x: view.x + ((clientX - rect.left) / r.width) * view.w,
+      y: view.y + ((clientY - rect.top) / r.height) * view.h,
+    };
+  }
+
+  function zoomAt(view, factor, px, py) {
+    return { x: px - (px - view.x) * factor, y: py - (py - view.y) * factor, w: view.w * factor, h: view.h * factor };
+  }
+
+  function pinch(view, rect, prev, next) {
+    const before = Math.hypot(prev.bx - prev.ax, prev.by - prev.ay);
+    const after = Math.hypot(next.bx - next.ax, next.by - next.ay);
+    if (!(before > 0) || !(after > 0)) return view;
+    const anchor = toSvg(view, rect, (prev.ax + prev.bx) / 2, (prev.ay + prev.by) / 2);
+    const factor = before / after;
+    const w = view.w * factor, h = view.h * factor;
+    const r = sizeOf(rect);
+    const fx = ((next.ax + next.bx) / 2 - rect.left) / r.width;
+    const fy = ((next.ay + next.by) / 2 - rect.top) / r.height;
+    return { x: anchor.x - fx * w, y: anchor.y - fy * h, w, h };
+  }
+
+  function contentHeight(bounds, rect, minScale, padPx) {
+    const r = sizeOf(rect);
+    const fitScale = Math.min(r.width / span(bounds.w), r.height / span(bounds.h));
+    return Math.ceil(span(bounds.h) * Math.max(fitScale, minScale) + padPx);
+  }
+
+  function clampZoom(view, bounds) {
+    const reach = span(Math.max(bounds.w, bounds.h));
+    const widest = reach * 8, narrowest = reach / 4000;
+    const w = Math.min(widest, Math.max(narrowest, view.w));
+    if (w === view.w) return view;
+    const h = view.h * (w / span(view.w));
+    const cx = view.x + view.w / 2, cy = view.y + view.h / 2;
+    return { x: cx - w / 2, y: cy - h / 2, w, h };
+  }
+
+  return { fitAll, legible, rescale, toSvg, zoomAt, pinch, clampZoom, contentHeight };
+})();
+</script>
 
 <script id="mr-data" type="application/json">/*MR_DATA*/</script>
 <script src="https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js"></script>
@@ -198,6 +292,7 @@ svg text { font-family: var(--font-code); }
   const state = { tab: "production", mode: "both", context: true, selected: null };
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const wbr = (s) => esc(s).replace(/([/_.:-])/g, "$1<wbr>");
   const short = (mod) => mod.startsWith(DATA.package + ".") ? mod.slice(DATA.package.length + 1) : mod;
   const commonDir = (() => {
     const dirs = DATA.files.map((f) => f.path.split("/").slice(0, -1));
@@ -218,7 +313,7 @@ svg text { font-family: var(--font-code); }
   const testFiles = DATA.files.filter((f) => !f.binary && f.test);
   const binFiles = DATA.files.filter((f) => f.binary);
   const [pa, pr] = sum(prodFiles), [ta, tr] = sum(testFiles);
-  $("eyebrow").innerHTML = `<span>branch <b>${esc(DATA.branch)}</b></span><span>base <b>${esc(DATA.base)}</b></span><span>package <b>${esc(DATA.package)}</b></span>`;
+  $("eyebrow").innerHTML = `<span>branch <b>${wbr(DATA.branch)}</b></span><span>base <b>${wbr(DATA.base)}</b></span><span>package <b>${wbr(DATA.package)}</b></span>`;
   $("title").textContent = DATA.title || DATA.branch;
   const changedFns = DATA.nodes.filter((n) => n.status !== "context");
   $("stats").innerHTML = [
@@ -314,16 +409,32 @@ svg text { font-family: var(--font-code); }
     if (parent) parent.appendChild(x);
     return x;
   };
+  const LABEL_UNITS = 12.5, MIN_LABEL_PX = 8, FLOOR = MIN_LABEL_PX / LABEL_UNITS;
   let view = { x: 0, y: 0, w: 100, h: 100 }, bounds = view;
-  const svg = $("svg");
+  let rect = { left: 0, top: 0, width: 1, height: 1 }, lastSize = null;
+  const svg = $("svg"), canvas = $("canvas");
   const setView = () => svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
-  function fit() {
-    const r = svg.getBoundingClientRect();
-    const aspect = r.width / Math.max(1, r.height);
-    let w = bounds.w, h = bounds.h;
-    if (w / h > aspect) h = w / aspect; else w = h * aspect;
-    view = { x: bounds.x - (w - bounds.w) / 2, y: bounds.y - (h - bounds.h) / 2, w, h };
-    setView();
+  function measure() {
+    rect = svg.getBoundingClientRect();
+    lastSize = { width: rect.width, height: rect.height };
+    return rect;
+  }
+  function apply(next) { view = ViewMath.clampZoom(next, bounds); setView(); }
+  function fit() { measure(); apply(ViewMath.fitAll(bounds, Math.max(1, rect.width) / Math.max(1, rect.height))); }
+  function fitLegible() {
+    canvas.style.removeProperty("--canvas-h");
+    measure();
+    const needed = ViewMath.contentHeight(bounds, rect, FLOOR, 24);
+    if (needed < rect.height) canvas.style.setProperty("--canvas-h", needed + "px");
+    measure();
+    apply(ViewMath.legible(bounds, rect, FLOOR));
+  }
+  function reflow() {
+    const before = lastSize;
+    measure();
+    if (before && before.width > 0 && before.height > 0 && rect.width > 0 && rect.height > 0) {
+      apply(ViewMath.rescale(view, before, rect));
+    }
   }
 
   let nodeEls = {}, edgeEls = [];
@@ -374,7 +485,7 @@ svg text { font-family: var(--font-code); }
       }
     }
     bounds = { x: 0, y: 0, w: laid.width, h: laid.height };
-    fit();
+    fitLegible();
     applyHighlight(state.selected);
   }
 
@@ -429,7 +540,7 @@ svg text { font-family: var(--font-code); }
   const callers = (id) => DATA.edges.filter((e) => e.target === id);
   const callees = (id) => DATA.edges.filter((e) => e.source === id);
   const edgeTag = (s) => s === "added" ? '<span class="edge-tag plus">new</span>' : s === "removed" ? '<span class="edge-tag minus">dropped</span>' : "";
-  const linkList = (es, key) => es.length ? `<ul class="plain">${es.map((e) => `<li><button class="link" data-go="${esc(e[key])}">${esc(byId[e[key]].qual)}</button>${edgeTag(e.status)}</li>`).join("")}</ul>` : '<div class="doc">None in this graph.</div>';
+  const linkList = (es, key) => es.length ? `<ul class="plain">${es.map((e) => `<li><button class="link" data-go="${esc(e[key])}">${wbr(byId[e[key]].qual)}</button>${edgeTag(e.status)}</li>`).join("")}</ul>` : '<div class="doc">None in this graph.</div>';
   function diffHtml(d) {
     return d.split("\n").map((l) => {
       const c = l.startsWith("@@") ? "h" : l.startsWith("+") ? "a" : l.startsWith("-") ? "r" : "";
@@ -455,10 +566,10 @@ svg text { font-family: var(--font-code); }
     const p = $("panel");
     const order = walkOrder();
     if (!state.selected) {
-      const fileRows = DATA.files.map((f) => `<tr><td class="p">${esc(trim(f.path))}</td><td class="n">${f.binary ? '<span class="doc">binary</span>' : fmt(f.added, f.removed)}</td></tr>`).join("");
+      const fileRows = DATA.files.map((f) => `<tr><td class="p">${wbr(trim(f.path))}</td><td class="n">${f.binary ? '<span class="doc">binary</span>' : fmt(f.added, f.removed)}</td></tr>`).join("");
       p.innerHTML = `
         <div><h3>Review walk</h3><div class="doc" style="margin-bottom:8px">${W.walkHint}</div>
-        <ol class="plain walk">${order.map((id, i) => { const n = byId[id]; const d = rowDir(n); return `<li><span class="idx">${i + 1}</span><button class="link" data-go="${esc(id)}">${esc(n.qual)}</button>${d ? `<span class="dir">${esc(d)}</span>` : ""}<span class="cnt">${fmt(n.added, n.removed)}</span></li>`; }).join("")}</ol></div>
+        <ol class="plain walk">${order.map((id, i) => { const n = byId[id]; const d = rowDir(n); return `<li><span class="idx">${i + 1}</span><button class="link" data-go="${esc(id)}">${wbr(n.qual)}</button><span class="cnt">${fmt(n.added, n.removed)}</span>${d ? `<span class="dir">${wbr(d)}</span>` : ""}</li>`; }).join("")}</ol></div>
         <div><h3>Files</h3><table class="files">${fileRows}</table></div>`;
     } else {
       const n = byId[state.selected];
@@ -468,7 +579,7 @@ svg text { font-family: var(--font-code); }
         <div class="nav"><button class="btn" id="back">All changes</button>
           ${i > 0 ? `<button class="btn" data-go="${esc(order[i - 1])}">‹ Prev</button>` : ""}
           ${i >= 0 && i < order.length - 1 ? `<button class="btn" data-go="${esc(order[i + 1])}">Next ›</button>` : ""}</div>
-        <div><h2>${esc(n.qual)}</h2><div class="kv">${esc(modPath(n.module))}${n.line ? ":" + n.line : ""}</div></div>
+        <div><h2>${wbr(n.qual)}</h2><div class="kv">${wbr(modPath(n.module) + (n.line ? ":" + n.line : ""))}</div></div>
         <div class="pills"><span class="pill ${n.status}">${statusLabel}</span>${n.status !== "context" ? `<span class="kv">${fmt(n.added, n.removed)}</span>` : ""}${n.orphaned ? `<span class="pill warn">${W.orphan}</span>` : ""}${n.test ? '<span class="pill context">test</span>' : ""}</div>
         ${n.signature ? `<div class="sig">${esc(n.signature)}</div>` : ""}
         ${n.doc ? `<div class="doc">${esc(n.doc)}</div>` : ""}
@@ -534,33 +645,125 @@ svg text { font-family: var(--font-code); }
   $("show-context").addEventListener("change", (e) => { state.context = e.target.checked; refresh(); });
 
   // Pan and zoom
-  const zoomAt = (factor, cx, cy) => {
-    view = { x: cx - (cx - view.x) * factor, y: cy - (cy - view.y) * factor, w: view.w * factor, h: view.h * factor };
-    setView();
+  const zoomCentre = (factor) => { measure(); apply(ViewMath.zoomAt(view, factor, view.x + view.w / 2, view.y + view.h / 2)); };
+  svg.addEventListener("wheel", (ev) => {
+    ev.preventDefault();
+    measure();
+    const p = ViewMath.toSvg(view, rect, ev.clientX, ev.clientY);
+    apply(ViewMath.zoomAt(view, Math.exp(ev.deltaY * 0.0015), p.x, p.y));
+  }, { passive: false });
+
+  const pointers = new Map();
+  let drag = null, pinchFrom = null, lastTap = 0;
+  const capture = (id) => { try { svg.setPointerCapture(id); } catch (e) {} };
+  const release = (id) => { try { svg.releasePointerCapture(id); } catch (e) {} };
+  const gesture = () => {
+    const [a, b] = [...pointers.values()];
+    return { ax: a.x, ay: a.y, bx: b.x, by: b.y };
   };
-  const toSvg = (ev) => {
-    const r = svg.getBoundingClientRect();
-    return { x: view.x + ((ev.clientX - r.left) / r.width) * view.w, y: view.y + ((ev.clientY - r.top) / r.height) * view.h };
+  const startDrag = (id, x, y, moved) => {
+    measure();
+    drag = { id, x, y, vx: view.x, vy: view.y, moved };
+    svg.classList.add("dragging");
   };
-  svg.addEventListener("wheel", (ev) => { ev.preventDefault(); const p = toSvg(ev); zoomAt(Math.exp(ev.deltaY * 0.0015), p.x, p.y); }, { passive: false });
-  let drag = null;
+
   svg.addEventListener("pointerdown", (ev) => {
-    if (ev.target.closest(".node")) return;
-    drag = { x: ev.clientX, y: ev.clientY, vx: view.x, vy: view.y, moved: false };
-    svg.setPointerCapture(ev.pointerId); svg.classList.add("dragging");
+    pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (pointers.size === 2) {
+      drag = null;
+      svg.classList.remove("dragging");
+      measure();
+      pinchFrom = gesture();
+      for (const id of pointers.keys()) capture(id);
+      return;
+    }
+    if (pointers.size > 2 || ev.target.closest(".node")) return;
+    startDrag(ev.pointerId, ev.clientX, ev.clientY, false);
+    capture(ev.pointerId);
   });
+
   svg.addEventListener("pointermove", (ev) => {
-    if (!drag) return;
-    const r = svg.getBoundingClientRect();
+    if (!pointers.has(ev.pointerId)) return;
+    pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (pointers.size >= 2) {
+      if (!pinchFrom) return;
+      measure();
+      const to = gesture();
+      apply(ViewMath.pinch(view, rect, pinchFrom, to));
+      pinchFrom = to;
+      return;
+    }
+    if (!drag || drag.id !== ev.pointerId) return;
+    measure();
     const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
     if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
-    view.x = drag.vx - (dx / r.width) * view.w; view.y = drag.vy - (dy / r.height) * view.h; setView();
+    view = {
+      x: drag.vx - (dx / Math.max(1, rect.width)) * view.w,
+      y: drag.vy - (dy / Math.max(1, rect.height)) * view.h,
+      w: view.w, h: view.h,
+    };
+    setView();
   });
-  svg.addEventListener("pointerup", () => { if (drag && !drag.moved) select(null); drag = null; svg.classList.remove("dragging"); });
-  $("zoom-in").addEventListener("click", () => zoomAt(0.8, view.x + view.w / 2, view.y + view.h / 2));
-  $("zoom-out").addEventListener("click", () => zoomAt(1.25, view.x + view.w / 2, view.y + view.h / 2));
+
+  const endPointer = (ev) => {
+    const wasPinching = pointers.size >= 2;
+    pointers.delete(ev.pointerId);
+    release(ev.pointerId);
+    if (wasPinching) {
+      pinchFrom = null;
+      if (pointers.size === 1) {
+        const [id] = [...pointers.keys()];
+        const [at] = [...pointers.values()];
+        startDrag(id, at.x, at.y, true);
+      } else {
+        drag = null;
+        svg.classList.remove("dragging");
+      }
+      return;
+    }
+    const tapped = drag && drag.id === ev.pointerId && !drag.moved;
+    drag = null;
+    svg.classList.remove("dragging");
+    if (tapped) select(null);
+    if (ev.pointerType === "mouse" || ev.target.closest(".node")) return;
+    const now = Date.now();
+    if (now - lastTap < 320) {
+      measure();
+      const p = ViewMath.toSvg(view, rect, ev.clientX, ev.clientY);
+      apply(ViewMath.zoomAt(view, 0.55, p.x, p.y));
+      lastTap = 0;
+      return;
+    }
+    lastTap = now;
+  };
+  svg.addEventListener("pointerup", endPointer);
+  svg.addEventListener("pointercancel", endPointer);
+
+  $("zoom-in").addEventListener("click", () => zoomCentre(0.8));
+  $("zoom-out").addEventListener("click", () => zoomCentre(1.25));
   $("zoom-fit").addEventListener("click", fit);
-  window.addEventListener("resize", fit);
+
+  const fullBtn = $("zoom-full");
+  function toggleFull() {
+    const on = canvas.classList.toggle("full");
+    document.body.classList.toggle("no-scroll", on);
+    fullBtn.textContent = on ? "Exit" : "Full";
+    fullBtn.setAttribute("aria-label", on ? "Leave full screen" : "Full screen");
+    reflow();
+  }
+  fullBtn.addEventListener("click", toggleFull);
+  window.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && canvas.classList.contains("full")) toggleFull(); });
+
+  const legend = $("legend"), legendBtn = $("legend-toggle");
+  const showLegend = (on) => {
+    legend.classList.toggle("collapsed", !on);
+    legendBtn.setAttribute("aria-expanded", String(on));
+  };
+  legendBtn.addEventListener("click", () => showLegend(legend.classList.contains("collapsed")));
+  showLegend(!window.matchMedia("(max-width: 700px)").matches);
+
+  if (window.ResizeObserver) new ResizeObserver(reflow).observe(canvas);
+  else window.addEventListener("resize", reflow);
 
   const start = () => setTab(location.hash === "#tests" ? "tests" : "production");
   (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(start, start);
