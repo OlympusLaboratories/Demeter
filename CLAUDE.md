@@ -32,6 +32,8 @@ Demeter/
   tools/                  # First-party projects shared by every profile
     claude-usage/         # VS Code extension, linked into ~/.claude/tools/
     worktree-sync/        # VS Code extension, linked into ~/.claude/tools/
+    forge-watch/          # watch.sh — the change-request watcher autopilot Step 5 arms;
+                          # one `gh api graphql` call per poll, no external jq
   git/                    # Git config shared by every profile
     ignore                # machine-wide gitignore, linked to core.excludesFile
   shell/                  # Terminal experience shared by every profile

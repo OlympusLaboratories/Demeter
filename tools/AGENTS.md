@@ -6,8 +6,15 @@ by step 13 — the symlink alone gives no signal that an installed artefact is o
 the source.
 
 Three of them are VS Code extensions on the same stack (TypeScript, esbuild, vitest):
-`agent-watch`, `claude-usage`, `worktree-sync`. `rdev-bootstrap` is a shell project and
-shares none of this.
+`agent-watch`, `claude-usage`, `worktree-sync`. `rdev-bootstrap` and `forge-watch` are shell
+projects and share none of this — they need no build, so step 13 never offers them one.
+
+`forge-watch/watch.sh` is the watcher autopilot Step 5 points at, and it exists because
+every run used to hand-roll its own poll loop. It makes one `gh api graphql` call and uses
+**no external `jq` and no `gh <subcommand> --json`**, which is not a style choice: phone
+sessions run these same skills on `piserver`, where `jq` is absent and `gh` is old enough
+that `gh pr checks --json` does not exist. A loop built from either fails on every poll
+there, and a `2>/dev/null` around it makes that look like an empty result.
 
 ## The shared scaffold
 
