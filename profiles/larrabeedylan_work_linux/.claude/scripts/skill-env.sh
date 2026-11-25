@@ -22,6 +22,7 @@ DEFAULTS = {
     "mnemosyne_user": "",
     "plan_folder": "",
     "diagram_folder": "",
+    "tasks_folder": "",
     "default_remote": "origin",
     "require_human_approval": False,
     "fix_autopilot": True,

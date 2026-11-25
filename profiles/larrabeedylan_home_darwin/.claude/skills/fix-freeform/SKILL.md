@@ -40,6 +40,42 @@ Then state the resolution in one line before doing anything else:
 
 Every one of those costs the user something, and a wrong default is cheapest to catch here. A key missing from `skill-env.sh` is not an error — it carries working defaults in code, so an absent or malformed `~/.claude/environment.json` degrades to them rather than breaking the run.
 
+### Publish the run checklist — before Step 1, not later
+
+This run owes a dozen things in a fixed order, across a context long enough to be compacted, and neither this file nor your notes are a record of which ones are still outstanding. The checklist is that record: **one published page, seeded from the resolved flags, re-read and updated in place as the run advances**, which the user refreshes to see where the run is. `autopilot`'s **The run checklist** section owns the full contract — the per-machine store, the URL-stability rule, the item shape — and `~/.claude/scripts/run-checklist.py rules` prints the guarantees. This step owes the first publish.
+
+Seed it from the values Step 0 just resolved, so the page cannot list an obligation this run does not have:
+
+```bash
+~/.claude/scripts/run-checklist.py template \
+  --title '<the change in a few words>' \
+  --repo '<repository name>' --branch 'BRANCH_NAME' \
+  --request-name "$(~/.claude/scripts/skill-env.sh get change_request)" \
+  --branch-mode new > <items>.json
+~/.claude/scripts/run-checklist.py publish <items>.json
+```
+
+Pass `--review`, `--diagram` and `--merge` for each of those flags that resolved true, and `--branch-mode default` on a `--branch default` run. `publish` prints `url=`, `hash=` and `page=`.
+
+**Record the url and the hash beside the seven flag values.** Every later write is an `--update` against that hash. A second plain publish is not a cosmetic mistake: it mints a new link, leaves the one the user is holding frozen at step one, and nothing reports it.
+
+**Exit `3` means this machine has no self-hosted store.** Publish the rendered `page=` file with the **Artifact** tool instead, record the url it returns, and make every later write a publish with that same url. If neither store works, keep the local file, say so in one line, and carry on — the run is not contingent on the page.
+
+**Report the link in the same line as the flag resolution**, or immediately after it. It is what the user opens to watch the run, so a link that arrives buried six steps later is worth nothing.
+
+> `branch new · one-shot description · no diagram · no swarm · autopilot, merging when green · checklist: <url>`
+
+**Then tick each item in the same tool-call batch as the step that completes it**, with one command rather than three:
+
+```bash
+~/.claude/scripts/run-checklist.py tick <items>.json \
+  plan=done 'implement=in-flight:the approved plan' --publish
+```
+
+The plan gate, the implementation, the commit message and the description are each an item here. **Never tick in a batch at the end**: the page exists so somebody can refresh it mid-run, and a page caught up only at the finish is a page that was wrong for the whole run — measured on the run that built this feature, which left it reading `commit: in flight` while a review swarm was already going.
+
+**A branch-mode escalation changes the run's shape** — whether it fires at Step 2b or at Step 2e after work has started — so re-seed the page when one does, as an update against the recorded hash, rather than leaving the checklist describing a `--branch default` run.
+
 ### Autopilot is on unless it is switched off
 
 `fix_autopilot` is `true` on every profile, so **the ordinary run of this skill ends at a pull request, not at a commit message.** Once the implementation and the deliverables are done, 5f hands the run to `autopilot`, which owns the push, the pull request, the pipeline watch, the review rounds, the infrastructure apply, and — when `--merge` is true — the merge itself.
@@ -355,7 +391,7 @@ The cost of ending that turn is paid entirely by the user, which is why it is so
 
 **The question itself carries no plan.** One line naming the change, then `Approve` and `Change something`, and nothing else. The compressed per-file summary this replaced was written when the question text was the only copy that reached the phone; with a link one tap above it, that summary is a second and worse copy of the plan, and it fills the screen the question is read on. A question reading only "approve the plan?" would still strand the user, which is why the link is a hard requirement of this step rather than a nicety — and why a failed publish is reported in one line rather than waited on. `ExitPlanMode` was never an option here: the hook sends the fixed string `Waiting for plan approval.` for it and never the plan. State the branch mode in the plan: which branch the work will land on, and whether an escalation fired.
 
-Once the user approves the plan, implement the changes.
+Once the user approves the plan, tick the plan item on the run checklist and implement the changes. While the question is open that item is `in-flight`, waiting on the user — which is the one state that makes a stalled gate visible on the page rather than only in the transcript.
 
 ## Step 4: Implement the Changes
 
@@ -422,6 +458,8 @@ It launches as a background workflow and yields the turn with a `wf_…` run ID.
 ### 5f. Hand the run to `autopilot`, unless `--autopilot false` was passed
 
 In the same turn that the description and the re-printed commit message go out, invoke the `autopilot` skill using the `Skill` tool and pass it the resolved flag state from Step 0 — `--branch`, `--diagram`, `--review`, `--merge`, `--max-rounds` — as **values, not as the user's original argument string**, so an amendment made mid-run is not silently rolled back to a machine default.
+
+**The checklist crosses the hand-off as state, not as a fresh publish.** Tick the commit-message and description items, then give `autopilot` the page's url and its update hash along with the flags. It adopts that page and keeps writing to it; a second publish there would hand the user's existing link to a checklist that stops at step five.
 
 **The hand-off is not a question.** Autopilot is on because this machine's `fix_autopilot` says so, or because the user said so; either way the decision is already made. Say in one line that you are handing over and what the run will do when it gets there — "Handing to autopilot: push, open the PR, work the review, merge when it is green" — then hand over.
 

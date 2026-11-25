@@ -14,7 +14,8 @@ Publish an HTML file to the self-hosted artifact store and print its URL.
 options:
   --purpose KIND       file it where this machine keeps that kind of page, and
                        publish it public: 'plan' uses plan_folder, 'diagram'
-                       uses diagram_folder, and an empty key files it nowhere
+                       uses diagram_folder, 'tasks' uses tasks_folder, and an
+                       empty key files it nowhere
   --folder PATH        file it in an existing folder, e.g. PRtifacts/Plans
   --public             anyone with the link may read it, and the printed link
                        is the one they can open; implied by --purpose
@@ -100,9 +101,9 @@ done
 set -- "${PASSTHROUGH[@]+${PASSTHROUGH[@]}}"
 
 case "$PURPOSE" in
-  "" | plan | diagram) ;;
+  "" | plan | diagram | tasks) ;;
   *)
-    echo "--purpose takes 'plan' or 'diagram', not '$PURPOSE'." >&2
+    echo "--purpose takes 'plan', 'diagram' or 'tasks', not '$PURPOSE'." >&2
     exit 1
     ;;
 esac
