@@ -129,8 +129,7 @@ def pyproject_py_root(root: Path) -> str | None:
     return None
 
 
-def detect_py_root(repo: str) -> str:
-    root = Path(repo)
+def layout_py_root(root: Path) -> str:
     if has_packages(root / "src"):
         return "src"
     if (root / "python").is_dir():
@@ -138,10 +137,42 @@ def detect_py_root(repo: str) -> str:
     declared = pyproject_py_root(root)
     if declared is not None:
         return declared
-    for child in sorted(root.iterdir()):
-        if child.is_dir() and (child / "__init__.py").is_file():
-            return ""
     return ""
+
+
+def package_root(root: Path, path: str) -> Path | None:
+    current = (root / path).parent
+    while current == root or root in current.parents:
+        if (current / "pyproject.toml").is_file():
+            return current
+        if current == root:
+            return None
+        current = current.parent
+    return None
+
+
+def changed_py_root(root: Path, paths) -> str | None:
+    counts: dict[str, int] = {}
+    for path in paths:
+        if not path.endswith(".py"):
+            continue
+        base = package_root(root, path)
+        if base is None:
+            continue
+        rel = base.relative_to(root).as_posix()
+        rel = "" if rel == "." else rel
+        counts[rel] = counts.get(rel, 0) + 1
+    if not counts:
+        return None
+    best = min(counts, key=lambda rel: (-counts[rel], rel))
+    inner = layout_py_root(root / best if best else root)
+    return "/".join(part for part in (best, inner) if part)
+
+
+def detect_py_root(repo: str, paths) -> str:
+    root = Path(repo)
+    derived = changed_py_root(root, paths)
+    return layout_py_root(root) if derived is None else derived
 
 
 def derive_package(modules) -> str:
@@ -790,14 +821,11 @@ def main():
     ap.add_argument(
         "--py-root",
         default=None,
-        help="directory Python module paths are relative to; detected from the repo "
-        "layout when omitted",
+        help="directory Python module paths are relative to; derived from the changed "
+        "files' nearest pyproject.toml when omitted, falling back to the repo layout",
     )
     args = ap.parse_args()
     repo, base = args.repo, args.base
-
-    global PY_ROOT
-    PY_ROOT = (args.py_root if args.py_root is not None else detect_py_root(repo)).strip("/")
 
     numstat = git(repo, "diff", "--numstat", base)
     files = []
@@ -812,6 +840,13 @@ def main():
                 "test": is_test_path(path),
             }
         )
+
+    global PY_ROOT
+    PY_ROOT = (
+        args.py_root
+        if args.py_root is not None
+        else detect_py_root(repo, [f["path"] for f in files])
+    ).strip("/")
 
     changed_mods = {}
     for f in files:
