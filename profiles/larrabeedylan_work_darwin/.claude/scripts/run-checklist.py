@@ -214,6 +214,7 @@ def mark_outstanding(document):
         state = {}
     if verdict == "complete":
         state.pop("checklist_pending", None)
+        state.pop("checklist_forked", None)
     else:
         run = document["run"]
         state["checklist_pending"] = {
@@ -998,6 +999,12 @@ what it guarantees, and what each one is written against:
   fork is otherwise invisible: a second branch writes nothing, so there is
   nothing for the gate to hold on and the first page describes a run that no
   longer exists
+
+  every write rebuilds the marker from scratch, so the gate's spent-fork
+  record lives in checklist_forked BESIDE it rather than in it - a field
+  inside the marker is wiped by every publish, tick, reconcile and arm, which
+  turns "hold once" into "hold at every turn end". it is dropped only with the
+  marker itself, on a complete checklist
 
   arm is the way back from notify.py --checklist-clear --force. it rewrites the
   marker from the items file alone - no render, no publish, no network - through

@@ -289,6 +289,19 @@ def branch_label(cwd):
     return head if head and head != "HEAD" else None
 
 
+def default_branch_label(cwd):
+    if not cwd or not os.path.isdir(cwd):
+        return ""
+    head = git(cwd, "symbolic-ref", "refs/remotes/origin/HEAD")
+    if head:
+        return head.rsplit("/", 1)[-1]
+    for name in ("main", "master"):
+        if git(cwd, "rev-parse", "--verify", "--quiet",
+               "refs/remotes/origin/" + name) is not None:
+            return name
+    return ""
+
+
 def session_path(session_id):
     safe = re.sub(r"[^A-Za-z0-9_-]", "-", session_id or "unknown")[:80]
     return os.path.join(SESSIONS, safe + ".json")
@@ -1093,8 +1106,10 @@ CHECKLIST_FORK = (
     " freezes the one already in the change request's description. If the new branch"
     " is a second piece of work, it is a second run and owes a checklist of its own:"
     " seed a new items file, publish it, and write to both pages from here on. Either"
-    " write clears this hold. Only the branch is compared, never the directory, so"
-    " entering or leaving a worktree on one branch never reaches this message."
+    " write clears this hold, and it is spent for this branch either way. Only the"
+    " branch is compared, never the directory, and a session standing on the default"
+    " branch never reaches this message — so neither a worktree you entered or left"
+    " nor the window before this run cut its branch can produce it."
 )
 
 
@@ -1108,14 +1123,18 @@ def checklist_reason(gate):
     return ""
 
 
-def checklist_fork(gate, payload):
+def checklist_fork(gate, state, payload):
     recorded = str(gate.get("branch") or "").strip()
     if not recorded:
         return ""
-    here = branch_label(payload.get("cwd") or os.getcwd())
+    cwd = payload.get("cwd") or os.getcwd()
+    here = branch_label(cwd)
     if not here or here == recorded:
         return ""
-    if gate.get("forked") == here:
+    default = default_branch_label(cwd)
+    if here == default or (not default and here in ("main", "master")):
+        return ""
+    if state.get("checklist_forked") == here:
         return ""
     return here
 
@@ -1134,16 +1153,16 @@ def checklist_gate(payload):
     if not isinstance(gate, dict) or not gate.get("open"):
         return None
     if gate_expired(gate):
-        merge_state(path, drop=("checklist_pending",))
+        merge_state(path, drop=("checklist_pending", "checklist_forked"))
         log("dropped a stale run checklist marker")
         return None
     if payload.get("hook_event_name") != "Stop" or payload.get("stop_hook_active"):
         return None
 
     where = gate.get("url") or "the published page"
-    forked = checklist_fork(gate, payload)
+    forked = checklist_fork(gate, state, payload)
     if forked:
-        if not merge_state(path, {"checklist_pending": dict(gate, forked=forked)}):
+        if not merge_state(path, {"checklist_forked": forked}):
             return None
         recorded = str(gate.get("branch") or "").strip()
         log("Stop held: the run forked to %s from the checklist's %s"
@@ -1327,6 +1346,13 @@ def checklist_marker(session_id):
     return gate if isinstance(gate, dict) else {}
 
 
+def checklist_spent_fork(session_id):
+    state = read_json(session_path(session_id), {}) or {}
+    if not isinstance(state, dict):
+        return ""
+    return str(state.get("checklist_forked") or "")
+
+
 def checklist_ids(gate, field):
     found = gate.get(field)
     if not isinstance(found, list):
@@ -1372,7 +1398,8 @@ def cmd_checklist_clear(args):
             % (session_id[:8], len(open_ids)))
         return 1
 
-    merge_state(session_path(session_id), drop=("checklist_pending",))
+    merge_state(session_path(session_id),
+                drop=("checklist_pending", "checklist_forked"))
     log("run checklist marker cleared for %s" % session_id)
     print("cleared the run checklist marker for %s" % where)
     if expired:
@@ -1413,16 +1440,20 @@ def cmd_checklist_status(args):
 
     recorded = str(gate.get("branch") or "").strip()
     here = branch_label(os.getcwd())
+    default = default_branch_label(os.getcwd())
     if not recorded:
         print("no branch recorded, so a fork cannot be detected")
     elif not here:
         print("branch %s, and no branch resolves here" % recorded)
     elif here == recorded:
         print("branch %s, which is the branch this session is on" % recorded)
+    elif here == default or (not default and here in ("main", "master")):
+        print("branch %s, and this session is on the default branch %s, which is"
+              " never a fork" % (recorded, here))
     else:
         print("branch %s, but this session is on %s — the run has forked"
               % (recorded, here))
-        if gate.get("forked") == here:
+        if checklist_spent_fork(session_id) == here:
             print("the fork was already held once")
 
     open_ids = checklist_ids(gate, "open")
