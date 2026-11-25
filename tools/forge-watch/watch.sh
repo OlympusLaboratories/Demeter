@@ -90,7 +90,7 @@ sync_checklist() {
       ${body_file:+--body-file "$body_file"} \
       --publish 2>&1)"; then
     [[ -n "$body_file" ]] && rm -f "$body_file"
-    say "CHECKLIST ERROR $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-200)"
+    say_once "CHECKLIST ERROR $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-200)"
     return 0
   fi
   [[ -n "$body_file" ]] && rm -f "$body_file"
