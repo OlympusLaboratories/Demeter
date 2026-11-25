@@ -20,6 +20,8 @@ PROFILES = (
 SESSION = "77777777-8888-9999-aaaa-bbbbbbbbbbbb"
 PAGE = "https://artifacts.example.dev/run123"
 
+OVERAGE = 90 * 60
+
 RULES = """
 the run checklist gate, checked over every profile copy:
 
@@ -43,8 +45,21 @@ the run checklist gate, checked over every profile copy:
     the reason given                      names the open items and why it held
 
   the escape hatch
-    --checklist-clear                     drops the marker, so the next Stop passes
-    --checklist-clear with no session     exits 0 and says so
+    a clear with items still open         refuses, changes nothing, exits non-zero
+    --force                               clears, naming the url and the dropped ids
+    a clear with no marker                says so, and exits 0
+    a clear with no session               exits 0 and says so
+    a marker past the TTL                 clears without --force
+    an expired marker's duration          is the time since expiry, not its age
+    one open item                         agrees: "1 item is still open"
+    a clear of any kind                   drops the marker and nothing beside it
+    --checklist-status while armed        prints the url, the open ids and the count
+    --checklist-status while not          exits non-zero
+    --checklist-status either way         mutates nothing, TTL drop included
+    the hold text                         names --force and --checklist-status
+    run-checklist.py arm                  rewrites the marker from the items file
+    arm with every item done               drops the marker instead
+    arm                                   leaves armed_at, thread and last_kind alone
 """
 
 
@@ -88,10 +103,13 @@ def marker(**extra):
     return base
 
 
-def put(sessions, value, session=SESSION):
+def put(sessions, value, session=SESSION, extra=None):
     path = os.path.join(sessions, session + ".json")
+    state = {} if value is None else {"checklist_pending": value}
+    if extra:
+        state.update(extra)
     with open(path, "w") as handle:
-        json.dump({} if value is None else {"checklist_pending": value}, handle)
+        json.dump(state, handle)
     return path
 
 
@@ -177,13 +195,153 @@ def check_hook(suite, profile, directory):
              hook.checklist_gate({"hook_event_name": "Stop", "session_id": ""}) is None)
 
     put(sessions, marker(verdict="stalled", in_flight=[]))
-    buffer = io.StringIO()
-    with contextlib.redirect_stdout(buffer):
-        cleared = hook.cmd_checklist_clear([SESSION])
-    suite.ok("%s: --checklist-clear exits 0" % tag, cleared == 0, cleared)
-    suite.ok("%s: --checklist-clear drops the marker" % tag,
+    held = hook.checklist_gate(stop())
+    suite.ok("%s: the hold names --checklist-clear --force" % tag,
+             bool(held) and "--checklist-clear --force" in held, held)
+    suite.ok("%s: the hold names --checklist-status" % tag,
+             bool(held) and "--checklist-status" in held, held)
+
+
+def captured(call):
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        status = call()
+    return status, out.getvalue() + err.getvalue()
+
+
+def frozen(sessions):
+    return json.dumps(get(sessions), sort_keys=True)
+
+
+def hours(seconds):
+    return "%dh" % (int(seconds) // 3600)
+
+
+def check_escape_hatch(suite, profile, directory):
+    hook, sessions = load_hook(profile, directory)
+    tag = profile
+
+    status, said = captured(lambda: hook.cmd_checklist_status([SESSION]))
+    suite.ok("%s: a status with no marker exits non-zero" % tag, status != 0, status)
+    suite.ok("%s: and says it is not armed" % tag, "not armed" in said, said)
+
+    status, said = captured(lambda: hook.cmd_checklist_clear([SESSION]))
+    suite.ok("%s: a clear with no marker exits 0" % tag, status == 0, status)
+    suite.ok("%s: and says there is nothing to clear" % tag,
+             "nothing to clear" in said, said)
+
+    put(sessions, marker(verdict="stalled", in_flight=[]))
+    before = frozen(sessions)
+    status, said = captured(lambda: hook.cmd_checklist_clear([SESSION]))
+    suite.ok("%s: a clear with items open exits non-zero" % tag, status != 0, status)
+    suite.ok("%s: it refuses out loud" % tag, "refusing" in said, said)
+    suite.ok("%s: the refusal names the page" % tag, PAGE in said, said)
+    suite.ok("%s: the refusal names the open ids" % tag,
+             "arm" in said and "implement" in said, said)
+    suite.ok("%s: the refusal names --force" % tag, "--force" in said, said)
+    suite.ok("%s: the refusal changed nothing" % tag,
+             frozen(sessions) == before, get(sessions))
+    suite.ok("%s: so the gate still holds after a refused clear" % tag,
+             hook.checklist_gate(stop()) is not None)
+
+    put(sessions, marker(verdict="stalled", in_flight=[]))
+    before = frozen(sessions)
+    status, said = captured(lambda: hook.cmd_checklist_status([SESSION]))
+    suite.ok("%s: a status on a live marker exits 0" % tag, status == 0, status)
+    suite.ok("%s: it names the page" % tag,
+             "armed" in said and PAGE in said, said)
+    suite.ok("%s: it names the open ids" % tag,
+             "arm" in said and "implement" in said, said)
+    suite.ok("%s: it reports the turn-end count" % tag, "turn end" in said, said)
+    suite.ok("%s: a status mutates nothing" % tag,
+             frozen(sessions) == before, get(sessions))
+    suite.ok("%s: so the gate still holds after a status" % tag,
+             hook.checklist_gate(stop()) is not None)
+
+    put(sessions, marker(verdict="stalled", in_flight=[]))
+    status, said = captured(lambda: hook.cmd_checklist_clear(["--force", SESSION]))
+    suite.ok("%s: --force exits 0" % tag, status == 0, status)
+    suite.ok("%s: --force drops the marker" % tag,
              "checklist_pending" not in get(sessions), get(sessions))
+    suite.ok("%s: --force names the page it cleared" % tag, PAGE in said, said)
+    suite.ok("%s: --force names the ids it dropped" % tag,
+             "arm" in said and "implement" in said, said)
     suite.ok("%s: and the next Stop passes" % tag, hook.checklist_gate(stop()) is None)
+
+    put(sessions, marker(verdict="stalled", in_flight=[]))
+    status, _ = captured(lambda: hook.cmd_checklist_clear([SESSION, "--force"]))
+    suite.ok("%s: --force after the session id works too" % tag,
+             status == 0 and "checklist_pending" not in get(sessions), status)
+
+    put(sessions, marker(verdict="stalled", in_flight=[],
+                         at=time.time() - hook.GATE_TTL - OVERAGE),
+        extra={"armed_at": 1234.5, "thread": "T9", "last_kind": "progress"})
+    before = frozen(sessions)
+    status, said = captured(lambda: hook.cmd_checklist_status([SESSION]))
+    suite.ok("%s: a status reports an expired marker as not armed" % tag,
+             status != 0 and "not armed" in said, said)
+    suite.ok("%s: a status does not drop an expired marker, unlike the gate" % tag,
+             frozen(sessions) == before, get(sessions))
+    suite.ok("%s: a status reports the time since expiry, not the marker's age" % tag,
+             hours(OVERAGE) in said
+             and hours(hook.GATE_TTL + OVERAGE) not in said, said)
+    status, said = captured(lambda: hook.cmd_checklist_clear([SESSION]))
+    suite.ok("%s: an expired marker clears without --force" % tag, status == 0, status)
+    suite.ok("%s: and the clear says it had expired" % tag, "expired" in said, said)
+    suite.ok("%s: and the clear reports the overage, not the age" % tag,
+             hours(OVERAGE) in said
+             and hours(hook.GATE_TTL + OVERAGE) not in said, said)
+    suite.ok("%s: and it is gone" % tag,
+             "checklist_pending" not in get(sessions), get(sessions))
+    state = get(sessions)
+    suite.ok("%s: an expired clear leaves armed_at alone" % tag,
+             state.get("armed_at") == 1234.5, state)
+
+    put(sessions, marker(verdict="stalled", in_flight=[]),
+        extra={"armed_at": 1234.5, "thread": "T9", "last_kind": "progress"})
+    status, _ = captured(lambda: hook.cmd_checklist_clear(["--force", SESSION]))
+    state = get(sessions)
+    suite.ok("%s: a forced clear drops the marker" % tag,
+             status == 0 and "checklist_pending" not in state, state)
+    suite.ok("%s: a forced clear leaves armed_at alone" % tag,
+             state.get("armed_at") == 1234.5, state)
+    suite.ok("%s: a forced clear leaves the thread alone" % tag,
+             state.get("thread") == "T9", state)
+    suite.ok("%s: a forced clear leaves last_kind alone" % tag,
+             state.get("last_kind") == "progress", state)
+
+    put(sessions, marker(verdict="stalled", in_flight=[], open=["merge"]))
+    status, said = captured(lambda: hook.cmd_checklist_status([SESSION]))
+    suite.ok("%s: one open item reads as one item" % tag,
+             "1 item is open" in said, said)
+    status, said = captured(lambda: hook.cmd_checklist_clear([SESSION]))
+    suite.ok("%s: and the refusal agrees with it" % tag,
+             "1 item is still open" in said, said)
+    status, said = captured(lambda: hook.cmd_checklist_clear(["--force", SESSION]))
+    suite.ok("%s: and a forced clear puts it in the past tense" % tag,
+             "1 item was still open" in said, said)
+
+    put(sessions, marker(open=[], in_flight=[]))
+    status, said = captured(lambda: hook.cmd_checklist_clear([SESSION]))
+    suite.ok("%s: a marker with nothing open clears without --force" % tag,
+             status == 0, status)
+    suite.ok("%s: and says nothing was outstanding" % tag,
+             "nothing was outstanding" in said, said)
+
+    saved = dict(os.environ)
+    for key in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"):
+        os.environ.pop(key, None)
+    try:
+        status, said = captured(lambda: hook.cmd_checklist_clear([]))
+        suite.ok("%s: a clear with no session id exits 0" % tag, status == 0, status)
+        suite.ok("%s: and says so" % tag, "no session id" in said, said)
+        status, said = captured(lambda: hook.cmd_checklist_status([]))
+        suite.ok("%s: a status with no session id exits non-zero" % tag,
+                 status != 0, status)
+        suite.ok("%s: and says it is not armed" % tag, "not armed" in said, said)
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
 
 
 def run_checklist(profile, work, args, environment):
@@ -247,6 +405,21 @@ def check_writer(suite, profile, work):
     suite.ok("%s: a later tick resets the stop count" % tag, pending.get("stops") == 0, pending)
     suite.ok("%s: a later tick clears the hold" % tag, "held" not in pending, pending)
 
+    with open(os.path.join(sessions, SESSION + ".json"), "w") as handle:
+        json.dump({"armed_at": 99.0, "thread": "T2", "last_kind": "stop"}, handle)
+    armed = run_checklist(profile, work, ["arm", items], env)
+    suite.ok("%s: arm exits 0" % tag, armed.returncode == 0, armed.stderr)
+    state = get(sessions)
+    suite.ok("%s: arm rewrites the marker from the items file alone" % tag,
+             "checklist_pending" in state, state)
+    suite.ok("%s: arm names the open items" % tag,
+             "describe" in armed.stdout and "close" in armed.stdout, armed.stdout)
+    suite.ok("%s: arm publishes nothing" % tag, "url=" not in armed.stdout, armed.stdout)
+    suite.ok("%s: arm leaves armed_at alone" % tag, state.get("armed_at") == 99.0, state)
+    suite.ok("%s: arm leaves the thread alone" % tag, state.get("thread") == "T2", state)
+    suite.ok("%s: arm leaves last_kind alone" % tag,
+             state.get("last_kind") == "stop", state)
+
     with open(items) as handle:
         document = json.load(handle)
     for entry in document["items"]:
@@ -254,9 +427,21 @@ def check_writer(suite, profile, work):
         entry["waiting_on"] = ""
     with open(items, "w") as handle:
         json.dump(document, handle)
+    dropped = run_checklist(profile, work, ["arm", items], env)
+    suite.ok("%s: arm on a complete checklist exits 0" % tag,
+             dropped.returncode == 0, dropped.stderr)
+    suite.ok("%s: arm on a complete checklist drops the marker" % tag,
+             "checklist_pending" not in get(sessions), get(sessions))
     run_checklist(profile, work, ["tick", items, "plan=done"], env)
     suite.ok("%s: a complete checklist drops the marker" % tag,
              "checklist_pending" not in get(sessions), get(sessions))
+
+    bare_arm = dict(env)
+    bare_arm.pop("CLAUDE_CODE_SESSION_ID")
+    bare_arm["CLAUDE_SESSION_ID"] = ""
+    silent = run_checklist(profile, work, ["arm", items], bare_arm)
+    suite.ok("%s: arm with no session id still exits 0" % tag,
+             silent.returncode == 0, silent.stderr)
 
     bare = dict(env)
     bare.pop("CLAUDE_CODE_SESSION_ID")
@@ -587,6 +772,7 @@ def main():
     try:
         for profile in PROFILES:
             check_hook(suite, profile, directory)
+            check_escape_hatch(suite, profile, os.path.join(directory, "hatch"))
             work = os.path.join(directory, profile, "writer")
             os.makedirs(work, exist_ok=True)
             check_writer(suite, profile, work)

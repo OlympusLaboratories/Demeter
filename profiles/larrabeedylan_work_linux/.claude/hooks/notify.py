@@ -1079,7 +1079,9 @@ CHECKLIST_HOLD = (
     " flight. Tick what is actually done with"
     " `~/.claude/scripts/run-checklist.py tick <items.json> <id>=<state> --publish`"
     " in this turn. If the run is genuinely finished or abandoned, run"
-    " `~/.claude/hooks/notify.py --checklist-clear` and end the turn again."
+    " `~/.claude/hooks/notify.py --checklist-clear --force` and end the turn"
+    " again — a bare clear refuses while items are open."
+    " `--checklist-status` reports the marker without touching it."
 )
 
 
@@ -1280,15 +1282,104 @@ def handle(payload):
     return "sent %s for %s (%s)" % (kind, repo, how)
 
 
+def checklist_marker(session_id):
+    state = read_json(session_path(session_id), {}) or {}
+    if not isinstance(state, dict):
+        return {}
+    gate = state.get("checklist_pending")
+    return gate if isinstance(gate, dict) else {}
+
+
+def checklist_ids(gate, field):
+    found = gate.get(field)
+    if not isinstance(found, list):
+        return []
+    return [str(entry) for entry in found]
+
+
+def describe_open(ids, tense="present", still=False):
+    singular = len(ids) == 1
+    if tense == "past":
+        verb = "was" if singular else "were"
+    else:
+        verb = "is" if singular else "are"
+    return "%d item%s %s%s open: %s" % (
+        len(ids), "" if singular else "s", verb,
+        " still" if still else "", ", ".join(ids))
+
+
 def cmd_checklist_clear(args):
-    session_id = (args[0] if args else "").strip() or session_from_env()
+    rest = [arg for arg in args if arg != "--force"]
+    forced = len(rest) != len(args)
+    session_id = (rest[0] if rest else "").strip() or session_from_env()
     if not session_id:
         print("no session id resolved: nothing to clear", file=sys.stderr)
         return 0
+
+    gate = checklist_marker(session_id)
+    if not gate:
+        print("no run checklist marker for this session: nothing to clear")
+        return 0
+
+    where = gate.get("url") or "an unpublished checklist"
+    open_ids = checklist_ids(gate, "open")
+    expired = gate_expired(gate)
+
+    if open_ids and not forced and not expired:
+        print("refusing to clear the run checklist marker for %s" % where,
+              file=sys.stderr)
+        print(describe_open(open_ids, still=True), file=sys.stderr)
+        print("pass --force if this run is genuinely finished or abandoned,"
+              " or tick what is done", file=sys.stderr)
+        log("refused to clear the run checklist marker for %s: %d open"
+            % (session_id[:8], len(open_ids)))
+        return 1
+
     merge_state(session_path(session_id), drop=("checklist_pending",))
     log("run checklist marker cleared for %s" % session_id)
-    print("cleared the run checklist marker")
+    print("cleared the run checklist marker for %s" % where)
+    if expired:
+        print("it had expired %s ago, so the gate would not have held on it"
+              % human_duration(expired - GATE_TTL))
+    elif open_ids:
+        print(describe_open(open_ids, "past", still=True))
+    else:
+        print("nothing was outstanding")
     return 0
+
+
+def cmd_checklist_status(args):
+    session_id = (args[0] if args else "").strip() or session_from_env()
+    if not session_id:
+        print("not armed: no session id resolved", file=sys.stderr)
+        return 1
+
+    gate = checklist_marker(session_id)
+    if not gate:
+        print("not armed: no run checklist marker for this session")
+        return 1
+
+    where = gate.get("url") or "an unpublished checklist"
+    expired = gate_expired(gate)
+    if expired:
+        print("not armed: the marker for %s expired %s ago"
+              % (where, human_duration(expired - GATE_TTL)))
+    else:
+        print("armed: %s" % where)
+
+    stops = gate.get("stops")
+    stops = stops if isinstance(stops, int) else 0
+    print("verdict %s, %d turn end%s since the last write, %s"
+          % (gate.get("verdict") or "unknown", stops,
+             "" if stops == 1 else "s",
+             "already held once" if gate.get("held") else "not yet held"))
+
+    open_ids = checklist_ids(gate, "open")
+    print(describe_open(open_ids) if open_ids else "nothing is open")
+    in_flight = checklist_ids(gate, "in_flight")
+    if in_flight:
+        print("in flight: %s" % ", ".join(in_flight))
+    return 1 if expired else 0
 
 
 def cmd_gate(args):
@@ -1499,6 +1590,8 @@ def main():
         return cmd_gate([""] + args[1:])
     if args and args[0] == "--checklist-clear":
         return cmd_checklist_clear(args[1:])
+    if args and args[0] == "--checklist-status":
+        return cmd_checklist_status(args[1:])
     if args and args[0] == "--change-request":
         session_id = args[1] if len(args) > 1 else ""
         path = session_path(session_id) if session_id else None
@@ -1537,7 +1630,8 @@ def main():
             " | --repo [<cwd>] | --change-request <session-id>"
             " | --gate-pending <url> [<session-id>]"
             " | --gate-clear [<session-id>]"
-            " | --checklist-clear [<session-id>]"
+            " | --checklist-clear [--force] [<session-id>]"
+            " | --checklist-status [<session-id>]"
             " | --ping --level <level> --title <title>"
             " [--body <text>|-] [--session <id>]]", file=sys.stderr)
         return 2
