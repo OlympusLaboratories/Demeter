@@ -336,9 +336,11 @@ def render(document, stamp=None):
         rows.append(
             "<tr class=\"s-%s\">"
             "<td class=\"n\">%d</td>"
-            "<td><span class=\"badge\">%s</span></td>"
-            "<td class=\"ob\">%s%s</td>"
-            "<td>%s</td><td>%s</td><td>%s</td>"
+            "<td data-label=\"State\"><span class=\"badge\">%s</span></td>"
+            "<td class=\"ob\" data-label=\"Obligation\">%s%s</td>"
+            "<td data-label=\"Skill\">%s</td>"
+            "<td data-label=\"Applies to\">%s</td>"
+            "<td class=\"wait\" data-label=\"Waiting on\">%s</td>"
             "</tr>" % (
                 entry["state"],
                 index,
@@ -423,6 +425,22 @@ PAGE = """<!doctype html>
            letter-spacing: .05em; font-weight: 650; padding: 2px 7px; border-radius: 999px;
            border: 1px solid currentColor; white-space: nowrap; }
   tr.s-done .badge { color: var(--ok); }
+  @media (max-width: 760px) {
+    .wrap { overflow-x: visible; }
+    table, tbody, tr, td { display: block; width: 100%%; }
+    thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    tr { border: 1px solid var(--rule); border-radius: 10px; padding: 10px 12px 4px;
+         margin: 0 0 12px; position: relative; }
+    td { border: 0; padding: 3px 0 7px 0; overflow-wrap: anywhere; }
+    td::before { content: attr(data-label); display: block; font-size: 11px;
+                 text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+                 font-weight: 650; margin: 0 0 2px; }
+    td.n { position: absolute; top: 10px; right: 12px; width: auto; padding: 0;
+           font-size: 12px; }
+    td.n::before { content: none; }
+    td[data-label="State"]::before { content: none; }
+    td.wait { border-top: 1px solid var(--rule); padding-top: 7px; }
+  }
   tr.s-in-flight .badge { color: var(--flight); }
   tr.s-skipped .badge { color: var(--skip); }
   tr.s-pending .badge { color: var(--muted); }
