@@ -152,7 +152,13 @@ Write the HTML to the scratchpad and print its **absolute path** so the user can
 
 Give the user the link or path, then 2–4 lines on what the chart actually shows for this change — the main flow difference in `callgraph` mode, the shape of the file/import map in `files` mode, and anything flagged `UNUSED`. Say which mode produced it, so an unexpectedly coarse chart is never mistaken for a shallow change.
 
-Then the warning, which is not boilerplate: **the page embeds the diff of every changed function (callgraph mode) or every changed file (files mode)**. Anyone the page is shared with can read that code. An Artifact is private until it is shared from its Share menu — say so, and say it before anyone shares the link rather than after.
+Then the one line about reach, **in the chat reply and nowhere else**: **the page embeds the diff of every changed function (callgraph mode) or every changed file (files mode)**, so anyone who can open it can read that code. Say who that is, because it differs by store and has been got wrong in both directions:
+
+- **The self-hosted store** publishes a `--purpose diagram` page **public**. Anyone with the link can read it, deliberately — that is what makes the link worth attaching at all.
+- **The Artifact tool** keeps it private until it is shared from its Share menu. Say so before anyone shares the link rather than after.
+- **A local file** reaches nobody, and there is nothing to say.
+
+**None of it is ever written next to the link.** Wherever the link travels — a pull request description, a ticket comment, a notification — it is a label and a URL, `**Diagram:** <url>`, with nothing after it. A trailing clause is noise on the one artefact other people also read, it restates what the page says the moment it opens, and the version of it that travelled furthest was false as well as unwanted: it annotated public pages as private. The reach note exists for the person deciding whether to share the link, which is the user, in the chat, once.
 
 ## How the page reads
 

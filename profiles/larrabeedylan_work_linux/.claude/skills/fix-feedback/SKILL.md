@@ -195,7 +195,7 @@ Do this even when the conversation seems to hold the bot's comments — "what is
 
 Compare each review-agent finding against:
 - threads already on the MR, whoever wrote them — a review bot (`@griddy-bot`, `gemini-mr-reviewer`) or a human;
-- comments a **previous run of this skill** posted — they carry the header from 3b.4, which is what makes them recognisable.
+- comments a **previous run of this skill** posted — they carry the hidden marker from 3b.4, which is what makes them recognisable.
 
 **Judge by substance, not wording.** The same defect in the same code is a duplicate even when one calls it a nil dereference and the other a missing guard. The same file with a different defect is not. When it is genuinely unclear, post it and name the thread it resembles in the summary — a reviewer resolves a near-duplicate in seconds, while a dropped finding costs them the bug.
 
@@ -225,7 +225,8 @@ One comment per finding — a thread is resolved as a unit, so batching several 
 
 ```bash
 ~/.claude/scripts/gitlab-api.sh create-diff-comment "<project_id_urlencoded>" <mr_iid> "<file_path>" <line> - << 'ENDOFBODY'
-🤖 **review-code — <dimension>**
+<!-- review-note:<dimension> -->
+**<dimension>**
 
 <one-sentence statement of the defect>
 
@@ -236,7 +237,7 @@ ENDOFBODY
 ```
 
 - `<line>` is the line in the file **as it stands now**, not the line the review quoted if the file has moved since. Pass `-` for a file-level note.
-- Keep the `🤖 **review-code — <dimension>**` header exactly as written. It is how 3b.2 recognises this skill's own comments on a later run.
+- Keep the `<!-- review-note:<dimension> -->` marker as the body's first line, byte for byte. GitLab strips an HTML comment out of the rendered view and hands it back verbatim from the API, so it is invisible to everyone reading the merge request and still exact to match on — which is how 3b.2 recognises this skill's own comments on a later run. The visible `**<dimension>**` line is a plain categorisation and deliberately nothing more: see Rule 9.
 - The script anchors to the diff when that line is inside it, and otherwise falls back to a plain note prefixed with `` `path:line` `` — a line outside the MR's hunks, a file the MR does not touch, or a commit that is not pushed. It reports which in the `anchored` and `fallback_reason` fields. **Report the fallback to the user**; do not describe a comment as anchored to the code when it landed as a general note.
 - Do not write the finding into the source as a comment while doing this. The MR thread is the record.
 
@@ -361,6 +362,7 @@ Draft a reply that the user can post in the comment thread. The reply should be:
 - **Substantive** — explain the reasoning clearly, not just "I disagree"
 - **Specific** — reference concrete code, behavior, or constraints that support the decision
 - **Constructive** — if applicable, suggest what alternative concern you did address or offer a compromise
+- **Unattributed** — it never says where the point being answered came from: no review swarm, no review skill, no automated reviewer, no "AI" (Rule 9)
 
 Print the reply in a fenced code block so the user can copy it:
 
@@ -474,3 +476,4 @@ After resolving one thread, offer to address the next unresolved thread. Loop ba
 6. **Keep replies concise.** Drafted replies should be 2-5 sentences. Long replies in code review threads are rarely read.
 7. **Use the local codebase.** The user is expected to have the MR branch checked out locally. Use `Read`, `Grep`, and `Glob` to explore the actual code — don't rely solely on the diff from the API.
 8. **No comments in the code.** When you apply a change, add no explanatory comment, docstring, or note recording what the reviewer asked for — a reviewer reading the next diff does not need the last review narrated back at them. That belongs in the drafted reply. Machine-read directives (linter suppressions, build pragmas, a doc-comment CI requires) are program input, not commentary, and stay allowed.
+9. **Nothing this skill posts says where the feedback came from.** Not in a finding body, not in a drafted reply, not in a resolution note: no robot glyph, no skill name, no "automated review", no "AI", no "swarm", and no agent referring to itself. A finding on a merge request is a review note from the account that posted it, and that account is who is accountable for it to whoever reads the thread — a body that hands the point off to a tool invites the reader to discount it and tells them nothing they can act on. The single exception is 3b.4's `<!-- review-note:<dimension> -->` marker, which exists because 3b.2 and 3b.5 have to find the comment again on a later run and which no reader ever sees. **The chat side is not covered**: Step 4 still tags an item `— review-code: correctness` in the terminal, where provenance is the user's own record of their own run.
