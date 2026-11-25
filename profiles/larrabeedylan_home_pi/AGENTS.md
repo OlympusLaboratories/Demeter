@@ -133,6 +133,29 @@ somebody pastes a token. That is not a weakening of the "ships switched off"
 rule: `only_when_armed` is `true`, so a session is silent until a `/ping` arms it,
 which is the gate that actually matters.
 
+## What a session here does not have
+
+The three symlinks above are why this box runs skill text authored against a Mac's
+toolchain while carrying strictly less of it. That asymmetry is what produced OLY-35: a
+watcher written for a laptop reached for `jq` and a `gh` flag that do not exist here,
+both guarded, and sat on a green, approved pull request until a human noticed.
+
+| Absent | What a skill written elsewhere assumes, and what happens |
+| --- | --- |
+| `jq` | Only `gh --jq` — gh's own built-in — works. An example using the external binary fails on every single invocation, and `2>/dev/null` makes that look like an empty result |
+| `mise` | A bare `make <target>` fails in any repo whose Makefile routes through `mise exec --`. `make <target> MISE=` is the way round it |
+| a current `gh` | The installed build is older than the Mac's, so `--json` support differs per subcommand — `gh pr checks --json` is the one already observed missing |
+| `GITHUB_PERSONAL_ACCESS_TOKEN` | `github-api.sh` exits when it is unset, so every forge call has to go through `gh`, including `gh api graphql` for replying to and resolving review threads. Its `help` still works, because the token read happens after the dispatch |
+
+**This table is for whoever writes a skill, not for a session running one.** A phone
+session loads `/home/jarvis/remote-root/CLAUDE.md`, which Gaia owns, so the
+session-facing copy of this belongs there rather than in this repository. What protects
+a session that reads neither is `autopilot` Step 5's smoke test — one pass of the
+watcher script before it is armed — which catches an absent tool without anybody having
+had to write down in advance which tools are absent. Prefer that shape for anything
+else that would otherwise need this list: a check the run performs beats a fact the run
+has to have been told.
+
 ## When changing this profile
 
 - Nothing here may name a transport. The Slack/Telegram split lives in
