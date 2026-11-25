@@ -425,16 +425,12 @@ def cmd_items(args):
     return 0
 
 
-def cmd_publish(args):
-    document = read_document(args.items)
+def publish(document, items_path, update, out, stamp):
     run = document["run"]
-    if args.update:
-        update = args.update
-    else:
-        update = run["hash"]
-    page = args.out or os.path.join(
+    update = update or run["hash"]
+    page = out or os.path.join(
         os.environ.get("TMPDIR", "/tmp"), "run-checklist-%d.html" % os.getpid())
-    write(page, render(document, stamp=args.stamp))
+    write(page, render(document, stamp=stamp))
 
     command = [PUBLISH_SCRIPT, page, "--purpose", "tasks", "--expires", EXPIRES,
                "--title", run["title"] or "Run checklist",
@@ -446,6 +442,7 @@ def cmd_publish(args):
         finished = subprocess.run(command, capture_output=True, text=True)
     except OSError as error:
         print("cannot run %s: %s" % (PUBLISH_SCRIPT, error), file=sys.stderr)
+        print("page=%s" % page)
         return ABSENT
 
     if finished.stderr:
@@ -465,10 +462,70 @@ def cmd_publish(args):
         print("the publisher printed no url", file=sys.stderr)
         return 1
 
+    digest = url.rstrip("/").rsplit("/", 1)[-1]
     print("url=%s" % url)
-    print("hash=%s" % url.rstrip("/").rsplit("/", 1)[-1])
+    print("hash=%s" % digest)
     print("page=%s" % page)
+    if items_path and items_path != "-" and (run["url"] != url or run["hash"] != digest):
+        run["url"] = url
+        run["hash"] = digest
+        write(items_path, dump(document) + "\n")
+        print("recorded the page identity in %s" % items_path)
     return 0
+
+
+def cmd_publish(args):
+    document = read_document(args.items)
+    return publish(document, args.items, args.update, args.out, args.stamp)
+
+
+def apply_ticks(document, ticks):
+    by_id = {entry["id"]: entry for entry in document["items"]}
+    for tick in ticks:
+        if "=" not in tick:
+            raise ValueError("%r is not <id>=<state>[:<text>]" % tick)
+        ident, _, rest = tick.partition("=")
+        state, _, text = rest.partition(":")
+        ident, state, text = ident.strip(), state.strip(), text.strip()
+        if ident not in by_id:
+            raise ValueError("no item %r; the page has %s"
+                             % (ident, ", ".join(sorted(by_id))))
+        if state not in STATES:
+            raise ValueError("%s: state %r is not one of %s"
+                             % (ident, state, ", ".join(STATES)))
+        entry = by_id[ident]
+        entry["state"] = state
+        if state == "in-flight":
+            entry["waiting_on"] = text or entry["waiting_on"]
+        else:
+            entry["waiting_on"] = ""
+            if text:
+                entry["note"] = text
+    return document
+
+
+def apply_run_fields(document, assignments):
+    for assignment in assignments:
+        field, _, value = assignment.partition("=")
+        field = field.strip()
+        if field not in RUN_FIELDS:
+            raise ValueError("no run field %r; the page has %s"
+                             % (field, ", ".join(RUN_FIELDS)))
+        document["run"][field] = value.strip()
+    return document
+
+
+def cmd_tick(args):
+    document = read_document(args.items)
+    apply_run_fields(document, args.run)
+    apply_ticks(document, args.tick)
+    document = canonical(document, args.items)
+    write(args.items, dump(document) + "\n")
+    verdict, sentence, _ = standing(document["items"])
+    print("%s: %s" % (verdict, sentence))
+    if not args.publish:
+        return 0
+    return publish(document, args.items, args.update, args.out, args.stamp)
 
 
 def cmd_rules(args):
@@ -485,12 +542,29 @@ RULES = """
 run-checklist.py — the run's obligations as a page it can read back.
 
   template    print a seed document, shaped by the run's resolved flags
+  tick        set item states and publish, in ONE command - the step-boundary call
   render      write the page from a document
   publish     render, then publish or update through publish-artifact.sh
   items       print the document embedded in a rendered page, local or published
   rules       this
 
+  tick items.json commit=done describe=in-flight:'the panel' --publish
+
 what it guarantees, and what each one is written against:
+
+  tick exists because a page the run has to remember to rewrite is a page that
+  goes stale: read-edit-publish is three steps and it was skipped through a
+  push, a change request and a review verdict on the very run that built this.
+  one command, run in the same batch as the step it records, is the fix
+
+  tick refuses an id the page does not have, so a typo is an error rather than
+  a silent no-op that leaves the item behind
+
+  tick clears waiting_on when an item leaves in-flight, so a finished item
+  cannot keep advertising a blocker that is gone
+
+  publish records the page's url and hash back into the items file, so the
+  caller cannot lose the identity that keeps the link stable
 
   every item carries an obligation, the skill that discharges it, what it
   applies to, what it is waiting on, and one of exactly four states
@@ -568,6 +642,20 @@ def main():
     send.add_argument("--out", default="")
     send.add_argument("--stamp", default=None)
     send.set_defaults(func=cmd_publish)
+
+    mark = sub.add_parser(
+        "tick", help="set item states and publish the page, in one command")
+    mark.add_argument("items")
+    mark.add_argument("tick", nargs="+", metavar="ID=STATE[:TEXT]",
+                      help="TEXT is what it waits on for in-flight, else the note")
+    mark.add_argument("--run", action="append", default=[], metavar="FIELD=VALUE",
+                      help="set a run field, e.g. --run change_request=<url>")
+    mark.add_argument("--publish", action="store_true",
+                      help="also write the page, as an update against the recorded hash")
+    mark.add_argument("--update", default="")
+    mark.add_argument("--out", default="")
+    mark.add_argument("--stamp", default=None)
+    mark.set_defaults(func=cmd_tick)
 
     rules = sub.add_parser("rules", help="print what this script guarantees")
     rules.set_defaults(func=cmd_rules)

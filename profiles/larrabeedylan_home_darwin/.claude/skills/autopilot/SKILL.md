@@ -98,7 +98,18 @@ A run composes a dozen skills in a fixed order and has to remember, unprompted a
 
 So the run keeps a checklist, and the checklist is a **published page**. `~/.claude/scripts/run-checklist.py` renders and publishes it, and the page embeds its own items as a JSON block, so reading the artifact back hands the run its obligations as data rather than as prose to parse. Run `run-checklist.py rules` for the subcommands and the guarantees; it is generated from that script's own source.
 
-**The page is the source of truth, not the context window.** Re-read it at **every step boundary and after every notification wake**, and update it in place as items complete. A turn that changed the run's state and left the page describing the old state has not finished.
+**The page is the source of truth, not the context window.** Re-read it at **every step boundary and after every notification wake**, and update it in place as items complete.
+
+**Updating it is one command, and that is the whole point.** `tick` reads the items, sets the states, validates, re-renders and publishes against the recorded hash in a single call:
+
+```bash
+~/.claude/scripts/run-checklist.py tick <items>.json \
+  commit=done 'pipeline=in-flight:a Monitor on the change request' --publish
+```
+
+`ID=STATE` for each item, where the text after a colon is **what it is waiting on** for `in-flight` and the **note** for anything else. An id the page does not have is an error naming the ids it does have, so a typo fails loudly instead of leaving the item behind. Leaving `in-flight` clears `waiting_on` by itself, so a finished item cannot keep advertising a blocker that is gone.
+
+**Run it in the same tool-call batch as the step it records.** This is the rule that actually keeps the page true, and it is written against a measured failure: on the very run that built this feature the page was published at the commit and then left untouched through the push, the change request, a review verdict and a swarm launch — it still read `commit: in flight` while the review was running, and the user had to say so. Nothing was forgotten in principle; three steps were skipped in practice, which is why the update is now one step. **A turn that ends with the page describing an earlier step than the run has reached is a defect**, in exactly the way a turn that ends with nothing armed is — and the stamp on the page is what makes it visible to the person refreshing it.
 
 **The user refreshes one link and sees where the run is.** That is the whole reason this is a published page and not a file in the scratchpad: it is readable on a phone, mid-run, by the person who is not watching the terminal. So the page carries a per-item state and an updated-at stamp, and a refresh that shows a later stamp is what proves it is live rather than frozen.
 
@@ -412,7 +423,15 @@ Open it as a normal pull request, not a draft — the review bot runs as a CI jo
 **Run checklist:** <url> — what this run still owes, updated as it goes.
 ```
 
-Then record in the run state that the description carries it. Two later edits append to this same description — the diagram link at Step 11.2 and the decision-record fold at Step 11.3 — and both must leave this line where it is. **On a `--branch default` run there is no description**, so the link goes into the Step 11 report and the ticket comment instead, exactly as the decision ledger already degrades there.
+Then tick the item and record the change request on the page, in this same batch:
+
+```bash
+~/.claude/scripts/run-checklist.py tick <items>.json open=done \
+  'pipeline=in-flight:the pipeline on the change request' \
+  --run change_request=<url> --publish
+```
+
+Two later edits append to this same description — the diagram link at Step 11.2 and the decision-record fold at Step 11.3 — and both must leave this line where it is. **On a `--branch default` run there is no description**, so the link goes into the Step 11 report and the ticket comment instead, exactly as the decision ledger already degrades there.
 
 ## Step 5: Arm the Watcher — never poll in-turn
 
@@ -437,6 +456,16 @@ Poll the forge no more often than every 60 seconds; these are remote APIs with r
 When the monitor's notification arrives, continue from Step 6. Between arming it and that notification, the turn is over: answer anything else the user asks normally.
 
 **Never yield with nothing armed.** This step is where the rule is easiest to break, because arming the watcher and ending the turn look like the same action and are not. Before ending **any** turn, confirm something will cause the next one — a running workflow, a `Monitor`, a scheduled wakeup. The run checklist's *waiting on* column is the query: if no item is in flight, nothing is going to wake you. The page says so in as many words, which is the point of computing it there rather than trusting a reading of the transcript.
+
+So the last thing this step does is record what it armed, which is also what makes the claim checkable:
+
+```bash
+~/.claude/scripts/run-checklist.py tick <items>.json \
+  'pipeline=in-flight:a Monitor on the pipeline' \
+  'review=in-flight:workflow <wf id>' --publish
+```
+
+It prints `armed: Waiting on …` or `stalled: N items outstanding and nothing is in flight`. The second answer is the defect, before the turn ends rather than after.
 
 With an empty queue and budget intact, **do the next item in this turn** instead of announcing it. Announcing is the specific failure: a run said *"remaining tonight: the C and D review swarms — starting the first now"* and then ended the turn without starting it, with both earlier panels already finished and nothing in flight. Had the user not replied, it would have idled until morning behind a transcript that read like work in progress. If the queue is genuinely empty because everything left is blocked, say which items are blocked and on what, then pause — so silence is never ambiguous between *working* and *stopped*.
 
@@ -721,7 +750,7 @@ When the PR merges, when a `--branch default` run has pushed, or when you stop f
 1. **Record it where the work lives.** On a ticket run, comment the PR URL and what shipped — **not the decision ledger**, which belongs in the description fold at 11.3 and must not be duplicated as a wall of text on the ticket as well. Anything noteworthy beyond those two is a line, not a section. A `--branch default` run has no PR, so record the pushed commit SHA and its forge URL instead. Work you deliberately did not do becomes its own ticket, linked back — never a buried bullet in a closing comment. Check whether the forge integration already moved the ticket before moving it by hand; that integration is asynchronous.
 2. **Attach the diagram** when `--diagram` is true and the run opened a pull request. On a `--branch default` run the fix skill already produced it at its own diagram step, so do not produce a second one — carry the link it gave you into the report and the ticket comment. Invoke `changes-diagram` with the `Skill` tool and append its link to the PR description — or, on a `--branch default` run, carry the link in the report and the ticket comment, since there is no description to append to. Do this once the code has settled — a diagram of a branch that changed three more times is worse than none. **A failed or unavailable diagram never fails the run**: say so in one line and carry on.
 3. **Append the decision record.** Take the scratchpad ledger, apply the filter and the budget from **The decision record**, and append it to the end of the change request description inside the collapsed `<details>` fold — one edit, after the diagram link. An empty ledger publishes nothing. **Never post it as a comment**: if the description edit fails, say so in one line and carry the ledger in the report instead.
-4. **Close the checklist.** Update the page one last time, against the identity recorded at the first publish so the link the user has open is the link that changes. Every item ends `done` or `skipped` with a reason — an item left `pending` on a finished run is the run telling the user it dropped something, which is exactly what the page is for. This is the last write, so it is also the one a stale page is most visible on.
+4. **Close the checklist.** One last `tick --publish`, against the identity recorded at the first publish so the link the user has open is the link that changes. Every item ends `done` or `skipped` **with a reason** — the renderer refuses a `skipped` item that carries none, and an item left `pending` on a finished run is the run telling the user it dropped something, which is exactly what the page is for. It should print `complete`; anything else names what the run did not finish.
 5. **Ping the user.** Invoke the `ping` skill with the `Skill` tool. This is the **closing** ping — Step 0d already sent the opening one and armed the session, so this is a report rather than an announcement. It is the only message the user is guaranteed to read, so it carries what happened and whether anything is needed — a ping that says "done" wastes it. **It carries Step 10b's verdict in Step 10b's own words**: deployed and verified, deploy failed, waiting on a human, or merged and unverified. "Merged" alone is the one word that reads as finished while leaving out whether the change is actually running. **A `--branch default` run says so in the ping**: the change is on the default branch, unreviewed, and already live. That is what the user chose, and it is also the single fact most worth knowing on a phone.
 6. **Name any signal that did not prove what it was meant to.** Where Step 0b's reading of the deploy path did not match what Step 10b actually observed, say so in the report in one line — the path you expected, the path it took, and which check turned out not to answer *is this SHA running*. A signal that looks authoritative and is not is the thing most likely to make the next run report a deploy it never saw, so it is worth naming even on a run that ended confirmed.
 

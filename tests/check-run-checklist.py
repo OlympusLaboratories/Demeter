@@ -25,6 +25,16 @@ run-checklist.py, checked over every profile copy:
   template --merge absent                     a "ready, not merged" item instead
   template --branch-mode default              no change request, no merge, no ledger item
   template --request-name                     this machine's word reaches every item
+  tick <id>=<state>                           rewrites the items file in place
+  tick <id>=in-flight:<text>                  sets what it is waiting on
+  tick <id>=done after in-flight              clears waiting_on
+  tick <id>=skipped:<reason>                   sets the note
+  tick with an id the page lacks              exits non-zero, names the ids it has
+  tick with a state that is not one of four   exits non-zero
+  tick --run <field>=<value>                  sets a run field
+  tick --run with an unknown field            exits non-zero
+  tick --publish                              publishes as an update
+  publish                                     records url and hash into the items file
   render then items                           round-trips byte for byte
   an unknown state                            exits non-zero
   a skipped item with no reason               exits non-zero
@@ -48,6 +58,12 @@ run-checklist.py, checked over every profile copy:
   publish                                     sends --expires, so the store does not keep
                                               one checklist per run forever
   publish with a recorded hash                sends --update, so the link cannot change
+
+tick is the step-boundary command and it is tested hardest, because the failure it exists
+to prevent is the one that actually happened: the page on the run that built this went
+stale through a push, a change request and a review verdict, since read-edit-publish is
+three steps and three steps get skipped. One command that validates and publishes is the
+fix, so an id it does not recognise must be an error rather than a silent no-op.
 
 The page is the run's own record of what it still owes, so a defect here is silent by
 construction: a state the renderer does not recognise, an item claiming to be in flight
@@ -250,7 +266,80 @@ def check_profile(suite, profile, work):
              run(script, "items", broken).returncode != 0)
 
     check_over_http(suite, tag, script, body, full.stdout)
+    check_tick(suite, tag, script, work, full.stdout)
     check_publish(suite, tag, script, work, seed)
+
+
+def check_tick(suite, tag, script, work, seed_text):
+    path = write(os.path.join(work, "tick.json"), seed_text)
+    load = lambda: {e["id"]: e for e in json.loads(open(path).read())["items"]}
+
+    suite.exits("%s tick" % tag, 0,
+                run(script, "tick", path, "commit=done",
+                    "review=in-flight:workflow wf_abc"))
+    items = load()
+    suite.ok("%s tick sets the state" % tag, items["commit"]["state"] == "done",
+             items["commit"]["state"])
+    suite.ok("%s tick sets what an in-flight item waits on" % tag,
+             items["review"]["waiting_on"] == "workflow wf_abc",
+             items["review"]["waiting_on"])
+
+    suite.exits("%s tick to done after in-flight" % tag, 0,
+                run(script, "tick", path, "review=done"))
+    suite.ok("%s leaving in-flight clears waiting_on" % tag,
+             load()["review"]["waiting_on"] == "", load()["review"]["waiting_on"])
+
+    suite.exits("%s tick to skipped with a reason" % tag, 0,
+                run(script, "tick", path, "ledger=skipped:no unreviewed calls"))
+    suite.ok("%s tick sets the note" % tag,
+             load()["ledger"]["note"] == "no unreviewed calls",
+             load()["ledger"]["note"])
+
+    typo = run(script, "tick", path, "comit=done")
+    suite.ok("%s tick rejects an unknown id" % tag, typo.returncode != 0, typo.stdout)
+    suite.ok("%s tick names the ids it does have" % tag, "commit" in typo.stderr,
+             typo.stderr)
+
+    suite.ok("%s tick rejects a state outside the four" % tag,
+             run(script, "tick", path, "commit=doneish").returncode != 0)
+    suite.ok("%s tick rejects an argument with no =" % tag,
+             run(script, "tick", path, "commit").returncode != 0)
+
+    suite.exits("%s tick --run" % tag, 0,
+                run(script, "tick", path, "commit=done",
+                    "--run", "change_request=https://example.invalid/pull/9"))
+    suite.ok("%s tick --run sets the field" % tag,
+             json.loads(open(path).read())["run"]["change_request"]
+             == "https://example.invalid/pull/9")
+    suite.ok("%s tick --run rejects an unknown field" % tag,
+             run(script, "tick", path, "commit=done",
+                 "--run", "nonsense=x").returncode != 0)
+
+    log = os.path.join(work, "tick-publisher-args.txt")
+    fake = write(os.path.join(work, "tick-publisher.sh"),
+                 '#!/bin/sh\nfor a in "$@"; do echo "$a" >>"%s"; done\n'
+                 'echo https://store.invalid/tick99\n' % log)
+    os.chmod(fake, 0o755)
+    finished = run(script, "tick", path, "commit=done", "--publish",
+                   "--out", os.path.join(work, "tick.html"), "--stamp", "S",
+                   env=dict(os.environ, PUBLISH_ARTIFACT=fake))
+    suite.exits("%s tick --publish" % tag, 0, finished)
+    suite.ok("%s tick --publish prints the url" % tag,
+             "url=https://store.invalid/tick99" in finished.stdout, finished.stdout)
+    recorded = json.loads(open(path).read())["run"]
+    suite.ok("%s publish records the url into the items file" % tag,
+             recorded["url"] == "https://store.invalid/tick99", recorded)
+    suite.ok("%s publish records the hash into the items file" % tag,
+             recorded["hash"] == "tick99", recorded)
+
+    os.remove(log)
+    suite.exits("%s a later tick --publish reuses the recorded hash" % tag, 0,
+                run(script, "tick", path, "describe=done", "--publish",
+                    "--out", os.path.join(work, "tick.html"), "--stamp", "S",
+                    env=dict(os.environ, PUBLISH_ARTIFACT=fake)))
+    sent = open(log, encoding="utf-8").read().splitlines()
+    suite.ok("%s the recorded hash becomes --update without being passed" % tag,
+             "--update" in sent and "tick99" in sent, "got %s" % sent)
 
 
 def check_over_http(suite, tag, script, page, want):

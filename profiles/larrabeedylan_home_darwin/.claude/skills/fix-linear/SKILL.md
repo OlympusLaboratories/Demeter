@@ -58,7 +58,16 @@ Pass `--review`, `--diagram` and `--merge` for each of those flags that resolved
 
 > `PLAT-3276 · branch new · full description · diagram · review · autopilot, stopping before the merge · checklist: <url>`
 
-**Then tick items as they complete, never in a batch at the end.** The plan gate, the implementation, the commit message and the description are each an item here, and **a branch-mode escalation at Step 2b changes the run's shape** — re-seed the page when one fires, as an update against the recorded hash, so a forced feature branch does not leave the checklist describing a `--branch default` run.
+**Then tick each item in the same tool-call batch as the step that completes it**, with one command rather than three:
+
+```bash
+~/.claude/scripts/run-checklist.py tick <items>.json \
+  plan=done 'implement=in-flight:the approved plan' --publish
+```
+
+The plan gate, the implementation, the commit message and the description are each an item here. **Never tick in a batch at the end**: the page exists so somebody can refresh it mid-run, and a page caught up only at the finish is a page that was wrong for the whole run — measured on the run that built this feature, which left it reading `commit: in flight` while a review swarm was already going.
+
+**A branch-mode escalation at Step 2b changes the run's shape**, so re-seed the page when one fires, as an update against the recorded hash — otherwise a forced feature branch leaves the checklist describing a `--branch default` run.
 
 ### Autopilot is on unless it is switched off
 
