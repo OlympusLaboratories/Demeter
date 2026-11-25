@@ -79,7 +79,8 @@ It is still not the default. A question **stalls the run** until somebody answer
 - **Anything irreversible or chargeable.** The Step 10c hazards: a step that interrupts other people, a one-way data migration, anything that spends money, a target the change request never mentioned.
 - **A fork where both ways are defensible and one is expensive to undo.** A ledger entry explains a wrong turn; it does not undo one.
 - **A decision from the Step 11 escalation list that the run could act on immediately** — a product or policy call, a merge conflict whose intent is unclear. Asking keeps the run alive where stopping would have killed it.
-- **The quota gate**, which already worked this way — see **At an interactive gate, just ask**.
+
+**The budget is never one of them, and neither is a flag the user already set.** Those are the two that look like judgment calls and are not. A quota reading is decided by Step 0c's table, whose only two answers are *pause* and *carry on* — asking the user whether to spend their own remaining quota hands back a decision this skill has already made, and it stalls a run that was handed over precisely so it would not need them. A flag belongs to whoever set it: `--review true` means the swarm runs, and noticing that it is expensive is not grounds to put it to a vote (Rule 6). Both happened on one run, together — it stopped at `weekly 85%` to ask whether to spend a review swarm, with an approved change request one step from the merge, while the user was in the middle of something else. The cost of asking is not the tokens; it is that the run stops being autopilot.
 
 Three rules keep the ask usable from a phone rather than theatrical:
 
@@ -236,7 +237,7 @@ On Linux the default is `${XDG_CACHE_HOME:-$HOME/.cache}/claude-usage/usage.json
 - `retryUntil` in the future means the account is already rate-limited — do not fetch.
 - Only if the cache is missing or badly stale, fetch **once**: read the token from the macOS keychain service `Claude Code-credentials`, else `~/.claude/.credentials.json` → `claudeAiOauth.accessToken`, and `GET https://api.anthropic.com/api/oauth/usage` with `Authorization: Bearer <token>`, `anthropic-beta: oauth-2025-04-20`, `Accept: application/json`. Never write the result into the cache directory.
 
-**Check all four meter kinds, not just the headline.** A `session` meter at 40% with a `scoped:<Model>` meter at 100% fails every agent you launch while the number you looked at says healthy.
+**Read `session`. That is the meter the pause decision keys on, and the only one.** The others are diagnostic, never budgetary: a `scoped:<Model>` meter at 100% is why your agents are suddenly failing while `session` reads healthy, which is worth knowing when something breaks and is not a number to police. Never turn one of them into a reason to stop, and never into a question.
 
 **Name the meter with every percentage you quote.** `62%` is not a reading; `weekly 62%` is. The extension's status bar draws one chip per meter, so an unlabelled number is one nobody can check against it — including you, a step later.
 
@@ -249,12 +250,14 @@ Check at **step boundaries** — it is a local file read, so it is cheap enough 
 | Reading | Action |
 |---|---|
 | `session` at **85% used or more** | Pause. Invoke the `pause` skill. |
-| `weekly`, `scoped:*` or `spend` near its limit | Pause, ping, and **do not arm a return.** |
-| Anything below that, parked on a watcher | Do nothing. A parked run spends nothing; wall-clock is not the thing being budgeted. |
+| `session` below 85% | Carry on. Nothing else in the file is a pause trigger. |
+| Below the floor, parked on a watcher | Do nothing. A parked run spends nothing; wall-clock is not the thing being budgeted. |
 
 **85% is a floor, not a suggestion, and "I am nearly finished" does not raise it.** The pause itself costs tokens — stopping watchers, flushing state, writing the file, sending the ping — so the threshold exists to leave enough window to perform it. A run that pushes past the floor because the merge is two minutes away is the run that cannot pause cleanly when those two minutes turn out to be twenty.
 
-**The weekly window is the user's call, and the stricter window always wins.** A session reset is not permission to spend a nearly-dead weekly quota, so a weekly-driven pause pings and waits for a human. `/pause` arms a return only for the session window; see that skill.
+**`session` is the only meter this decision reads. `weekly`, `scoped:*` and `spend` are not the run's business at all.** Do not weigh them, do not pause on them, do not mention them as a reason to stop, and above all do not ask the user whether to spend them — the weekly window is theirs to manage, and a run that stops to consult them about it has invented a gate out of a number it was not asked to police. Observed exactly that way: a run read `weekly 85%`, decided a review swarm was too expensive to launch without consent, and stalled with an approved change request one step from the merge while the user was mid-task. The session floor exists because the pause itself must stay affordable; no other meter has that property, so no other meter earns a check here. If a wider limit genuinely runs out, the platform stops the run and that is the signal — pre-empting it is not this skill's job.
+
+`/pause` arms a return only for the session window; see that skill.
 
 ### Journal as you go, so the pause is affordable
 
@@ -266,9 +269,13 @@ The usual moment to pause is the moment there is least budget to do it with, and
 
 Everything else is read from the forge or from `git` at pause time, which is affordable. Prose is not. A run that journals as it goes pauses with one atomic write.
 
-### At an interactive gate, just ask
+### At a gate you are already stopped at, fold the budget into it
 
-A blocked `AskUserQuestion` spends nothing while it waits, so the threshold cannot be crossed during the wait. The real case is that the answer arrives and the window has gone in the meantime — and at that exact moment the user is demonstrably at the keyboard. **That is the one point where asking is both cheap and correct**: say the window is nearly out and ask whether to pause here or push on. Deciding it silently from a threshold throws away the only moment the question is free.
+**This never creates a gate.** It applies only when the run is *already* blocked on an `AskUserQuestion` it raised for one of the reasons in **Asking mid-run** — then, and only then, the budget rides along on a question that was going to be asked anyway. Read the heading as a precondition, not as permission: a question whose subject is the quota is the thing this section forbids, and raising one *in order* to reach this paragraph is the misreading it exists to close.
+
+Why the exception is worth having at all: a blocked question spends nothing while it waits, so the threshold cannot be crossed during the wait, and the real risk is that the answer arrives after the window has gone. At that moment the user is demonstrably at the keyboard, which is the only time the follow-up is free — so add one line to the question already on screen saying the window is nearly out, and let them say whether to park it.
+
+With no such gate open, there is no question. Apply Step 0c's table and move: pause if it says pause, carry on if it does not.
 
 **Never pause with an unanswered question dangling.** The question exists only in the transcript, and a paused session swallows the answer the user is in the middle of giving.
 
@@ -369,7 +376,15 @@ You now need to know when the pipeline finishes and when the reviewer reports. *
 
 Write the monitor script so that **every terminal state produces a line**. Silence must never be indistinguishable from success — a monitor that only reports green stays quiet through a crashloop. Emit a line for success, failure, cancellation, and a blocked or manual pipeline, and for any new unresolved thread.
 
-Poll the forge no more often than every 60 seconds; these are remote APIs with rate limits, and the review bot runs in CI, so the interesting events are minutes apart. Tolerate a failed request (`|| true`) so one blip cannot kill the watch. Set `persistent: true` — a review cycle outlives the default timeout.
+Poll the forge no more often than every 60 seconds; these are remote APIs with rate limits, and the review bot runs in CI, so the interesting events are minutes apart. Set `persistent: true` — a review cycle outlives the default timeout.
+
+**A failed poll emits a line; only its consequences are tolerated.** `|| true` is right for a blip and wrong for anything that fails the same way every time. A missing binary and an unsupported flag fail on *every* poll, and a bare `|| true` turns that into exactly the silence the rule above forbids — the watch stays alive, reports nothing it was armed for, and never exits. So a non-zero poll writes a `POLL ERROR` line carrying the command's stderr. **One of those is a blip and the watch carries on; a few in a row is the permanent case, so the watch emits and exits.** Do not let it report the same failure every 60 seconds forever: `persistent: true` means nothing stops it on its own, and the `Monitor` tool stops a watch that produces too many events — so an unbounded error stream ends as a killed monitor whose last word was noise. A watch that cannot see is a terminal state like any other, and terminal states exit.
+
+**Smoke-test the script before arming it.** Write the loop so a single pass is expressible — `MAX_POLLS=1 SLEEP=0` — run exactly that, and read what it prints. A real line about the merge request means the script works *on this machine*; empty output or a `POLL ERROR` means the monitor you were about to arm would have waited forever. It costs one command, and it is the only check that catches a tool this box does not have. Never infer the toolchain instead — these skills are shared across machines that have different ones, and the script is the thing that knows.
+
+**The adapter prints one JSON object per line, so parse line by line — and a parser that cannot parse emits.** A `gitlab-api.sh` subcommand prints one JSON object per line and never an array — many lines for a multi-item one, exactly one for a single-item one. A couple print plain text instead, which is exactly why `help` carries a shape per subcommand rather than leaving you to assume one. A whole-stream `json.load` therefore works on the single-item subcommands and throws on the rest, which is how a parser written against one and reused for another fails. Run `gitlab-api.sh help` and read each subcommand's shape column rather than assuming. Then note that an `except` which exits 0 on a parse error is the worst failure available here, because it turns a broken parser into a silent healthy report: the monitor renders no output as "nothing to report", so a blocking review arrives as zero unresolved threads. Emit a line naming the parse failure and the text that caused it. An empty answer is **zero bytes** rather than an empty array, so give the nothing-to-report case a line of its own too.
+
+**Never let the monitor's working directory be a path this run can delete.** A watcher running inside the worktree that Step 10d reclaims fails on the harness's trailing `pwd`, so a script that exited 0 is reported as exiting 1 — a broken watch at the exact moment the run is trying to confirm a deploy.
 
 When the monitor's notification arrives, continue from Step 6. Between arming it and that notification, the turn is over: answer anything else the user asks normally.
 
@@ -573,7 +588,7 @@ Runs once the change has actually landed on the default branch — by merge, or 
 
 So **every check is tied to the commit that landed.** Resolve that SHA once, and make each check answer *is this SHA what is now running* rather than *did a job pass*. Where a signal cannot be tied back to the SHA, say so and treat the result as unverified — not as confirmation.
 
-Arm a `Monitor` in the turn the merge confirms. Never a sleep loop, never an in-turn poll, exactly as Step 5. Poll remote APIs no faster than every 60 seconds, tolerate a failed request so one blip cannot kill the watch, and bound the watch with the budget from Step 0b. **Every terminal state emits a line** — same reason as Step 5: a watch that only speaks on success is indistinguishable from a watch that died.
+Arm a `Monitor` in the turn the merge confirms. Never a sleep loop, never an in-turn poll, exactly as Step 5. Poll remote APIs no faster than every 60 seconds and bound the watch with the budget from Step 0b. **Every terminal state emits a line** — same reason as Step 5: a watch that only speaks on success is indistinguishable from a watch that died. Step 5's four rules about failure apply here unchanged, and the first two matter more on this watch than on that one: a failed poll emits rather than being swallowed by `|| true`, and the script is smoke-tested with a single pass before it is armed. A deploy watch that went silent because a tool is missing reports no deploy at all, which this step is required to treat as unverified rather than as success.
 
 Five terminal states, and the difference between the last three is most of this step's value:
 
@@ -689,6 +704,6 @@ Stopping and asking are both reserved for this list. Everything else — surpris
 9. **An empty config value means the capability is absent, not that you should guess at it.** Never substitute a name you saw in an example for one the machine did not supply.
 10. **The merge is not the finish line, and "merged" is not "deployed".** Step 0b works out how the change reaches production and Step 10b confirms it got there, tied to the commit that landed rather than to a job going green. Unverified is a reportable outcome — **never** upgrade cannot-observe or timed-out into success.
 11. **Arm the notifications before the first unattended step.** A ping is the only thing that writes `armed_at`, and an unarmed session is silent through every permission prompt, question and failure in the run. Step 0d sends it once, on every route in — hand-off, direct, or a mid-run `/autopilot` amendment. Pinging only at the end arms the session at the exact moment it stops mattering.
-12. **Pause on purpose; never run out mid-flight.** Read the quota from the `claude-usage` cache at step boundaries, never from the API, and pause at 85% of the session window. Journal the step, the next action and the ledger as you go, so the pause costs one write. A weekly, scoped or spend limit pauses and pings and **never** arms its own return — that window is the user's to spend.
+12. **Pause on purpose; never run out mid-flight.** Read the quota from the `claude-usage` cache at step boundaries, never from the API, and pause at 85% of the session window. Journal the step, the next action and the ledger as you go, so the pause costs one write. **`session` is the only meter that gates the run** — `weekly`, `scoped:*` and `spend` are the user's to manage, never a reason to stop and never a question to ask.
 14. **Never hand the user a command you can run yourself.** If Step 0b found the deploy and this session can reach the target, Step 10c runs it. A run that finishes with a block of commands for the user to paste has failed at the one thing it was for, and it fails in the worst way — looking finished. The same goes for anything else in reach: pulling a repo, restarting a service, installing a file on a box you already have access to, and reclaiming the worktree and branch the merge just finished with (**Step 10d**).
 13. **A broken deploy is warned about, never fixed.** No rollback, no revert, no re-run of a deploy job, no touching the runtime. Gather the evidence, ping immediately, and stop. An unattended agent reverting production at 2am is worse than a bad deploy somebody has been told about.

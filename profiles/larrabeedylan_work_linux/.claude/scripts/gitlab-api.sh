@@ -16,18 +16,45 @@ print_usage() {
 
 print_help() {
   awk '
+    function row(label, text, kind) {
+      line = sprintf("%-24s %-48s  %s", label, text, kind)
+      sub(/[ \t]+$/, "", line)
+      print line
+    }
     /^  [a-z][a-z0-9-]*\)$/ {
       name = $1
       sub(/\)$/, "", name)
-      printed = 0
+      shape = ""
+      count = 0
+      delete doc
       while ((getline line) > 0) {
         if (line !~ /^    #/) break
         sub(/^    # ?/, "", line)
+        if (line ~ /^Shape: /) {
+          sub(/^Shape: */, "", line)
+          shape = line
+          continue
+        }
         sub(/^Args: */, "", line)
-        printf "%-24s %s\n", (printed ? "" : name), line
-        printed = 1
+        doc[++count] = line
       }
-      if (!printed) print name
+      if (count == 0) {
+        row(name, "", shape)
+        next
+      }
+      for (i = 1; i <= count; i++)
+        row(i == 1 ? name : "", doc[i], i == 1 ? shape : "")
+    }
+    END {
+      print ""
+      print "output shape, declared beside each subcommand and checked by tests/check-api-help-shape.py:"
+      print "  json    exactly one JSON object"
+      print "  ndjson  one JSON object per line, zero or more - an empty answer is no bytes"
+      print "  text    plain lines, not JSON"
+      print "  mixed   plain-text section headers interleaved with ndjson"
+      print "A handled failure prints a single JSON object with an error key. An"
+      print "unhandled one exits non-zero with nothing on stdout, so judge a call"
+      print "by its exit status rather than by parsing an empty stream."
     }
   ' "$0"
 }
@@ -35,6 +62,7 @@ print_help() {
 case "${1:-}" in
   help)
     # Args: none; --help and -h do the same
+    # Shape: text
     print_help
     exit 0
     ;;
@@ -52,6 +80,7 @@ TOKEN=$(python3 -c "import json; print(json.load(open('$HOME/.claude/.mcp.json')
 
 case "${1:-}" in
   current-user)
+    # Shape: json
     curl -sf -H "PRIVATE-TOKEN: $TOKEN" "$GITLAB_URL/user" | python3 -c "
 import sys, json
 u = json.load(sys.stdin)
@@ -60,6 +89,7 @@ print(json.dumps({'username': u['username'], 'id': u['id'], 'name': u['name']}))
     ;;
   merged-mrs)
     # Args: username, updated_after
+    # Shape: ndjson
     USERNAME="${2:?Usage: gitlab-api.sh merged-mrs <username> <updated_after>}"
     UPDATED_AFTER="${3:?}"
     curl -sf -H "PRIVATE-TOKEN: $TOKEN" \
@@ -79,6 +109,7 @@ for mr in mrs:
     ;;
   open-mrs)
     # Args: username
+    # Shape: ndjson
     USERNAME="${2:?Usage: gitlab-api.sh open-mrs <username>}"
     curl -sf -H "PRIVATE-TOKEN: $TOKEN" \
       "$GITLAB_URL/merge_requests?author_username=$USERNAME&state=opened&scope=all&per_page=50" | python3 -c "
@@ -98,6 +129,7 @@ for mr in mrs:
     ;;
   mr-info)
     # Args: project_path (URL-encoded), mr_iid
+    # Shape: json
     PROJECT="${2:?Usage: gitlab-api.sh mr-info <project_path_urlencoded> <mr_iid>}"
     MR_IID="${3:?}"
     curl -sf -H "PRIVATE-TOKEN: $TOKEN" \
@@ -117,6 +149,7 @@ print(json.dumps({
     ;;
   mr-discussions)
     # Args: project_path (URL-encoded), mr_iid
+    # Shape: ndjson
     PROJECT="${2:?Usage: gitlab-api.sh mr-discussions <project_path_urlencoded> <mr_iid>}"
     MR_IID="${3:?}"
     curl -sf -H "PRIVATE-TOKEN: $TOKEN" \
@@ -163,6 +196,7 @@ for d in discussions:
   mr-notes)
     # Args: project_path (URL-encoded), mr_iid
     # Raw note stream: system notes and notes posted outside any thread included.
+    # Shape: ndjson
     PROJECT="${2:?Usage: gitlab-api.sh mr-notes <project_path_urlencoded> <mr_iid>}"
     MR_IID="${3:?}"
     curl -sf -H "PRIVATE-TOKEN: $TOKEN" \
@@ -180,6 +214,7 @@ for n in json.load(sys.stdin):
     ;;
   mr-changes)
     # Args: project_path (URL-encoded), mr_iid
+    # Shape: ndjson
     PROJECT="${2:?Usage: gitlab-api.sh mr-changes <project_path_urlencoded> <mr_iid>}"
     MR_IID="${3:?}"
     curl -sf -H "PRIVATE-TOKEN: $TOKEN" \
@@ -197,6 +232,7 @@ for c in changes:
     ;;
   reply-to-thread)
     # Args: project_path (URL-encoded), mr_iid, discussion_id, body
+    # Shape: json
     PROJECT="${2:?Usage: gitlab-api.sh reply-to-thread <project_path_urlencoded> <mr_iid> <discussion_id> <body>}"
     MR_IID="${3:?}"
     DISCUSSION_ID="${4:?}"
@@ -216,6 +252,7 @@ print(json.dumps({
     ;;
   reply-to-thread-stdin)
     # Args: project_path (URL-encoded), mr_iid, discussion_id; body read from stdin
+    # Shape: json
     PROJECT="${2:?Usage: gitlab-api.sh reply-to-thread-stdin <project_path_urlencoded> <mr_iid> <discussion_id>}"
     MR_IID="${3:?}"
     DISCUSSION_ID="${4:?}"
@@ -235,6 +272,7 @@ print(json.dumps({
   resolve-thread)
     # Args: project_path (URL-encoded), mr_iid, discussion_id, [unresolve]
     # GitLab returns the discussion, not a resolved flag — it is carried per note.
+    # Shape: json
     PROJECT="${2:?Usage: gitlab-api.sh resolve-thread <project_path_urlencoded> <mr_iid> <discussion_id> [unresolve]}"
     MR_IID="${3:?}"
     DISCUSSION_ID="${4:?}"
@@ -257,6 +295,7 @@ else:
     ;;
   update-mr-title)
     # Args: project_path (URL-encoded), mr_iid, title
+    # Shape: json
     PROJECT="${2:?Usage: gitlab-api.sh update-mr-title <project_path_urlencoded> <mr_iid> <title>}"
     MR_IID="${3:?}"
     TITLE="${4:?}"
@@ -276,6 +315,7 @@ print(json.dumps({
     # Args: project_path (URL-encoded), mr_iid, note_id, body
     # Rewrites an existing MR note in place. Use it to correct a note this
     # run posted; GitLab keeps no public edit history on notes.
+    # Shape: json
     PROJECT="${2:?Usage: gitlab-api.sh update-note <project_path_urlencoded> <mr_iid> <note_id> <body>}"
     MR_IID="${3:?}"
     NOTE_ID="${4:?}"
@@ -293,6 +333,7 @@ print(json.dumps({'id': note.get('id'), 'updated_at': note.get('updated_at'), 'b
     # Args: project_path (URL-encoded), mr_iid, body
     # Posts a plain MR note with the body verbatim (no location prefix), so
     # bot commands like `atlantis plan` parse correctly.
+    # Shape: json
     PROJECT="${2:?Usage: gitlab-api.sh create-note <project_path_urlencoded> <mr_iid> <body>}"
     MR_IID="${3:?}"
     BODY="${4:?}"
@@ -311,6 +352,7 @@ print(json.dumps({
     ;;
   mr-commits)
     # Args: project_path (URL-encoded), mr_iid
+    # Shape: ndjson
     PROJECT="${2:?Usage: gitlab-api.sh mr-commits <project_path_urlencoded> <mr_iid>}"
     MR_IID="${3:?}"
     curl -sf -H "PRIVATE-TOKEN: $TOKEN" \
@@ -330,6 +372,7 @@ for c in commits:
     ;;
   mr-pipelines)
     # Args: project_path (URL-encoded), mr_iid
+    # Shape: ndjson
     PROJECT="${2:?Usage: gitlab-api.sh mr-pipelines <project_path_urlencoded> <mr_iid>}"
     MR_IID="${3:?}"
     curl -sf -H "PRIVATE-TOKEN: $TOKEN" \
@@ -352,6 +395,7 @@ for p in pipelines:
     ;;
   pipeline-jobs)
     # Args: project_path (URL-encoded), pipeline_id
+    # Shape: ndjson
     PROJECT="${2:?Usage: gitlab-api.sh pipeline-jobs <project_path_urlencoded> <pipeline_id>}"
     PIPELINE_ID="${3:?}"
     curl -sf -H "PRIVATE-TOKEN: $TOKEN" \
@@ -373,6 +417,7 @@ for j in jobs:
   pipeline-bridges)
     # Args: project_path (URL-encoded), pipeline_id
     # Lists child-pipeline trigger jobs (bridges) and their downstream pipelines.
+    # Shape: ndjson
     PROJECT="${2:?Usage: gitlab-api.sh pipeline-bridges <project_path_urlencoded> <pipeline_id>}"
     PIPELINE_ID="${3:?}"
     curl -sf -H "PRIVATE-TOKEN: $TOKEN" \
@@ -394,6 +439,7 @@ for b in bridges:
   job-log)
     # Args: project_path (URL-encoded), job_id, optional line budget — a number (default 400) or "all"
     # Prints the tail, because a failing job's reason is at the end of its trace.
+    # Shape: text
     PROJECT="${2:?Usage: gitlab-api.sh job-log <project_path_urlencoded> <job_id> [lines|all]}"
     JOB_ID="${3:?}"
     LINES="${4:-400}"
@@ -427,6 +473,7 @@ for b in bridges:
   retry-job)
     # Args: project_path (URL-encoded), job_id
     # Prints the NEW job the retry creates, which has a different id to the old one.
+    # Shape: json
     PROJECT="${2:?Usage: gitlab-api.sh retry-job <project_path_urlencoded> <job_id>}"
     JOB_ID="${3:?}"
     curl -s -X POST -H "PRIVATE-TOKEN: $TOKEN" \
@@ -448,6 +495,7 @@ else:
     # Args: project_path (URL-encoded), source_branch, target_branch, title, [description_file]
     # description_file: path to a file with the MR description, or "-" for stdin, or omitted for none.
     # To open as a Draft, prefix the title with "Draft: ".
+    # Shape: json
     PROJECT="${2:?Usage: gitlab-api.sh create-mr <project_path_urlencoded> <source_branch> <target_branch> <title> [description_file]}"
     SOURCE_BRANCH="${3:?}"
     TARGET_BRANCH="${4:?}"
@@ -480,6 +528,7 @@ print(json.dumps({
   update-mr-description)
     # Args: project_path (URL-encoded), mr_iid, description_file
     # description_file: path to a file with the new description, or "-" for stdin.
+    # Shape: json
     PROJECT="${2:?Usage: gitlab-api.sh update-mr-description <project_path_urlencoded> <mr_iid> <description_file>}"
     MR_IID="${3:?}"
     DESC_FILE="${4:?}"
@@ -499,6 +548,7 @@ print(json.dumps({
     ;;
   mr-for-branch)
     # Args: project_path (URL-encoded, or "-" to derive it from the origin remote), branch ("-" for the current branch)
+    # Shape: ndjson
     PROJECT="${2:?Usage: gitlab-api.sh mr-for-branch <project_path_urlencoded|-> <branch|->}"
     BRANCH="${3:--}"
     GL_TOKEN="$TOKEN" GL_API="$GITLAB_URL" GL_PROJECT="$PROJECT" GL_BRANCH="$BRANCH" python3 -c "$(cat <<'PYEOF'
@@ -562,6 +612,7 @@ PYEOF
     # Args: project_path (URL-encoded), mr_iid, file_path, line ("-" for a file-level note), body_file ("-" for stdin)
     # Opens a NEW discussion anchored to the diff. Falls back to an unanchored
     # note (prefixed with the location) when the line is not in the MR diff.
+    # Shape: json
     PROJECT="${2:?Usage: gitlab-api.sh create-diff-comment <project_path_urlencoded> <mr_iid> <file_path> <line|-> <body_file|->}"
     MR_IID="${3:?}"
     FILE_PATH="${4:?}"
@@ -684,6 +735,7 @@ PYEOF
     ;;
   project-info)
     # Args: project_path (URL-encoded, e.g. gridmatic%2Ffoundation%2Fftl-platform)
+    # Shape: json
     PROJECT="${2:?Usage: gitlab-api.sh project-info <project_path_urlencoded>}"
     curl -sf -H "PRIVATE-TOKEN: $TOKEN" "$GITLAB_URL/projects/$PROJECT" | python3 -c "
 import sys, json
@@ -698,6 +750,7 @@ print(json.dumps({
     ;;
   project-runners)
     # Args: project_path (URL-encoded), optional scope (specific|shared|group|project_type|...)
+    # Shape: ndjson
     PROJECT="${2:?Usage: gitlab-api.sh project-runners <project_path_urlencoded> [scope]}"
     SCOPE="${3:-}"
     curl -sf -H "PRIVATE-TOKEN: $TOKEN" \
@@ -717,6 +770,7 @@ for r in json.load(sys.stdin):
     ;;
   runner-info)
     # Args: runner_id (from project-runners)
+    # Shape: json
     RUNNER_ID="${2:?Usage: gitlab-api.sh runner-info <runner_id>}"
     curl -sf -H "PRIVATE-TOKEN: $TOKEN" "$GITLAB_URL/runners/$RUNNER_ID" | python3 -c "
 import sys, json
@@ -738,6 +792,7 @@ print(json.dumps({
   ci-variable-keys)
     # Args: scope ("projects"|"groups"), id (URL-encoded path or numeric id).
     # Prints KEY NAMES and flags only — never values, so secrets stay out of logs.
+    # Shape: ndjson
     SCOPE="${2:?Usage: gitlab-api.sh ci-variable-keys <projects|groups> <id_urlencoded>}"
     OWNER="${3:?}"
     curl -sf -H "PRIVATE-TOKEN: $TOKEN" "$GITLAB_URL/$SCOPE/$OWNER/variables?per_page=100" | python3 -c "
@@ -753,6 +808,7 @@ for v in json.load(sys.stdin):
     ;;
   protected-refs)
     # Args: project_path (URL-encoded). Lists protected branches and protected tags.
+    # Shape: mixed
     PROJECT="${2:?Usage: gitlab-api.sh protected-refs <project_path_urlencoded>}"
     for KIND in protected_branches protected_tags; do
       echo "# $KIND"
@@ -770,6 +826,7 @@ for r in json.load(sys.stdin):
     ;;
   group-members)
     # Args: group_path (URL-encoded), optional "direct" to exclude inherited
+    # Shape: ndjson
     GROUP="${2:?Usage: gitlab-api.sh group-members <group_path_urlencoded> [direct]}"
     GPATH="members/all"
     [ "${3:-}" = "direct" ] && GPATH="members"
@@ -790,6 +847,7 @@ for m in json.load(sys.stdin):
     # Default sets auto-merge (merge_when_pipeline_succeeds), which is what adds
     # the MR to the merge train where merge_train_enforcement is on — a direct
     # merge is rejected there. Pass "now" to attempt an immediate merge instead.
+    # Shape: json
     PROJECT="${2:?Usage: gitlab-api.sh merge-mr <project_path_urlencoded> <mr_iid> [now]}"
     MR_IID="${3:?}"
     MERGE_ARGS=(--data-urlencode "merge_when_pipeline_succeeds=true")
@@ -815,6 +873,7 @@ else:
   cancel-auto-merge)
     # Args: project_path (URL-encoded), mr_iid
     # Disarms merge_when_pipeline_succeeds without touching the MR otherwise.
+    # Shape: json
     PROJECT="${2:?Usage: gitlab-api.sh cancel-auto-merge <project_path_urlencoded> <mr_iid>}"
     MR_IID="${3:?}"
     curl -s -X POST -H "PRIVATE-TOKEN: $TOKEN" \
@@ -833,6 +892,7 @@ else:
     ;;
   rebase-mr)
     # Args: project_path (URL-encoded), mr_iid — rebase is async, poll merge-status.
+    # Shape: json
     PROJECT="${2:?Usage: gitlab-api.sh rebase-mr <project_path_urlencoded> <mr_iid>}"
     MR_IID="${3:?}"
     curl -s -X PUT -H "PRIVATE-TOKEN: $TOKEN" \
@@ -847,6 +907,7 @@ else:
     ;;
   mr-approvals)
     # Args: project_path (URL-encoded), mr_iid
+    # Shape: json
     PROJECT="${2:?Usage: gitlab-api.sh mr-approvals <project_path_urlencoded> <mr_iid>}"
     MR_IID="${3:?}"
     curl -sf -H "PRIVATE-TOKEN: $TOKEN" "$GITLAB_URL/projects/$PROJECT/merge_requests/$MR_IID/approvals" | python3 -c "
@@ -864,6 +925,7 @@ print(json.dumps({
   merge-status)
     # Args: project_path (URL-encoded), mr_iid
     # Shows what actually gates the merge: pipeline, approvals, auto-merge state.
+    # Shape: json
     PROJECT="${2:?Usage: gitlab-api.sh merge-status <project_path_urlencoded> <mr_iid>}"
     MR_IID="${3:?}"
     curl -sf -H "PRIVATE-TOKEN: $TOKEN" "$GITLAB_URL/projects/$PROJECT/merge_requests/$MR_IID" | python3 -c "
@@ -883,6 +945,7 @@ print(json.dumps({
     ;;
   project-members)
     # Args: project_path (URL-encoded), optional "direct" to exclude inherited members
+    # Shape: ndjson
     PROJECT="${2:?Usage: gitlab-api.sh project-members <project_path_urlencoded> [direct]}"
     MPATH="members/all"
     [ "${3:-}" = "direct" ] && MPATH="members"

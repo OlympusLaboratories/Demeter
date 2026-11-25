@@ -6,12 +6,14 @@ Usage: github_api.py <command> [args...]
 Run `github_api.py help` for every command and the arguments it takes.
 """
 
+import ast
 import inspect
 import json
 import os
 import re
 import subprocess
 import sys
+import textwrap
 import time
 import urllib.error
 import urllib.request
@@ -899,10 +901,44 @@ def _arguments_of(fn):
     return match.group(1).strip() if match else ''
 
 
+def _calls_to_stdout(node, name):
+    for inner in ast.walk(node):
+        if not isinstance(inner, ast.Call):
+            continue
+        if not isinstance(inner.func, ast.Name) or inner.func.id != name:
+            continue
+        if any(kw.arg == 'file' for kw in inner.keywords):
+            continue
+        return True
+    return False
+
+
+def _shape_of(fn):
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
+    except (OSError, TypeError, SyntaxError):
+        return ''
+    if _calls_to_stdout(tree, 'print'):
+        return 'text'
+    for loop in ast.walk(tree):
+        if isinstance(loop, (ast.For, ast.While)) and _calls_to_stdout(loop, 'emit'):
+            return 'ndjson'
+    return 'json'
+
+
 def cmd_help(token, args):
-    for name, fn in COMMANDS.items():
-        arguments = _arguments_of(fn)
-        print(f'{name:<24} {arguments}' if arguments else name)
+    rows = [(name, _arguments_of(fn), _shape_of(fn)) for name, fn in COMMANDS.items()]
+    width = min(max(len(arguments) for _, arguments, _ in rows), 48)
+    for name, arguments, shape in rows:
+        print(f'{name:<24} {arguments:<{width}}  {shape}'.rstrip())
+    print()
+    print('output shape, derived from each subcommand\'s own source:')
+    print('  json    exactly one JSON object')
+    print('  ndjson  one JSON object per line, zero or more — an empty answer is no bytes')
+    print('  text    plain lines, not JSON')
+    print('A handled failure prints a single JSON object with an "error" key. An')
+    print('unhandled HTTP error exits non-zero with nothing on stdout, so judge a')
+    print('call by its exit status rather than by parsing an empty stream.')
 
 
 COMMANDS = {

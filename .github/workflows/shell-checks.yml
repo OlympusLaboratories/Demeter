@@ -64,3 +64,6 @@ jobs:
 
       - name: Verdict-clearing subcommands
         run: tests/check-verdict-commands.sh
+
+      - name: Forge adapter help output shape
+        run: tests/check-api-help-shape.py
