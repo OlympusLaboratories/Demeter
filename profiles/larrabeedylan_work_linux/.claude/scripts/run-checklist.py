@@ -654,22 +654,21 @@ def session_armed():
 def observed_local(repo, branch, base, body, armed):
     ticks = {}
 
-    def settled(ident, finished):
-        ticks[ident] = ("done", "", None) if finished else ("pending", "", "done")
+    def discharged(ident, finished):
+        if finished:
+            ticks[ident] = ("done", "", None)
 
-    if armed is not None:
-        settled("arm", armed)
+    discharged("arm", armed)
 
     commits = branch_commits(repo, branch, base)
-    if commits is not None:
-        settled("commit", commits > 0)
-        settled("implement", commits > 0)
+    discharged("commit", bool(commits))
+    discharged("implement", bool(commits))
 
     if body is not None:
         prose = "\n".join(line for line in body.splitlines()
                           if not line.strip().startswith("**Run checklist:**")).strip()
-        settled("describe", bool(prose))
-        settled("ledger", LEDGER_MARK in body)
+        discharged("describe", bool(prose))
+        discharged("ledger", LEDGER_MARK in body)
 
     return ticks
 
@@ -939,8 +938,11 @@ what it guarantees, and what each one is written against:
   reconcile never touches plan, review, verify or close - no signal for those
   is solid, and deriving one badly is worse than leaving it manual
 
-  a not-done signal demotes only a done item, never a true in-flight: git can
-  see a commit, it cannot see work in progress
+  every local signal only ever promotes: it ticks an item done when it can see
+  the obligation discharged, and says nothing when it cannot. absence is not
+  evidence - a merged branch has no commits ahead of its base, and armed_at is
+  cleared by /ping off long after the ping was sent, so a two-way signal would
+  un-tick finished work and wedge the gate on obligations nobody can re-do
 
   a skipped item is never revived, so a deliberate skip survives every pass
 

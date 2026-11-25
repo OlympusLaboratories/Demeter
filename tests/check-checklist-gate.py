@@ -444,10 +444,18 @@ def check_local_signals(suite, profile, work):
     suite.ok("%s: armed_at ticks arm done" % tag, states(items)["arm"][0] == "done",
              states(items)["arm"])
 
+    with open(os.path.join(sessions, SESSION + ".json"), "w") as handle:
+        json.dump({}, handle)
+    sync()
+    suite.ok("%s: /ping off never un-ticks a ping that was sent" % tag,
+             states(items)["arm"][0] == "done", states(items)["arm"])
+    with open(os.path.join(sessions, SESSION + ".json"), "w") as handle:
+        json.dump({"armed_at": 1.0}, handle)
+
     run_checklist(profile, work, ["tick", items, "implement=in-flight:writing it"], env)
     sync()
     now = states(items)
-    suite.ok("%s: a not-done signal never demotes a true in-flight" % tag,
+    suite.ok("%s: a missing commit never demotes a true in-flight" % tag,
              now["implement"][0] == "in-flight", now["implement"])
     suite.ok("%s: and leaves its blocker alone" % tag,
              now["implement"][1] == "writing it", now["implement"])
@@ -460,11 +468,19 @@ def check_local_signals(suite, profile, work):
     suite.ok("%s: and ticks implement done over the in-flight" % tag,
              now["implement"][0] == "done", now["implement"])
 
+    git(repo, "checkout", "--quiet", "main")
+    git(repo, "merge", "--no-ff", "--quiet", "-m", "merge feature", "feature")
+    sync()
+    now = states(items)
+    suite.ok("%s: a merge commit never un-ticks commit" % tag,
+             now["commit"][0] == "done", now["commit"])
+    suite.ok("%s: nor implement" % tag, now["implement"][0] == "done", now["implement"])
+
     git(repo, "branch", "-f", "feature", "main")
     sync()
     now = states(items)
-    suite.ok("%s: dropping the commit demotes commit back to pending" % tag,
-             now["commit"][0] == "pending", now["commit"])
+    suite.ok("%s: a branch contained in the base never un-ticks commit" % tag,
+             now["commit"][0] == "done", now["commit"])
 
     body = os.path.join(work, "body.md")
     with open(body, "w") as handle:
@@ -487,6 +503,14 @@ def check_local_signals(suite, profile, work):
     sync(body_file=body)
     suite.ok("%s: the decision fold ticks the ledger done" % tag,
              states(items)["ledger"][0] == "done", states(items)["ledger"])
+
+    with open(body, "w") as handle:
+        handle.write("**Run checklist:** https://example.invalid/x\n")
+    sync(body_file=body)
+    now = states(items)
+    suite.ok("%s: a body that loses its prose never un-ticks describe" % tag,
+             now["describe"][0] == "done", now["describe"])
+    suite.ok("%s: nor the ledger" % tag, now["ledger"][0] == "done", now["ledger"])
 
     run_checklist(profile, work, ["tick", items, "ledger=skipped:nothing worth recording"], env)
     sync(body_file=body)

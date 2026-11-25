@@ -31,8 +31,16 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --checklist) CHECKLIST="${2:-}"; shift 2 ;;
-    --checklist=*) CHECKLIST="${1#*=}"; shift ;;
+    --checklist)
+      [[ $# -ge 2 && -n "${2:-}" ]] || { echo "POLL ERROR --checklist needs a path" >&2; exit 2; }
+      CHECKLIST="$2"
+      shift 2
+      ;;
+    --checklist=*)
+      CHECKLIST="${1#*=}"
+      [[ -n "$CHECKLIST" ]] || { echo "POLL ERROR --checklist needs a path" >&2; exit 2; }
+      shift
+      ;;
     *) break ;;
   esac
 done
@@ -170,6 +178,7 @@ poll() {
     return 0
   fi
   if [[ $checks -eq 0 ]]; then
+    sync_checklist "$state" "$merged" "$decision" "${unresolved:-0}" "$pending" "${#failed[@]}" "$checks" "${body64:-}"
     say_once "CHECKS none reported yet"
     return 2
   fi
