@@ -11,6 +11,7 @@ on:
       - 'tests/**'
       - 'profiles/*/.claude/hooks/**'
       - 'profiles/*/.claude/scripts/**'
+      - 'tools/forge-watch/**'
       - '.github/workflows/shell-checks.yml'
 
 concurrency:
@@ -42,7 +43,8 @@ jobs:
             vscode/*.sh \
             shell/*.sh \
             tests/*.sh \
-            profiles/*/.claude/scripts/publish-artifact.sh
+            profiles/*/.claude/scripts/publish-artifact.sh \
+            tools/forge-watch/watch.sh
 
       - name: Link roots are declared
         run: tests/check-link-roots.sh
