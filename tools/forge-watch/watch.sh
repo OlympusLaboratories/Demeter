@@ -41,17 +41,18 @@ fi
 QUERY='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){state merged reviewDecision reviewThreads(first:100){nodes{isResolved}} commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){nodes{__typename ... on CheckRun{name status conclusion} ... on StatusContext{context state}}}}}}}}}}'
 
 JQ='.data.repository.pullRequest as $pr
-| (["PR", $pr.state, ($pr.merged|tostring), ($pr.reviewDecision // "NONE"),
+| (["PR", ($pr.state // ""), ($pr.merged | tostring), ($pr.reviewDecision // "NONE"),
     ([$pr.reviewThreads.nodes[] | select(.isResolved == false)] | length | tostring),
-    ($pr.commits.nodes[0].commit.oid[0:7] // "unknown")] | @tsv),
+    ($pr.commits.nodes[0].commit.oid[0:7] // "unknown")] | join("\u001f")),
   (($pr.commits.nodes[0].commit.statusCheckRollup.contexts.nodes // [])[]
    | if .__typename == "CheckRun"
      then ["CHECK", .name, .status, (.conclusion // "")]
      else ["CHECK", .context,
-           (if .state == "PENDING" then "IN_PROGRESS" else "COMPLETED" end),
+           (if .state == "PENDING" or .state == "EXPECTED"
+            then "IN_PROGRESS" else "COMPLETED" end),
            (.state // "")]
      end
-   | @tsv)'
+   | join("\u001f"))'
 
 declare -A SAID=()
 polls=0
@@ -67,16 +68,13 @@ say_once() {
   say "$1"
 }
 
-terminal_conclusion() {
-  case "$1" in
-    SUCCESS|FAILURE|CANCELLED|TIMED_OUT|ACTION_REQUIRED|NEUTRAL|SKIPPED|STALE|ERROR) return 0 ;;
-    *) return 1 ;;
-  esac
+still_running() {
+  [[ "$1" != COMPLETED ]]
 }
 
-bad_conclusion() {
+benign_conclusion() {
   case "$1" in
-    FAILURE|CANCELLED|TIMED_OUT|ACTION_REQUIRED|STALE|ERROR) return 0 ;;
+    SUCCESS|NEUTRAL|SKIPPED) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -102,7 +100,7 @@ poll() {
 
   local pending=0 failed=() checks=0
   local state merged decision unresolved head
-  IFS=$'\t' read -r _ state merged decision unresolved head <<<"$(head -1 <<<"$raw")"
+  IFS=$'\037' read -r _ state merged decision unresolved head <<<"$(head -1 <<<"$raw")"
 
   if [[ -z "$state" || -z "$merged" ]]; then
     say "POLL ERROR the response carried no pull-request state, so $OWNER/$REPO#$PR may not exist"
@@ -113,14 +111,14 @@ poll() {
   [[ "$decision" != "NONE" ]] && say_once "REVIEW decision=$decision"
   [[ "${unresolved:-0}" != "0" ]] && say_once "THREADS unresolved=$unresolved"
 
-  while IFS=$'\t' read -r kind a _ c; do
+  while IFS=$'\037' read -r kind a b c; do
     [[ "$kind" == "CHECK" ]] || continue
     checks=$((checks + 1))
-    if terminal_conclusion "$c"; then
-      say_once "CHECK $a $c"
-      bad_conclusion "$c" && failed+=("$a")
-    else
+    if still_running "$b"; then
       pending=$((pending + 1))
+    else
+      say_once "CHECK $a ${c:-NO_CONCLUSION}"
+      benign_conclusion "$c" || failed+=("$a (${c:-NO_CONCLUSION})")
     fi
   done <<<"$raw"
 

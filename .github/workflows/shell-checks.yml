@@ -69,3 +69,6 @@ jobs:
 
       - name: Forge adapter help output shape
         run: tests/check-api-help-shape.py
+
+      - name: forge-watch terminal states
+        run: tests/check-forge-watch.sh

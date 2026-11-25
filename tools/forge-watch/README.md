@@ -62,6 +62,24 @@ One `gh api graphql` call per poll, with `--jq`, and nothing else.
   environment and exits without it. On the Pi the token lives in `gh`'s own credential
   store instead, so `gh` works there and the script does not.
 
+## Terminal states are decided by the benign set, never the failing one
+
+A check is **still running** only while its `status` is not `COMPLETED`, and a conclusion
+counts as **green** only when it is `SUCCESS`, `NEUTRAL` or `SKIPPED`. Everything else is
+terminal and failed, including a value this script has never heard of.
+
+That is the opposite of the obvious design, and the reason is that the obvious design is
+the bug this tool exists to prevent. The first version listed the conclusions it knew, and
+GitHub's `CheckConclusionState` already carried one it did not — `STARTUP_FAILURE` — so a
+check failing that way would have been counted as pending on every poll and the watch
+would have run forever. Enumerating an open set leaves that hole open; enumerating the
+closed set cannot. Both directions now fail safe: a watch that stops early and says why is
+recoverable, and one that silently reads an unknown value as green is worse than one that
+never started.
+
+`tests/check-forge-watch.sh` pins this, including a deliberately invented
+`SOME_FUTURE_STATE`.
+
 ## Two failure modes it is built around
 
 **A failed poll emits, and a repeated one is terminal.** `|| true` around a poll is right
