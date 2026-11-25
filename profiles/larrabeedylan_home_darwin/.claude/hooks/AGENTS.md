@@ -99,6 +99,28 @@ Four details carry it. **A `--force`-less clear is refused rather than warned ab
 
 What is deliberately **not** built is the ticket's fourth suggestion, making the hold un-clearable while a workflow or `Monitor` is in flight. Nothing reachable from here can observe a live swarm: the hook sees the `Stop` payload and the session state, neither of which carries the harness task list, and `run-checklist.py` has no access to it either. Any signal invented for it would be a guess that reads as a fact, which is the failure mode this directory's own "cannot observe is not success" rule exists against. The case is covered anyway — a run with a live swarm has outstanding items, so a bare clear refuses.
 
+### One marker per session, so a run that forks to a second branch tracked nothing
+
+a `/fix-freeform` run on `dylan/diagram-mobile-zoom-and-wrapping` published its checklist, then — mid-run, at the user's direction — cut a **second** worktree and branch and carried it all the way to a commit. That second branch had **no checklist at all**: no `arm`, no `plan`, no `commit`, no `review`, no `merge`. A whole change request's worth of obligations, invisible. Meanwhile the first page still named the first branch and described a run that no longer existed. The user noticed. Nothing else did.
+
+Neither gate above could have caught it, and the reason is worth stating precisely: **they key on a marker that a second branch never writes.** `checklist_pending` is keyed by session, and `mark_outstanding()` is called only by a `publish`, a `tick` or an `arm`. A second branch that publishes nothing writes nothing, so `checklist_gate()` has no marker to hold on — and the marker it *does* have describes the first page, which is still internally consistent. The stale-page gate reports a healthy run while an entire second run goes untracked. Nothing is wrong with either page; what is missing is a page.
+
+So the marker now carries the run's **branch**, and `checklist_fork()` compares it against `branch_label(cwd)` at every `Stop`. A difference holds the turn end once and names both branches, with the two cases spelled out: re-seed this page when the work moved, or publish a second one when the second branch is second work. Either write clears the hold on its own, because `mark_outstanding()` rebuilds the marker from scratch and the new branch goes in with it — there is no new escape hatch, and nothing to remember to switch off.
+
+Five things are load-bearing, and four of them are about *not* holding.
+
+**The comparison is on the branch, never the directory.** A run legitimately enters and leaves worktrees — `autopilot` Step 10d does it deliberately — and `branch_label` already resolves a worktree's branch correctly through `--git-common-dir`. Comparing paths would hold on every one of those, which is a gate that fires on correct behaviour and gets switched off within a day.
+
+**An empty answer on either side is not evidence of a fork.** A marker written before the branch was recorded, a session outside a repository, a dotfiles repo rooted at `$HOME`, and a detached HEAD all resolve to nothing, and all of them mean *the question cannot be asked here* rather than *the run has forked*. This is the same rule the `reconcile` signals follow for the same reason: absence only ever declines to act.
+
+**The fork spends its own key, not `held`.** `forked` records the branch it complained about, where `held` records the one stale-page offence. Sharing them would mean a run already held once for staleness could fork in silence, which is this exact defect wearing the fix as a disguise. Storing the branch rather than a flag also means a run that forks a *third* time earns its own hold, and a re-seed onto the new branch drops the key naturally.
+
+**The hold names `--update`, not a plain publish.** The re-seed it recommends is a fresh `template`, which carries no page identity — so a plain `publish` of it would mint a new link and freeze the one already sitting in the change request's description, which is the single thing the checklist contract forbids. A hold whose instructions break a different invariant is worse than no hold.
+
+And **`--checklist-status` reports the branch**, saying whether the session is on it, so a fork is answerable read-only. That is the lesson of the section above, applied without being re-learned: the diagnostic exists before the first run needs it, and it still mutates nothing.
+
+What is deliberately **not** built is a marker per branch. The ticket's own option C — one page with a section per branch — was rejected for breaking URL stability, and tracking two markers in one session would make "nothing in flight" ambiguous across two independent runs. The gate's job here is to make the fork *visible to a human*, who then owns both pages; it is not to own them itself.
+
 ### A page the run has to remember to update is a page that goes stale
 
 the gate above catches a checklist nobody wrote to. It cannot catch one that was written to and is wrong, because `standing()` reports `armed` for an item claiming to be in flight whether or not anything is in flight behind it. That is the hole the gate shipped with, and it was demonstrated twice within an hour of shipping: a page read `pipeline: in-flight` while all three checks had been green for minutes, and later `implement: in-flight` while the implementation was finished and the run had stopped. Both passed the gate.

@@ -69,6 +69,8 @@ The plan gate, the implementation, the commit message and the description are ea
 
 **A branch-mode escalation at Step 2b changes the run's shape**, so re-seed the page when one fires, as an update against the recorded hash — otherwise a forced feature branch leaves the checklist describing a `--branch default` run.
 
+**A second branch in the same session is a second run, and owes a checklist of its own.** That is not the re-seed above: the first page is still the record of the first branch's obligations, and its link is already in that change request's description. Seed a new items file for the new branch, publish it, and write to both pages from then on. The `Stop` hook holds the first turn end where the session's branch differs from the one the checklist records, and says which of the two cases it is — so a fork is caught rather than left untracked, which is what happened the one time a run did this.
+
 ### Autopilot is on unless it is switched off
 
 `fix_autopilot` is `true` on every profile, so **the ordinary run of this skill ends at a pull request, not at a commit message.** Once the implementation and the deliverables are done, Step 6 hands the run to `autopilot`, which owns the push, the pull request, the pipeline watch, the review rounds, the infrastructure apply, and — when `--merge` is true — the merge itself.

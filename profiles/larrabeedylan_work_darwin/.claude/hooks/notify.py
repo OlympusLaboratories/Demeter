@@ -1084,6 +1084,19 @@ CHECKLIST_HOLD = (
     " `--checklist-status` reports the marker without touching it."
 )
 
+CHECKLIST_FORK = (
+    "Do not end this turn yet. The run checklist at %s describes branch `%s`, and this"
+    " session is on `%s`. One of two things is true and the page is wrong either way."
+    " If this is the same work on a renamed or escalated branch, re-seed it with"
+    " `run-checklist.py template --branch %s …` and publish that with `--update"
+    " <the recorded hash>`, never a plain publish — a plain one mints a new link and"
+    " freezes the one already in the change request's description. If the new branch"
+    " is a second piece of work, it is a second run and owes a checklist of its own:"
+    " seed a new items file, publish it, and write to both pages from here on. Either"
+    " write clears this hold. Only the branch is compared, never the directory, so"
+    " entering or leaving a worktree on one branch never reaches this message."
+)
+
 
 def checklist_reason(gate):
     stops = gate.get("stops")
@@ -1093,6 +1106,18 @@ def checklist_reason(gate):
         return ("it has not been written since %d turns ended"
                 % CHECKLIST_STALE_STOPS)
     return ""
+
+
+def checklist_fork(gate, payload):
+    recorded = str(gate.get("branch") or "").strip()
+    if not recorded:
+        return ""
+    here = branch_label(payload.get("cwd") or os.getcwd())
+    if not here or here == recorded:
+        return ""
+    if gate.get("forked") == here:
+        return ""
+    return here
 
 
 def checklist_gate(payload):
@@ -1114,6 +1139,17 @@ def checklist_gate(payload):
         return None
     if payload.get("hook_event_name") != "Stop" or payload.get("stop_hook_active"):
         return None
+
+    where = gate.get("url") or "the published page"
+    forked = checklist_fork(gate, payload)
+    if forked:
+        if not merge_state(path, {"checklist_pending": dict(gate, forked=forked)}):
+            return None
+        recorded = str(gate.get("branch") or "").strip()
+        log("Stop held: the run forked to %s from the checklist's %s"
+            % (forked, recorded))
+        return CHECKLIST_FORK % (where, recorded, forked, forked)
+
     if gate.get("held"):
         return None
 
@@ -1126,7 +1162,8 @@ def checklist_gate(payload):
     if not merge_state(path, {"checklist_pending": dict(gate, held=time.time())}):
         return None
     open_items = ", ".join(str(entry) for entry in gate["open"][:6])
-    return CHECKLIST_HOLD % (gate.get("url") or "the published page", open_items, reason)
+    log("Stop held: the run checklist is behind the run")
+    return CHECKLIST_HOLD % (where, open_items, reason)
 
 
 def gate_expired(gate):
@@ -1373,6 +1410,20 @@ def cmd_checklist_status(args):
           % (gate.get("verdict") or "unknown", stops,
              "" if stops == 1 else "s",
              "already held once" if gate.get("held") else "not yet held"))
+
+    recorded = str(gate.get("branch") or "").strip()
+    here = branch_label(os.getcwd())
+    if not recorded:
+        print("no branch recorded, so a fork cannot be detected")
+    elif not here:
+        print("branch %s, and no branch resolves here" % recorded)
+    elif here == recorded:
+        print("branch %s, which is the branch this session is on" % recorded)
+    else:
+        print("branch %s, but this session is on %s — the run has forked"
+              % (recorded, here))
+        if gate.get("forked") == here:
+            print("the fork was already held once")
 
     open_ids = checklist_ids(gate, "open")
     print(describe_open(open_ids) if open_ids else "nothing is open")
@@ -1644,7 +1695,6 @@ def main():
     hold = checklist_gate(payload)
     if hold:
         print(json.dumps({"decision": "block", "reason": hold}))
-        log("Stop held: the run checklist is behind the run")
         return 0
     log("%s %s" % (payload.get("hook_event_name"), handle(payload)))
     return 0
