@@ -21,6 +21,7 @@ run-checklist.py, checked over every profile copy:
 
   rules                                       exits 0 and names every state
   template                                    a valid document, arming first
+  template                                    carries the link item ping discharges
   template --review / --diagram / --merge     gate the review, diagram and merge items
   template --merge absent                     a "ready, not merged" item instead
   template --branch-mode default              no change request, no merge, no ledger item
@@ -158,7 +159,7 @@ def check_profile(suite, profile, work):
     full_ids = ids(full.stdout)
     suite.ok("%s template arms first" % tag, full_ids[0] == "arm",
              "first item is %s" % full_ids[0])
-    for wanted in ("review", "diagram", "merge", "apply", "ledger", "close"):
+    for wanted in ("review", "diagram", "merge", "apply", "ledger", "link", "close"):
         suite.ok("%s template carries the %s item" % (tag, wanted),
                  wanted in full_ids, "got %s" % full_ids)
 
@@ -180,7 +181,7 @@ def check_profile(suite, profile, work):
     default = run(script, "template", "--branch-mode", "default", "--merge")
     suite.exits("%s template --branch-mode default" % tag, 0, default)
     default_ids = ids(default.stdout)
-    for absent in ("open", "pipeline", "threads", "merge", "ready", "ledger"):
+    for absent in ("open", "link", "pipeline", "threads", "merge", "ready", "ledger"):
         suite.ok("%s a default-branch template omits the %s item" % (tag, absent),
                  absent not in default_ids, "got %s" % default_ids)
     suite.ok("%s a default-branch template pushes" % tag, "push" in default_ids,
