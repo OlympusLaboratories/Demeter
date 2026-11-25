@@ -453,7 +453,7 @@ Use the ticket title, description, comments, the parent/sibling/related context 
    **`rg -r` is `--replace`, not "recursive".** `rg -rn 'foo-bar' .` silently rewrites every match to `n` in the output, which reads as a real but wrong result (it made a bucket named `ftl-local-dev` appear to be named `n`, sending me down a false trail). ripgrep is recursive by default; never pass `-r`.
 2. **Design an implementation approach** — identify which files need changes, what the changes are, and in what order.
 3. **Ask clarifying questions** — if the ticket description is ambiguous or missing details, use `AskUserQuestion` to clarify with the user before finalizing the plan.
-4. **Publish the plan, put its link in the chat, then gate on it.** Write the full plan into your reply for the terminal. Publish it as a page, send the link as **its own short message immediately before** the question, then call `AskUserQuestion`. Options are `Approve` and `Change something`. Treat anything other than a clear approval as a revision and plan again. Do **not** call `ExitPlanMode`; this skill never enters plan mode, so there is nothing to exit.
+4. **Plan into the reply, publish, send the link alone, then gate on it — in that order.** Write the full plan into your reply for the terminal **first**, ahead of the publish. Then publish it as a page, send the URL as **its own message carrying nothing but the URL**, and call `AskUserQuestion`. Options are `Approve` and `Change something`. Treat anything other than a clear approval as a revision and plan again. Do **not** call `ExitPlanMode`; this skill never enters plan mode, so there is nothing to exit.
 
 **Publish the plan first, so the gate can hand over a link to the whole thing.** Render the plan as a self-contained HTML page and publish it:
 
@@ -471,6 +471,8 @@ It prints the URL. `--purpose plan` is the whole of the configuration: the scrip
 
 **Send the link as a message of its own, immediately before the question.** `AskUserQuestion` renders no links, so a URL inside the question text arrives as characters nobody can tap — on the phone screen this whole gate exists to serve. The chat message before it is clickable and is the last thing on screen when the question lands, so that is where the link goes, on a line of its own.
 
+**That message carries the URL and nothing else**, and "nothing else" is the load-bearing half. No plan, no summary of the plan, no restatement of the change, no account of what happens once it is approved, no closing offer. Each of those is prose the reader has to scroll past to reach the only actionable thing on the screen, and they do not read it — the page is where the plan is, which is why it was published. A bare label in front of the URL is the most that earns its place. This is also why the plan prose goes into the reply **ahead of** the publish rather than beside the link: the terminal copy still earns its keep as the fallback for a publish that fails, and in front of the publish it cannot wedge itself between the link and the question.
+
 **Publishing the plan and asking the question are one turn. Never end the turn between them.** This is the failure the whole gate is built to avoid, and it has happened: the plan was published, the link was posted, the turn ended, and the run sat waiting on an approval nobody had been asked for. Publishing feels like the deliverable, so the turn reads as finished — but a published plan is nothing except the thing a question is about. No tool call belongs between the publish and the `AskUserQuestion`, and nothing is worth one more exploratory check first.
 
 The cost of ending that turn is paid entirely by the user, which is why it is so easy to miss. Turn-end notifications are suppressed on a session nothing has armed yet, and the arming ping does not go out until the hand-off to `autopilot` — which is several steps away, past the gate. The gate question is the one event that notifies on an unarmed session. Skip it and the run is silent with the plan ready: no notification, no question, and nothing on the user's phone to tap.
@@ -479,7 +481,17 @@ The cost of ending that turn is paid entirely by the user, which is why it is so
 
 **The question itself carries no plan.** One line naming the change, then `Approve` and `Change something`, and nothing else. The compressed per-file summary this replaced was written when the question text was the only copy that reached the phone; with a link one tap above it, that summary is a second and worse copy of the plan, and it fills the screen the question is read on. A question reading only "approve the plan?" would still strand the user, which is why the link is a hard requirement of this step rather than a nicety — and why a failed publish is reported in one line rather than waited on. `ExitPlanMode` was never an option here: the hook sends the fixed string `Waiting for plan approval.` for it and never the plan.
 
-Once the user approves the plan, tick the plan item on the run checklist and implement the changes. While the question is open that item is `in-flight`, waiting on the user — which is the one state that makes a stalled gate visible on the page rather than only in the transcript.
+While the question is open the plan item on the run checklist is `in-flight`, waiting on the user — which is the one state that makes a stalled gate visible on the page rather than only in the transcript. Once the user approves, tick it and **record the plan page's URL on the checklist in the same command**:
+
+```bash
+~/.claude/scripts/run-checklist.py tick <items>.json \
+  plan=done 'implement=in-flight:the approved plan' \
+  --run plan_page=<the published plan url> --publish
+```
+
+`plan_page` is how the URL reaches the pull request's description at `autopilot` Step 4b. The items file is the one piece of run state that survives both the hand-off and a pause, so recording it here is what stops the link depending on a context window that gets compacted — the same argument that put the run's obligations on a page in the first place. A run whose publish failed has no URL and records none: the field stays empty and Step 4b writes no line.
+
+Then implement the changes.
 
 ## Step 5: Implement the Changes
 
@@ -515,7 +527,7 @@ Immediately after implementation is complete — do not wait for the user to com
 3. **Re-print the commit message after the PR description, verbatim.** The `changes-description` output is long, so by the time it finishes the commit message from step 1 has scrolled far up the terminal. In the turn that presents the description — the one the swarm's completion notification wakes you into on a `--quick-description false` run, or the turn you wrote it in on a quick one — close by repeating it — unchanged from what `commit-msg` produced, no re-generation, no re-wording, no summary of it — in its own fenced block under a `Commit message` heading, so both blocks the user copies sit next to each other at the bottom. If the user corrected the commit message between step 1 and here, repeat the corrected version.
 4. **Then hand the run to `autopilot`, unless `--autopilot false` was passed.** In that same turn, once the description and the re-printed commit message are out, invoke the `autopilot` skill using the `Skill` tool and pass it the resolved flag state from Step 0 — `--branch`, `--diagram`, `--review`, `--merge`, `--max-rounds` — as values, not as the user's original argument string, so an amendment made mid-run is not silently rolled back to a machine default.
 
-   **The checklist crosses the hand-off as state, not as a fresh publish.** Tick the commit-message and description items, then give `autopilot` the page's url and its update hash along with the flags. It adopts that page and keeps writing to it; a second publish there would hand the user's existing link to a checklist that stops at step five.
+   **The checklist crosses the hand-off as state, not as a fresh publish.** Tick the commit-message and description items, then give `autopilot` the page's url and its update hash along with the flags. It adopts that page and keeps writing to it; a second publish there would hand the user's existing link to a checklist that stops at step five. **The items file goes with it**, not just the url and the hash: `plan_page` lives in there, and Step 4b writes the change request's description from it.
 
    **Autopilot owns everything from here, and that includes the diagram and the swarm.** Do not run `changes-diagram` or `review-code` yourself on this path. Autopilot runs the swarm in the turn that arms its pipeline watcher, *after* the push, because `fix-feedback` posts each confirmed finding to the pull request as an anchored comment and there is no pull request to post to before the push. It attaches the diagram at its final step, once the code has stopped moving — a diagram of a branch that changed three more times is worse than none. Running either of them here would mean doing the work twice and losing the posting target the first time.
 
