@@ -645,9 +645,9 @@ A long `autopilot` run can outlive a 5-hour quota window. Running out mid-flight
 
 **The name is `/unpause`, not `/resume`,** because `/resume` is already a built-in Claude Code command (the past-session picker) and a skill by that name would be unreachable.
 
-**Quota comes from the `claude-usage` cache, never the API.** `/api/oauth/usage` is rate-limited per account and the CLI already polls it from every open session, so the skills read the shared cache the extension maintains — never taking `usage.lock` (which would make every editor window skip its own refresh) and never writing into that directory (a file-watch there fires in every window). All four meters are checked, not just the headline: a session at 40% with a model-scoped meter at 100% fails every agent you launch.
+**Quota comes from the `claude-usage` cache, never the API.** `/api/oauth/usage` is rate-limited per account and the CLI already polls it from every open session, so the skills read the shared cache the extension maintains — never taking `usage.lock` (which would make every editor window skip its own refresh) and never writing into that directory (a file-watch there fires in every window). `session` is the meter an autopilot pause reads, and the only one — `weekly`, `scoped:<Model>` and `spend` are read at an `/unpause` wake and are diagnostic in between, since a session at 40% with a model-scoped meter at 100% fails every agent you launch while the headline reads healthy. Worth knowing when something breaks; never a reason for a run to stop.
 
-**The session window auto-resumes; the weekly window does not.** A refreshed 5-hour window is a reasonable thing to start back up on. A spent weekly quota is yours to decide about, so that pauses, pings, and waits.
+**The session window auto-resumes; the weekly window does not.** A refreshed 5-hour window is a reasonable thing to start back up on. A spent weekly quota is yours to decide about, so a `/pause` you reach for there pings and waits instead of arming a return. Autopilot never reaches for it on your behalf — `session` is the only meter it pauses on, so it will not park a run, and will not ask you about one, because a wider window is running low.
 
 Three things make it actually work:
 
