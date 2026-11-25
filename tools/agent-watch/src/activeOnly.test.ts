@@ -52,13 +52,37 @@ describe('pruneInactive', () => {
     expect(pruned.hidden).toBe(2);
   });
 
-  it('keeps a failure and the path to it, since a hidden error reads as success', () => {
+  it('hides a failure with nothing working under it, since a dead agent is not active', () => {
     const tree = node('session:a', 'done', [node('agent:1', 'error'), node('agent:2', 'done')]);
     propagateActivity(tree);
 
     const pruned = pruneInactive([tree]);
 
-    expect(ids(pruned.roots)).toEqual(['session:a', 'agent:1']);
+    expect(pruned.roots).toEqual([]);
+    expect(pruned.hidden).toBe(3);
+  });
+
+  it('hides a killed workflow whose every agent errored with it', () => {
+    const tree = node('session:a', 'idle', [
+      node('workflow:w', 'error', [node('agent:1', 'error'), node('agent:2', 'error')]),
+    ]);
+    propagateActivity(tree);
+
+    const pruned = pruneInactive([tree]);
+
+    expect(pruned.roots).toEqual([]);
+    expect(pruned.hidden).toBe(4);
+  });
+
+  it('keeps a live agent under a failed parent, path and all', () => {
+    const tree = node('session:a', 'idle', [
+      node('workflow:w', 'error', [node('agent:1', 'error'), node('agent:2', 'running')]),
+    ]);
+    propagateActivity(tree);
+
+    const pruned = pruneInactive([tree]);
+
+    expect(ids(pruned.roots)).toEqual(['session:a', 'workflow:w', 'agent:2']);
     expect(pruned.hidden).toBe(1);
   });
 
