@@ -826,6 +826,33 @@ def cmd_tick(args):
     return publish(document, args.items, args.update, args.out, args.stamp)
 
 
+def cmd_arm(args):
+    document = read_document(args.items)
+    verdict, sentence, _ = standing(document["items"])
+    where = document["run"].get("url") or "an unpublished checklist"
+
+    if not session_id():
+        print("no session id in the environment: the marker was not written",
+              file=sys.stderr)
+        print("%s: %s" % (verdict, sentence))
+        return 0
+    if not mark_outstanding(document):
+        print("could not write the session state: the marker was not written",
+              file=sys.stderr)
+        return 1
+
+    if verdict == "complete":
+        print("dropped the marker for %s: %s" % (where, sentence))
+        return 0
+
+    open_ids = [entry["id"] for entry in document["items"]
+                if entry["state"] in OPEN_STATES]
+    print("armed the gate on %s" % where)
+    print("%s: %s" % (verdict, sentence))
+    print("%d open: %s" % (len(open_ids), ", ".join(open_ids)))
+    return 0
+
+
 def cmd_rules(args):
     print(RULES.strip())
     print()
@@ -844,6 +871,7 @@ run-checklist.py — the run's obligations as a page it can read back.
   render      write the page from a document
   publish     render, then publish or update through publish-artifact.sh
   items       print the document embedded in a rendered page, local or published
+  arm         rewrite the session's gate marker from the items file, no publish
   rules       this
 
   tick items.json commit=done describe=in-flight:'the panel' --publish
@@ -952,6 +980,13 @@ what it guarantees, and what each one is written against:
   reconcile refuses a url that disagrees with the recorded change request, and
   derives nothing from the forge when no change request is recorded - the facts
   must belong to this checklist
+
+  arm is the way back from notify.py --checklist-clear --force. it rewrites the
+  marker from the items file alone - no render, no publish, no network - through
+  the same mark_outstanding() every write uses, so there is one definition of
+  the marker rather than a second one that can disagree with it. nothing else
+  re-armed the gate except the next publish or tick, which is precisely the
+  action a stalled run is failing to take
 """
 
 
@@ -1027,6 +1062,11 @@ def main():
     sync.add_argument("--out", default="")
     sync.add_argument("--stamp", default=None)
     sync.set_defaults(func=cmd_reconcile)
+
+    again = sub.add_parser(
+        "arm", help="rewrite the session's gate marker from the items file")
+    again.add_argument("items")
+    again.set_defaults(func=cmd_arm)
 
     rules = sub.add_parser("rules", help="print what this script guarantees")
     rules.set_defaults(func=cmd_rules)
