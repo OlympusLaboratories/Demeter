@@ -114,9 +114,11 @@ and stops at `0.15` rather than shrinking a 96-agent run to nothing.
 
 **active only** keeps the path, not just the leaf: a session is kept because something
 under it is working, which is the same rule that paints that path green, so a live agent
-nine levels down still arrives with its ancestors attached. A `✗` **failure is never
-hidden** by it — an errored agent and the path to it stay on the canvas, since a filter
-that swallowed failures would make a broken run look like an empty one. The status line
+nine levels down still arrives with its ancestors attached. A `✗` **failed or killed node
+is hidden** like any other — it is not doing anything, and `error` is the one terminal
+state that never ages out, so keeping them filled the filtered canvas with dead work.
+Switch the filter off to read them. A `✗` with something still running beneath it stays,
+path and all, so the filter never buries live work under a crashed parent. The status line
 reports how many nodes it hid, and if nothing in the branch you are on is working the
 canvas says that rather than going blank. The count badges follow the filter too: a node
 whose 90 children have finished reads `▸2` while two of them are still going.

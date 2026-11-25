@@ -10,7 +10,7 @@ export function isActiveStatus(status: NodeStatus | undefined): boolean {
 }
 
 function worthKeeping(node: AgentNode): boolean {
-  return isActiveStatus(node.activity ?? node.status) || node.status === 'error';
+  return isActiveStatus(node.activity ?? node.status);
 }
 
 function countNodes(node: AgentNode): number {

@@ -512,17 +512,28 @@ wide, and how deep the nesting went.
   still gates on `workspaceFolders`, so a window with no folder open is unaffected rather
   than empty, and the two store tests that exercise the *on* transition now switch it off
   explicitly instead of leaning on the default.
-- **`active only` filters the tree, not the node list, and keeps failures.** With a dozen
+- **`active only` filters the tree, not the node list, and a failure is not active work.** With a dozen
   sessions retained per repo, nearly everything on the canvas is finished work, and the one
   thing you opened the panel for is a single green box among them. The filter drops any node
   with nothing `live` or `running` in it — which is a *subtree* question, not a node one, so
   it is answered by the `activity` field `propagateActivity` already computes: the same rule
   that paints the path to a working agent green keeps that path on the canvas, and a node is
-  kept whenever it is active itself or any descendant survived. Two deliberate exceptions.
-  An `error` node is kept whatever its activity, because `propagateActivity` pointedly does
-  not propagate failure upward, so a filter that took activity alone would delete a crashed
-  agent out of a finished tree and leave the run looking merely over — the one reading the
-  filter must never produce. And the prune **copies** rather than mutating: `view()` runs on
+  kept whenever it is active itself or any descendant survived. **An `error` node is no
+  exception, and it used to be.** It was kept whatever its activity, on the grounds that
+  `propagateActivity` pointedly does not propagate failure upward, so a filter taking
+  activity alone would delete a crashed agent out of a finished tree and leave the run
+  looking merely over. That holds for one dead node and inverts at a dozen: `error` is the
+  only terminal state that never ages out, while whole sessions leave the view after
+  `recentDays`, so the filtered canvas accumulated killed and failed nodes until live work
+  was the minority of it again — which is the condition the filter exists to clear, arrived
+  at by the filter itself. The failures are one toggle away, which is already what both the
+  status-line tooltip and the empty state tell the reader; neither ever claimed an exception
+  for them, so the strings needed no edit and the code was the outlier. Hiding one cannot
+  bury live work either: the prune keeps any node whose children survived, and
+  `propagateActivity` sets `activity` on an `error` node from its strongest descendant while
+  declining only to overwrite its `status`, so a `✗` with a running agent under it arrives
+  with its whole path. The one deliberate exception left is that the prune **copies** rather
+  than mutating: `view()` runs on
   every 2s poll off the same loaded trees, so a mutating filter would progressively eat the
   model and never grow back when it was switched off.
 
