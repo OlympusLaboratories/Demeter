@@ -1297,9 +1297,15 @@ def checklist_ids(gate, field):
     return [str(entry) for entry in found]
 
 
-def describe_open(ids, verb):
-    return "%d item%s %s open: %s" % (
-        len(ids), "" if len(ids) == 1 else "s", verb, ", ".join(ids))
+def describe_open(ids, tense="present", still=False):
+    singular = len(ids) == 1
+    if tense == "past":
+        verb = "was" if singular else "were"
+    else:
+        verb = "is" if singular else "are"
+    return "%d item%s %s%s open: %s" % (
+        len(ids), "" if singular else "s", verb,
+        " still" if still else "", ", ".join(ids))
 
 
 def cmd_checklist_clear(args):
@@ -1322,7 +1328,7 @@ def cmd_checklist_clear(args):
     if open_ids and not forced and not expired:
         print("refusing to clear the run checklist marker for %s" % where,
               file=sys.stderr)
-        print(describe_open(open_ids, "are still"), file=sys.stderr)
+        print(describe_open(open_ids, still=True), file=sys.stderr)
         print("pass --force if this run is genuinely finished or abandoned,"
               " or tick what is done", file=sys.stderr)
         log("refused to clear the run checklist marker for %s: %d open"
@@ -1334,9 +1340,9 @@ def cmd_checklist_clear(args):
     print("cleared the run checklist marker for %s" % where)
     if expired:
         print("it had expired %s ago, so the gate would not have held on it"
-              % human_duration(expired))
+              % human_duration(expired - GATE_TTL))
     elif open_ids:
-        print(describe_open(open_ids, "were still"))
+        print(describe_open(open_ids, "past", still=True))
     else:
         print("nothing was outstanding")
     return 0
@@ -1357,7 +1363,7 @@ def cmd_checklist_status(args):
     expired = gate_expired(gate)
     if expired:
         print("not armed: the marker for %s expired %s ago"
-              % (where, human_duration(expired)))
+              % (where, human_duration(expired - GATE_TTL)))
     else:
         print("armed: %s" % where)
 
@@ -1369,7 +1375,7 @@ def cmd_checklist_status(args):
              "already held once" if gate.get("held") else "not yet held"))
 
     open_ids = checklist_ids(gate, "open")
-    print(describe_open(open_ids, "are") if open_ids else "nothing is open")
+    print(describe_open(open_ids) if open_ids else "nothing is open")
     in_flight = checklist_ids(gate, "in_flight")
     if in_flight:
         print("in flight: %s" % ", ".join(in_flight))
