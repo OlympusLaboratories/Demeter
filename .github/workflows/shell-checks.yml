@@ -86,3 +86,6 @@ jobs:
 
       - name: Diagram page view maths
         run: tests/check-diagram-template.py
+
+      - name: Diagram py_root derivation
+        run: tests/check-py-root.py

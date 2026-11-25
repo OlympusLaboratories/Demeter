@@ -56,7 +56,7 @@ It prints `N nodes, M edges, K groups, mode=<callgraph|files>`.
 
 Two overrides exist, both derived from the repo when omitted — pass them only when the derived values are visibly wrong:
 
-- `--py-root` — the directory Python module paths are relative to. Detected by looking for `src/` with packages in it, then `python/`, then the packages `pyproject.toml` declares, then top-level directories holding an `__init__.py`, falling back to the repo root.
+- `--py-root` — the directory Python module paths are relative to. Derived from the **changed files**: each changed `.py` file is walked up to its nearest `pyproject.toml`, the package root holding most of them wins (ties broken by path, so the answer is deterministic), and the root is then resolved inside it by looking for `src/` with packages in it, then `python/`, then the packages that `pyproject.toml` declares, falling back to the package root itself. When the diff contains no Python — or none of it sits under a manifest — that same layout scan runs against the repo root instead. Deriving it from the repo layout alone found the first package root on disk and stopped, which gave every package in a monorepo the wrong root and so `mode=files`.
 - `--package` — a dotted prefix that limits which modules become nodes. Derived from the changed modules' common prefix; when they share none, no filter is applied at all. Pass `--package ''` to switch the filter off explicitly, or a wider prefix when the change reaches past it.
 
 The JSON records what was used in `py_root` and `package`, so Step 5 can check them.
