@@ -68,7 +68,7 @@ Three rules govern every amendment:
 | `--branch new` | before the push | This is the fix skill's own escalation path and it is always available: cut the branch, move the commits (its "escalating after work has already started" step), and carry on. |
 | `--branch default` | after a feature branch has commits | Refuse, in one line. Escalation is one-way within a run, and the commits live on a branch created for a reason. |
 | `--autopilot false` | any time | Stop the automation where it stands and report. Leave the branch, the pull request and the threads exactly as they are — **never delete a pushed branch or close a pull request** to honour this. It means *stop driving*, not *undo*. |
-| `--autopilot true` | on a run that had it off | Engage from Step 2: commit if needed, push, and carry on as normal. **Arm the notifications first** (Step 0d) — the tail was off, so nothing has armed them. |
+| `--autopilot true` | on a run that had it off | Engage from Step 2: commit if needed, push, and carry on as normal. **Check the notifications first** (Step 0d) and arm them if `armed_at` is absent — a fix run armed at its own Step 0 whatever `--autopilot` said, so on that route this is a confirmation; on work that was never a fix-skill run, nothing has armed them. |
 
 ### Asking mid-run
 
@@ -328,7 +328,7 @@ With no such gate open, there is no question. Apply Step 0c's table and move: pa
 
 ## Step 0d: Arm the Notifications — before the first unattended step
 
-**Engaging autopilot is the gesture that says the user is walking away, so it is what arms their phone.**
+**Engaging autopilot is the gesture that says the user is walking away, so nothing may reach Step 1 with their phone unarmed.** Usually it is already armed when this step runs — a fix skill arms at its own Step 0 — and this step's job is then to confirm that rather than to send again. Where it is not armed, this step is the last place it can be.
 
 Notifications are **opt-in per session** and the opt-in is a sent ping: `notify.py` writes `armed_at` only on a successful send, and until then it logs `skip: session not armed` and stays silent however long the turn runs or however stuck the run gets. So an autopilot run that only pings at Step 11 arms the session *after the run is over*, which is the one moment the arming is worth nothing. Everything in between — a permission prompt, an `AskUserQuestion`, a failure — happens into a session that cannot speak.
 
@@ -342,7 +342,9 @@ That single send does both jobs — it tells them the hand-off happened, and it 
 
 **Skip it when the session is already armed.** Read `~/.claude/notify-state/sessions/<session-id>.json`; an `armed_at` already present means the user has pinged this session before and the automatic notifications are live. Say so in one line and move on rather than sending a second announcement.
 
-**Never arm when `--autopilot false`.** There is no unattended tail to notify about, and the user is at the keyboard by definition.
+**On a hand-off that skip is the normal case, not an exception.** Both fix skills arm at their own Step 0, on every run, because their gates — the plan approval above all — sit in front of this skill and are the ones a user actually walks away from. So the session reaching here from a hand-off is already armed, and this step's job there is to confirm that in one line and move on. Sending anyway would hand the user two announcements for one run, minutes apart, saying the same thing. What this step still exists for is the two routes with no fix-skill Step 0 behind them: a **direct** invocation and a **mid-run amendment**.
+
+**Never arm when `--autopilot false`**, which is a rule about *this* skill and not about the run. There is no unattended tail here to notify about. It is not a reason for a fix skill to withhold its own Step 0 ping on an `--autopilot false` run: that run still has a plan gate, so it still arms, and both fix skills say so explicitly.
 
 **When a pull request for this branch is already open, this ping carries its URL.** That is the resumed and amended routes below: `/autopilot --merge` landing on work that is already pushed, or a run picking up the pull request an interrupted one left behind. Read it before composing the body — the forge helper's branch lookup answers it — and put the URL in the body, which discharges Step 4b's link ping as well. One that does not exist yet gets no placeholder and no promise; Step 4b sends the link the moment there is one.
 
@@ -350,12 +352,12 @@ That single send does both jobs — it tells them the hand-off happened, and it 
 
 **Then tick item 1 on the run checklist**, with the outcome rather than the intention: `done` on a send, `skipped` with the reason on a failure or an already-armed session. Arming is item 1 precisely because it is the obligation this skill has demonstrably skipped while carrying the instruction twice, and an item ticked `done` on a send that never landed is worse than no item at all.
 
-### Every route in arms, including the amendment
+### Every route arrives armed, and two of them arm here
 
-All three ways into this skill mean the same thing, so all three arm:
+All three ways into this skill mean the same thing, so the session is armed on all three before Step 1 — what differs is which skill sent the ping:
 
-- **By hand-off** from a fix skill — arm here, before Step 1.
-- **Directly** (`/autopilot <ticket>`) — same.
+- **By hand-off** from a fix skill — **already armed**, at that skill's Step 0. Confirm it and move on; do not announce the run twice.
+- **Directly** (`/autopilot <ticket>`) — arm here, before Step 1. Nothing has run ahead of this step, so there is no earlier ping.
 - **As a mid-run amendment** (`/autopilot --merge` on work that was never a fix-skill run) — **arm at the moment the amendment lands.** This is the route that most needs it and the easiest to miss: the run is already in flight, Step 0d is behind it, and the user has just said *take it from here* in the clearest possible terms. Check `armed_at` and send the opening ping if it is absent, before acting on the flags.
 
 ## Step 1: Implement — direct invocations only
@@ -811,7 +813,7 @@ Stopping and asking are both reserved for this list. Everything else — surpris
 9. **No comments in the code.** Autonomy does not relax it.
 10. **An empty config value means the capability is absent, not that you should guess at it.** Never substitute a name you saw in an example for one the machine did not supply.
 11. **The merge is not the finish line, and "merged" is not "deployed".** Step 0b works out how the change reaches production and Step 10b confirms it got there, tied to the commit that landed rather than to a job going green. Unverified is a reportable outcome — **never** upgrade cannot-observe or timed-out into success.
-12. **Arm the notifications before the first unattended step.** A ping is the only thing that writes `armed_at`, and an unarmed session is silent through every permission prompt, question and failure in the run. Step 0d sends it once, on every route in — hand-off, direct, or a mid-run `/autopilot` amendment. Pinging only at the end arms the session at the exact moment it stops mattering.
+12. **Nothing reaches the first unattended step with the phone unarmed.** A ping is the only thing that writes `armed_at`, and an unarmed session is silent through every permission prompt, question and failure in the run. On a hand-off a fix skill has already sent it at its own Step 0; on a direct invocation and on a mid-run amendment, Step 0d sends it. Exactly one of them does, and a run where neither did is a run nobody can reach. Pinging only at the end arms the session at the exact moment it stops mattering.
 13. **Pause on purpose; never run out mid-flight.** Read the quota from the `claude-usage` cache at step boundaries, never from the API, and pause at 85% of the session window. Journal the step, the next action and the ledger as you go, so the pause costs one write. **`session` is the only meter that gates the run** — `weekly`, `scoped:*` and `spend` are the user's to manage, never a reason to stop and never a question to ask.
 14. **Never hand the user a command you can run yourself.** If Step 0b found the deploy and this session can reach the target, Step 10c runs it. A run that finishes with a block of commands for the user to paste has failed at the one thing it was for, and it fails in the worst way — looking finished. The same goes for anything else in reach: pulling a repo, restarting a service, installing a file on a box you already have access to, and reclaiming the worktree and branch the merge just finished with (**Step 10d**).
 15. **A broken deploy is warned about, never fixed.** No rollback, no revert, no re-run of a deploy job, no touching the runtime. Gather the evidence, ping immediately, and stop. An unattended agent reverting production at 2am is worse than a bad deploy somebody has been told about.
