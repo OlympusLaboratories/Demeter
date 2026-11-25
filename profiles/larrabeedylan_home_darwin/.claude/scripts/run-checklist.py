@@ -494,6 +494,8 @@ def apply_ticks(document, ticks):
             raise ValueError("%s: state %r is not one of %s"
                              % (ident, state, ", ".join(STATES)))
         entry = by_id[ident]
+        if state != entry["state"]:
+            entry["note"] = ""
         entry["state"] = state
         if state == "in-flight":
             entry["waiting_on"] = text or entry["waiting_on"]
@@ -562,6 +564,12 @@ what it guarantees, and what each one is written against:
 
   tick clears waiting_on when an item leaves in-flight, so a finished item
   cannot keep advertising a blocker that is gone
+
+  tick clears the note on any state CHANGE unless new text replaces it, so a
+  skip reason cannot outlive the skip - an item un-skipped by an amendment
+  (--diagram true arriving late) would otherwise read as pending while still
+  carrying "not needed". A re-tick of the SAME state keeps its note, so
+  annotating an item twice is not destructive
 
   publish records the page's url and hash back into the items file, so the
   caller cannot lose the identity that keeps the link stable

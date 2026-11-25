@@ -29,6 +29,10 @@ run-checklist.py, checked over every profile copy:
   tick <id>=in-flight:<text>                  sets what it is waiting on
   tick <id>=done after in-flight              clears waiting_on
   tick <id>=skipped:<reason>                   sets the note
+  tick <id>=pending after skipped             clears the stale skip reason
+  tick <id>=in-flight after skipped           clears the stale skip reason
+  tick <id>=<same state> with no text         keeps the note it already had
+  tick <id>=<new state>:<text>                replaces the note
   tick with an id the page lacks              exits non-zero, names the ids it has
   tick with a state that is not one of four   exits non-zero
   tick --run <field>=<value>                  sets a run field
@@ -294,6 +298,31 @@ def check_tick(suite, tag, script, work, seed_text):
     suite.ok("%s tick sets the note" % tag,
              load()["ledger"]["note"] == "no unreviewed calls",
              load()["ledger"]["note"])
+
+    suite.exits("%s tick un-skips an item" % tag, 0,
+                run(script, "tick", path, "verify=pending"))
+    suite.ok("%s leaving skipped clears the stale reason" % tag,
+             load()["verify"]["note"] == "", load()["verify"]["note"])
+
+    run(script, "tick", path, "verify=skipped:nothing deploys")
+    suite.exits("%s tick skipped to in-flight" % tag, 0,
+                run(script, "tick", path, "verify=in-flight:the deploy watcher"))
+    items = load()
+    suite.ok("%s skipped to in-flight clears the stale reason" % tag,
+             items["verify"]["note"] == "", items["verify"]["note"])
+    suite.ok("%s skipped to in-flight sets the blocker" % tag,
+             items["verify"]["waiting_on"] == "the deploy watcher",
+             items["verify"]["waiting_on"])
+
+    run(script, "tick", path, "open=done:PR 31")
+    suite.exits("%s re-tick the same state" % tag, 0,
+                run(script, "tick", path, "open=done"))
+    suite.ok("%s a re-tick of the same state keeps the note" % tag,
+             load()["open"]["note"] == "PR 31", load()["open"]["note"])
+    suite.exits("%s tick replaces a note" % tag, 0,
+                run(script, "tick", path, "open=pending:reopened"))
+    suite.ok("%s new text replaces the note on a state change" % tag,
+             load()["open"]["note"] == "reopened", load()["open"]["note"])
 
     typo = run(script, "tick", path, "comit=done")
     suite.ok("%s tick rejects an unknown id" % tag, typo.returncode != 0, typo.stdout)
