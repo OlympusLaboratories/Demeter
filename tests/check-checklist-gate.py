@@ -384,6 +384,199 @@ def check_reconcile(suite, profile, work):
              get(os.path.join(home, ".claude", "notify-state", "sessions")))
 
 
+def git(repo, *args):
+    return subprocess.run(("git", "-C", repo) + args, capture_output=True, text=True)
+
+
+def build_repo(root):
+    os.makedirs(root, exist_ok=True)
+    git(root, "init", "--quiet", "--initial-branch=main")
+    git(root, "config", "user.email", "t@example.invalid")
+    git(root, "config", "user.name", "Test")
+    with open(os.path.join(root, "seed.txt"), "w") as handle:
+        handle.write("seed\n")
+    git(root, "add", "-A")
+    git(root, "commit", "--quiet", "-m", "seed")
+    git(root, "branch", "feature")
+    return root
+
+
+def commit_on(root, branch, text):
+    git(root, "checkout", "--quiet", branch)
+    with open(os.path.join(root, text + ".txt"), "w") as handle:
+        handle.write(text + "\n")
+    git(root, "add", "-A")
+    git(root, "commit", "--quiet", "-m", text)
+    git(root, "checkout", "--quiet", "main")
+
+
+def check_local_signals(suite, profile, work):
+    tag = profile
+    home = os.path.join(work, "home")
+    sessions = os.path.join(home, ".claude", "notify-state", "sessions")
+    os.makedirs(sessions, exist_ok=True)
+    env = {"HOME": home, "CLAUDE_CODE_SESSION_ID": SESSION}
+    repo = build_repo(os.path.join(work, "repo"))
+    items = os.path.join(work, "local.json")
+
+    made = run_checklist(profile, work, [
+        "template", "--title", "T", "--repo", "R", "--branch", "feature",
+        "--branch-mode", "new", "--review", "--merge",
+    ], env)
+    with open(items, "w") as handle:
+        handle.write(made.stdout)
+
+    def sync(**extra):
+        flags = ["--repo", repo, "--default-branch", "main"]
+        for key, value in extra.items():
+            flags += ["--" + key.replace("_", "-"), str(value)]
+        return run_checklist(profile, work, ["reconcile", items] + flags, env)
+
+    sync()
+    now = states(items)
+    suite.ok("%s: no armed_at leaves arm pending" % tag, now["arm"][0] == "pending", now["arm"])
+    suite.ok("%s: a branch with no commits leaves commit pending" % tag,
+             now["commit"][0] == "pending", now["commit"])
+
+    with open(os.path.join(sessions, SESSION + ".json"), "w") as handle:
+        json.dump({"armed_at": 1.0}, handle)
+    sync()
+    suite.ok("%s: armed_at ticks arm done" % tag, states(items)["arm"][0] == "done",
+             states(items)["arm"])
+
+    with open(os.path.join(sessions, SESSION + ".json"), "w") as handle:
+        json.dump({}, handle)
+    sync()
+    suite.ok("%s: /ping off never un-ticks a ping that was sent" % tag,
+             states(items)["arm"][0] == "done", states(items)["arm"])
+    with open(os.path.join(sessions, SESSION + ".json"), "w") as handle:
+        json.dump({"armed_at": 1.0}, handle)
+
+    run_checklist(profile, work, ["tick", items, "implement=in-flight:writing it"], env)
+    sync()
+    now = states(items)
+    suite.ok("%s: a missing commit never demotes a true in-flight" % tag,
+             now["implement"][0] == "in-flight", now["implement"])
+    suite.ok("%s: and leaves its blocker alone" % tag,
+             now["implement"][1] == "writing it", now["implement"])
+
+    commit_on(repo, "feature", "work")
+    sync()
+    now = states(items)
+    suite.ok("%s: a commit on the branch ticks commit done" % tag,
+             now["commit"][0] == "done", now["commit"])
+    suite.ok("%s: and ticks implement done over the in-flight" % tag,
+             now["implement"][0] == "done", now["implement"])
+
+    git(repo, "checkout", "--quiet", "main")
+    git(repo, "merge", "--no-ff", "--quiet", "-m", "merge feature", "feature")
+    sync()
+    now = states(items)
+    suite.ok("%s: a merge commit never un-ticks commit" % tag,
+             now["commit"][0] == "done", now["commit"])
+    suite.ok("%s: nor implement" % tag, now["implement"][0] == "done", now["implement"])
+
+    git(repo, "branch", "-f", "feature", "main")
+    sync()
+    now = states(items)
+    suite.ok("%s: a branch contained in the base never un-ticks commit" % tag,
+             now["commit"][0] == "done", now["commit"])
+
+    body = os.path.join(work, "body.md")
+    with open(body, "w") as handle:
+        handle.write("**Run checklist:** https://example.invalid/x\n")
+    sync(body_file=body)
+    now = states(items)
+    suite.ok("%s: a body carrying only the checklist link is not a description" % tag,
+             now["describe"][0] == "pending", now["describe"])
+    suite.ok("%s: and no fold leaves the ledger pending" % tag,
+             now["ledger"][0] == "pending", now["ledger"])
+
+    with open(body, "w") as handle:
+        handle.write("**Run checklist:** https://example.invalid/x\n\n## Summary\n\nIt does a thing.\n")
+    sync(body_file=body)
+    suite.ok("%s: real prose ticks describe done" % tag,
+             states(items)["describe"][0] == "done", states(items)["describe"])
+
+    with open(body, "w") as handle:
+        handle.write("## Summary\n\nIt does a thing.\n\n<details>\n<summary>Relevant Decisions (2)</summary>\n</details>\n")
+    sync(body_file=body)
+    suite.ok("%s: the decision fold ticks the ledger done" % tag,
+             states(items)["ledger"][0] == "done", states(items)["ledger"])
+
+    with open(body, "w") as handle:
+        handle.write("**Run checklist:** https://example.invalid/x\n")
+    sync(body_file=body)
+    now = states(items)
+    suite.ok("%s: a body that loses its prose never un-ticks describe" % tag,
+             now["describe"][0] == "done", now["describe"])
+    suite.ok("%s: nor the ledger" % tag, now["ledger"][0] == "done", now["ledger"])
+
+    run_checklist(profile, work, ["tick", items, "ledger=skipped:nothing worth recording"], env)
+    sync(body_file=body)
+    suite.ok("%s: a skipped item survives a contradicting signal" % tag,
+             states(items)["ledger"][0] == "skipped", states(items)["ledger"])
+
+    run_checklist(profile, work, ["tick", items,
+                                  "merge=in-flight:a stale blocker from a pause"], env)
+    sync(url="https://forge/pr/9", state="OPEN", merged="false", review="NONE",
+         unresolved=0, checks_pending=0, checks_total=3, checks_failed=0)
+    suite.ok("%s: an owned item's stale blocker is refreshed while it is open" % tag,
+             "stale blocker" not in states(items)["merge"][1], states(items)["merge"])
+
+    suite.ok("%s: verify is never derived" % tag,
+             states(items)["verify"][0] == "pending", states(items)["verify"])
+    suite.ok("%s: the swarm item is never derived" % tag,
+             states(items)["review"][0] == "pending", states(items)["review"])
+
+    fresh = os.path.join(work, "noreq.json")
+    with open(fresh, "w") as handle:
+        handle.write(made.stdout)
+    blind = run_checklist(profile, work, [
+        "reconcile", fresh, "--repo", repo, "--default-branch", "main",
+        "--state", "MERGED", "--merged", "true", "--review", "APPROVED",
+        "--checks-pending", "0", "--checks-total", "3", "--checks-failed", "0",
+    ], env)
+    now = states(fresh)
+    suite.ok("%s: a checklist with no change request exits 0" % tag,
+             blind.returncode == 0, blind.stderr)
+    suite.ok("%s: and never derives merge from a request it does not have" % tag,
+             now["merge"][0] == "pending", now["merge"])
+    suite.ok("%s: nor the pipeline" % tag, now["pipeline"][0] == "pending", now["pipeline"])
+
+    owned = os.path.join(work, "owned.json")
+    with open(owned, "w") as handle:
+        handle.write(made.stdout)
+    run_checklist(profile, work, ["tick", owned, "arm=done", "--run",
+                                  "change_request=https://forge/pr/1"], env)
+    wrong = run_checklist(profile, work, [
+        "reconcile", owned, "--url", "https://forge/pr/999", "--state", "MERGED",
+        "--merged", "true", "--review", "APPROVED",
+        "--checks-pending", "0", "--checks-total", "3", "--checks-failed", "0",
+    ], env)
+    suite.ok("%s: another change request's state is refused" % tag,
+             wrong.returncode != 0, wrong.stdout)
+    suite.ok("%s: and the refusal names both requests" % tag,
+             "pr/1" in wrong.stderr and "pr/999" in wrong.stderr, wrong.stderr)
+    suite.ok("%s: and nothing was written" % tag,
+             states(owned)["merge"][0] == "pending", states(owned)["merge"])
+
+    right = run_checklist(profile, work, [
+        "reconcile", owned, "--url", "https://forge/pr/1", "--state", "MERGED",
+        "--merged", "true", "--review", "APPROVED",
+        "--checks-pending", "0", "--checks-total", "3", "--checks-failed", "0",
+    ], env)
+    suite.ok("%s: the matching change request is accepted" % tag,
+             right.returncode == 0 and states(owned)["merge"][0] == "done",
+             states(owned)["merge"])
+
+    missing = os.path.join(work, "nowhere")
+    quiet = run_checklist(profile, work, ["reconcile", items, "--repo", missing,
+                                          "--default-branch", "main"], env)
+    suite.ok("%s: an unreadable repository does not fail the sync" % tag,
+             quiet.returncode == 0, quiet.stderr)
+
+
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "rules":
         print(RULES.strip())
@@ -400,6 +593,9 @@ def main():
             sync = os.path.join(directory, profile, "reconcile")
             os.makedirs(sync, exist_ok=True)
             check_reconcile(suite, profile, sync)
+            local = os.path.join(directory, profile, "local")
+            os.makedirs(local, exist_ok=True)
+            check_local_signals(suite, profile, local)
     finally:
         shutil.rmtree(directory, ignore_errors=True)
 

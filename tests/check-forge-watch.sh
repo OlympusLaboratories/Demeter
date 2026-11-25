@@ -48,6 +48,13 @@ printf '%s\n' "$STUB_OUT"
 STUB
 chmod +x "$STUB_DIR/gh"
 
+cat >"$STUB_DIR/failing-checklist" <<'STUB'
+#!/usr/bin/env bash
+echo "stubbed checklist failure" >&2
+exit 1
+STUB
+chmod +x "$STUB_DIR/failing-checklist"
+
 run() {
   STUB_OUT="$1" MAX_POLLS="${2:-1}" SLEEP=0 \
     PATH="$STUB_DIR:$PATH" "$WATCH" acme repo 7 2>&1
@@ -119,6 +126,26 @@ check "repeated failures give up" "$out" "consecutive failed polls"
 
 out="$(run $'PR\037\037\037NONE\0370\037' )"
 check "a response with no state is a failed poll" "$out" "POLL ERROR the response carried no pull-request state"
+
+out="$(MAX_POLLS=1 SLEEP=0 PATH="$STUB_DIR:$PATH" timeout 10 "$WATCH" --checklist 2>&1)"
+check "a value-less --checklist is refused" "$out" "POLL ERROR --checklist needs a path"
+refute "and does not fall through to the watch" "$out" "STATUS"
+
+out="$(MAX_POLLS=1 SLEEP=0 PATH="$STUB_DIR:$PATH" timeout 10 "$WATCH" --checklist= acme repo 7 2>&1)"
+check "an empty --checklist= is refused" "$out" "POLL ERROR --checklist needs a path"
+
+out="$(STUB_OUT="$PR_OPEN" MAX_POLLS=1 SLEEP=0 CHECKLIST="" RUN_CHECKLIST=/nonexistent \
+  PATH="$STUB_DIR:$PATH" timeout 10 "$WATCH" acme repo 7 2>&1)"
+refute "no --checklist means no sync is attempted" "$out" "CHECKLIST"
+
+out="$(STUB_OUT="$PR_OPEN" MAX_POLLS=2 SLEEP=0 \
+  RUN_CHECKLIST="$STUB_DIR/failing-checklist" \
+  PATH="$STUB_DIR:$PATH" timeout 10 "$WATCH" --checklist /dev/null acme repo 7 2>&1)"
+check "a failing sync is reported" "$out" "CHECKLIST ERROR"
+check "a failing sync does not kill the watch" "$out" "poll budget reached after 2 poll(s)"
+[[ "$(grep -c 'CHECKLIST ERROR' <<<"$out")" == "1" ]] \
+  && { printf '  ok   — a repeated sync error is said once\n'; PASS=$((PASS + 1)); } \
+  || { printf '  fail — a repeated sync error is said once\n'; FAIL=$((FAIL + 1)); }
 
 echo
 if [[ $FAIL -gt 0 ]]; then
