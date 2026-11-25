@@ -336,9 +336,11 @@ def render(document, stamp=None):
         rows.append(
             "<tr class=\"s-%s\">"
             "<td class=\"n\">%d</td>"
-            "<td><span class=\"badge\">%s</span></td>"
-            "<td class=\"ob\">%s%s</td>"
-            "<td>%s</td><td>%s</td><td>%s</td>"
+            "<td data-label=\"State\"><span class=\"badge\">%s</span></td>"
+            "<td class=\"ob\" data-label=\"Obligation\">%s%s</td>"
+            "<td data-label=\"Skill\">%s</td>"
+            "<td data-label=\"Applies to\">%s</td>"
+            "<td class=\"wait\" data-label=\"Waiting on\">%s</td>"
             "</tr>" % (
                 entry["state"],
                 index,
@@ -423,6 +425,22 @@ PAGE = """<!doctype html>
            letter-spacing: .05em; font-weight: 650; padding: 2px 7px; border-radius: 999px;
            border: 1px solid currentColor; white-space: nowrap; }
   tr.s-done .badge { color: var(--ok); }
+  @media (max-width: 760px) {
+    .wrap { overflow-x: visible; }
+    table, tbody, tr, td { display: block; width: 100%%; }
+    thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    tr { border: 1px solid var(--rule); border-radius: 10px; padding: 10px 12px 4px;
+         margin: 0 0 12px; position: relative; }
+    td { border: 0; padding: 3px 0 7px 0; overflow-wrap: anywhere; }
+    td::before { content: attr(data-label); display: block; font-size: 11px;
+                 text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+                 font-weight: 650; margin: 0 0 2px; }
+    td.n { position: absolute; top: 10px; right: 12px; width: auto; padding: 0;
+           font-size: 12px; }
+    td.n::before { content: none; }
+    td[data-label="State"]::before { content: none; }
+    td.wait { border-top: 1px solid var(--rule); padding-top: 7px; }
+  }
   tr.s-in-flight .badge { color: var(--flight); }
   tr.s-skipped .badge { color: var(--skip); }
   tr.s-pending .badge { color: var(--muted); }
@@ -579,6 +597,92 @@ def apply_ticks(document, ticks):
             if text:
                 entry["note"] = text
     return document
+
+
+OBSERVABLE = ("open", "pipeline", "threads", "merge")
+
+
+def observed(forge):
+    merged = str(forge.get("merged", "")).lower() == "true"
+    state = (forge.get("state") or "").upper()
+    decision = (forge.get("review") or "NONE").upper()
+    unresolved = int(forge.get("unresolved") or 0)
+    pending = int(forge.get("checks_pending") or 0)
+    failed = int(forge.get("checks_failed") or 0)
+    total = int(forge.get("checks_total") or 0)
+
+    ticks = {}
+    if forge.get("url"):
+        ticks["open"] = ("done", "")
+
+    if merged:
+        ticks["merge"] = ("done", "")
+        ticks["pipeline"] = ("done", "")
+    elif state == "CLOSED":
+        ticks["merge"] = ("skipped", "the change request was closed without merging")
+    elif total == 0:
+        ticks["pipeline"] = ("in-flight", "the forge has reported no checks yet")
+    elif pending:
+        ticks["pipeline"] = ("in-flight",
+                             "%d of %d check(s) still running" % (pending, total))
+    elif failed:
+        ticks["pipeline"] = ("in-flight", "%d check(s) failed" % failed)
+    else:
+        ticks["pipeline"] = ("done", "")
+
+    if not merged:
+        if decision == "CHANGES_REQUESTED":
+            ticks["threads"] = ("in-flight", "the reviewer requested changes")
+        elif unresolved:
+            ticks["threads"] = ("in-flight", "%d unresolved thread(s)" % unresolved)
+        elif decision == "APPROVED":
+            ticks["threads"] = ("done", "")
+    return ticks
+
+
+def reconcile(document, forge):
+    by_id = {entry["id"]: entry for entry in document["items"]}
+    changed = []
+    for ident, (state, text) in observed(forge).items():
+        entry = by_id.get(ident)
+        if entry is None or ident not in OBSERVABLE:
+            continue
+        if entry["state"] == "skipped":
+            continue
+        if entry["state"] == state and entry.get("waiting_on", "") == (
+                text if state == "in-flight" else ""):
+            continue
+        entry["state"] = state
+        entry["waiting_on"] = text if state == "in-flight" else ""
+        entry["note"] = "" if state == "in-flight" else text
+        changed.append("%s=%s" % (ident, state))
+    return changed
+
+
+def cmd_reconcile(args):
+    document = read_document(args.items)
+    forge = {
+        "url": args.url or document["run"].get("change_request", ""),
+        "state": args.state,
+        "merged": args.merged,
+        "review": args.review,
+        "unresolved": args.unresolved,
+        "checks_pending": args.checks_pending,
+        "checks_failed": args.checks_failed,
+        "checks_total": args.checks_total,
+    }
+    changed = reconcile(document, forge)
+    document = canonical(document, args.items)
+    write(args.items, dump(document) + "\n")
+    mark_outstanding(document)
+    verdict, sentence, _ = standing(document["items"])
+    if not changed:
+        print("unchanged: %s" % sentence)
+        return 0
+    print("%s: %s (%s)" % (verdict, sentence, ", ".join(changed)))
+    if not args.publish:
+        return 0
+    return publish(document, args.items, args.update, args.out, args.stamp)
 
 
 def apply_run_fields(document, assignments):
@@ -758,6 +862,24 @@ def main():
     mark.add_argument("--out", default="")
     mark.add_argument("--stamp", default=None)
     mark.set_defaults(func=cmd_tick)
+
+    sync = sub.add_parser(
+        "reconcile",
+        help="set the forge-observable items from what the forge reports")
+    sync.add_argument("items")
+    sync.add_argument("--url", default="")
+    sync.add_argument("--state", default="")
+    sync.add_argument("--merged", default="false")
+    sync.add_argument("--review", default="NONE")
+    sync.add_argument("--unresolved", default="0")
+    sync.add_argument("--checks-pending", dest="checks_pending", default="0")
+    sync.add_argument("--checks-failed", dest="checks_failed", default="0")
+    sync.add_argument("--checks-total", dest="checks_total", default="0")
+    sync.add_argument("--publish", action="store_true")
+    sync.add_argument("--update", default="")
+    sync.add_argument("--out", default="")
+    sync.add_argument("--stamp", default=None)
+    sync.set_defaults(func=cmd_reconcile)
 
     rules = sub.add_parser("rules", help="print what this script guarantees")
     rules.set_defaults(func=cmd_rules)

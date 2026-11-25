@@ -265,6 +265,125 @@ def check_writer(suite, profile, work):
     suite.ok("%s: no session id still exits 0" % tag, quiet.returncode == 0, quiet.stderr)
 
 
+def reconciled(profile, work, items, env, **forge):
+    flags = []
+    for key, value in forge.items():
+        flags += ["--" + key.replace("_", "-"), str(value)]
+    return run_checklist(profile, work, ["reconcile", items] + flags, env)
+
+
+def states(items):
+    with open(items) as handle:
+        document = json.load(handle)
+    return {entry["id"]: (entry["state"], entry.get("waiting_on", ""))
+            for entry in document["items"]}
+
+
+def check_reconcile(suite, profile, work):
+    tag = profile
+    home = os.path.join(work, "home")
+    os.makedirs(os.path.join(home, ".claude", "notify-state", "sessions"), exist_ok=True)
+    env = {"HOME": home, "CLAUDE_CODE_SESSION_ID": SESSION}
+    items = os.path.join(work, "reconcile.json")
+
+    made = run_checklist(profile, work, [
+        "template", "--title", "T", "--repo", "R", "--branch", "b",
+        "--branch-mode", "new", "--review", "--merge",
+    ], env)
+    with open(items, "w") as handle:
+        handle.write(made.stdout)
+
+    running = reconciled(profile, work, items, env, url="https://forge/pr/1",
+                         state="OPEN", merged="false", review="NONE", unresolved=0,
+                         checks_pending=2, checks_total=3, checks_failed=0)
+    suite.ok("%s: reconcile exits 0" % tag, running.returncode == 0, running.stderr)
+    now = states(items)
+    suite.ok("%s: a running pipeline is in flight" % tag,
+             now["pipeline"][0] == "in-flight", now["pipeline"])
+    suite.ok("%s: and says how many checks are left" % tag,
+             "2 of 3" in now["pipeline"][1], now["pipeline"])
+    suite.ok("%s: an open change request ticks the open item" % tag,
+             now["open"][0] == "done", now["open"])
+    suite.ok("%s: reconcile never touches the swarm item" % tag,
+             now["review"][0] == "pending", now["review"])
+    suite.ok("%s: reconcile never touches implement" % tag,
+             now["implement"][0] == "pending", now["implement"])
+
+    green = reconciled(profile, work, items, env, url="https://forge/pr/1",
+                       state="OPEN", merged="false", review="APPROVED", unresolved=0,
+                       checks_pending=0, checks_total=3, checks_failed=0)
+    now = states(items)
+    suite.ok("%s: a green pipeline is done" % tag, now["pipeline"][0] == "done", now["pipeline"])
+    suite.ok("%s: an approved review with no threads clears them" % tag,
+             now["threads"][0] == "done", now["threads"])
+    suite.ok("%s: the change is reported" % tag, "pipeline=done" in green.stdout, green.stdout)
+
+    blocked = reconciled(profile, work, items, env, url="https://forge/pr/1",
+                         state="OPEN", merged="false", review="CHANGES_REQUESTED",
+                         unresolved=1, checks_pending=0, checks_total=3, checks_failed=0)
+    now = states(items)
+    suite.ok("%s: changes requested reopens the threads item" % tag,
+             now["threads"][0] == "in-flight", now["threads"])
+    suite.ok("%s: and says why" % tag, "requested changes" in now["threads"][1], now["threads"])
+    suite.ok("%s: a reopened item is reported as a change" % tag,
+             "threads=in-flight" in blocked.stdout, blocked.stdout)
+
+    pushed = reconciled(profile, work, items, env, url="https://forge/pr/1",
+                        state="OPEN", merged="false", review="NONE", unresolved=0,
+                        checks_pending=1, checks_total=3, checks_failed=0)
+    suite.ok("%s: a push moves a done pipeline back to in flight" % tag,
+             states(items)["pipeline"][0] == "in-flight", pushed.stdout)
+
+    red = reconciled(profile, work, items, env, url="https://forge/pr/1",
+                     state="OPEN", merged="false", review="NONE", unresolved=0,
+                     checks_pending=0, checks_total=3, checks_failed=1)
+    now = states(items)
+    suite.ok("%s: a failed check is never done" % tag,
+             now["pipeline"][0] == "in-flight", now["pipeline"])
+    suite.ok("%s: and names the failure" % tag, "failed" in now["pipeline"][1], now["pipeline"])
+
+    again = reconciled(profile, work, items, env, url="https://forge/pr/1",
+                       state="OPEN", merged="false", review="NONE", unresolved=0,
+                       checks_pending=0, checks_total=3, checks_failed=1)
+    suite.ok("%s: an unchanged forge state reports unchanged" % tag,
+             again.stdout.startswith("unchanged:"), again.stdout)
+
+    merged = reconciled(profile, work, items, env, url="https://forge/pr/1",
+                        state="MERGED", merged="true", review="APPROVED", unresolved=0,
+                        checks_pending=0, checks_total=3, checks_failed=0)
+    now = states(items)
+    suite.ok("%s: a merged change ticks the merge item" % tag,
+             now["merge"][0] == "done", now["merge"])
+    suite.ok("%s: merging settles the pipeline too" % tag,
+             now["pipeline"][0] == "done", now["pipeline"])
+    suite.ok("%s: merge is reported" % tag, "merge=done" in merged.stdout, merged.stdout)
+
+    closed_items = os.path.join(work, "closed.json")
+    with open(closed_items, "w") as handle:
+        handle.write(made.stdout)
+    reconciled(profile, work, closed_items, env, url="https://forge/pr/1",
+               state="CLOSED", merged="false", review="NONE", unresolved=0,
+               checks_pending=0, checks_total=0, checks_failed=0)
+    suite.ok("%s: a closed change request skips the merge with a reason" % tag,
+             states(closed_items)["merge"][0] == "skipped", states(closed_items)["merge"])
+
+    skipped_items = os.path.join(work, "skipped.json")
+    with open(skipped_items, "w") as handle:
+        handle.write(made.stdout)
+    run_checklist(profile, work, ["tick", skipped_items,
+                                  "pipeline=skipped:no pipeline in this repo"], env)
+    reconciled(profile, work, skipped_items, env, url="https://forge/pr/1",
+               state="OPEN", merged="false", review="NONE", unresolved=0,
+               checks_pending=0, checks_total=3, checks_failed=0)
+    suite.ok("%s: reconcile never revives a deliberately skipped item" % tag,
+             states(skipped_items)["pipeline"][0] == "skipped",
+             states(skipped_items)["pipeline"])
+
+    suite.ok("%s: reconcile rearms the gate marker" % tag,
+             "checklist_pending" in get(os.path.join(home, ".claude", "notify-state", "sessions")),
+             get(os.path.join(home, ".claude", "notify-state", "sessions")))
+
+
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "rules":
         print(RULES.strip())
@@ -278,6 +397,9 @@ def main():
             work = os.path.join(directory, profile, "writer")
             os.makedirs(work, exist_ok=True)
             check_writer(suite, profile, work)
+            sync = os.path.join(directory, profile, "reconcile")
+            os.makedirs(sync, exist_ok=True)
+            check_reconcile(suite, profile, sync)
     finally:
         shutil.rmtree(directory, ignore_errors=True)
 
