@@ -5,6 +5,8 @@ OWNER="${OWNER:-}"
 REPO="${REPO:-}"
 PR="${PR:-}"
 SLEEP="${SLEEP:-60}"
+CHECKLIST="${CHECKLIST:-}"
+RUN_CHECKLIST="${RUN_CHECKLIST:-$HOME/.claude/scripts/run-checklist.py}"
 MAX_POLLS="${MAX_POLLS:-0}"
 MAX_ERRORS="${MAX_ERRORS:-3}"
 
@@ -16,12 +18,24 @@ Usage: watch.sh <owner> <repo> <pr-number>
   SLEEP        seconds between polls (default 60)
   MAX_POLLS    stop after this many polls; 0 means until a terminal state (default 0)
   MAX_ERRORS   consecutive failed polls before giving up (default 3)
+  CHECKLIST    an items.json; every poll syncs its forge-observable items
+               (open, pipeline, threads, merge) from what this poll saw, so the
+               published page tracks the change request with nobody ticking it
+  RUN_CHECKLIST  path to run-checklist.py (default ~/.claude/scripts/run-checklist.py)
 
 Smoke test before arming a Monitor:
   MAX_POLLS=1 SLEEP=0 watch.sh <owner> <repo> <pr-number>
 EOF
   exit 2
 }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --checklist) CHECKLIST="${2:-}"; shift 2 ;;
+    --checklist=*) CHECKLIST="${1#*=}"; shift ;;
+    *) break ;;
+  esac
+done
 
 if [[ $# -eq 3 ]]; then
   OWNER="$1"
@@ -60,6 +74,22 @@ errors=0
 
 say() {
   printf '%s\n' "$1"
+}
+
+sync_checklist() {
+  [[ -n "$CHECKLIST" ]] || return 0
+  local out
+  if ! out="$("$RUN_CHECKLIST" reconcile "$CHECKLIST" \
+      --state "$1" --merged "$2" --review "$3" --unresolved "$4" \
+      --checks-pending "$5" --checks-failed "$6" --checks-total "$7" \
+      --publish 2>&1)"; then
+    say "CHECKLIST ERROR $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-200)"
+    return 0
+  fi
+  case "$out" in
+    unchanged:*) return 0 ;;
+    *) say "CHECKLIST $(printf '%s' "$out" | head -1 | cut -c1-200)" ;;
+  esac
 }
 
 say_once() {
@@ -123,6 +153,7 @@ poll() {
   done <<<"$raw"
 
   if [[ "$merged" == "true" ]]; then
+    sync_checklist "$state" "$merged" "$decision" "${unresolved:-0}" "$pending" "${#failed[@]}" "$checks"
     say "TERMINAL merged"
     return 0
   fi
@@ -135,9 +166,12 @@ poll() {
     return 2
   fi
   if [[ $pending -gt 0 ]]; then
+    sync_checklist "$state" "$merged" "$decision" "${unresolved:-0}" "$pending" "${#failed[@]}" "$checks"
     say_once "WAITING $pending of $checks check(s) still running"
     return 2
   fi
+  sync_checklist "$state" "$merged" "$decision" "${unresolved:-0}" "$pending" "${#failed[@]}" "$checks"
+
   if [[ ${#failed[@]} -gt 0 ]]; then
     say "TERMINAL checks finished with failures: ${failed[*]}"
   else
