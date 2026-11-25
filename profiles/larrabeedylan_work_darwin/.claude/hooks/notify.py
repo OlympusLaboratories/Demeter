@@ -289,6 +289,19 @@ def branch_label(cwd):
     return head if head and head != "HEAD" else None
 
 
+def default_branch_label(cwd):
+    if not cwd or not os.path.isdir(cwd):
+        return ""
+    head = git(cwd, "symbolic-ref", "refs/remotes/origin/HEAD")
+    if head:
+        return head.rsplit("/", 1)[-1]
+    for name in ("main", "master"):
+        if git(cwd, "rev-parse", "--verify", "--quiet",
+               "refs/remotes/origin/" + name) is not None:
+            return name
+    return ""
+
+
 def session_path(session_id):
     safe = re.sub(r"[^A-Za-z0-9_-]", "-", session_id or "unknown")[:80]
     return os.path.join(SESSIONS, safe + ".json")
@@ -1084,6 +1097,21 @@ CHECKLIST_HOLD = (
     " `--checklist-status` reports the marker without touching it."
 )
 
+CHECKLIST_FORK = (
+    "Do not end this turn yet. The run checklist at %s describes branch `%s`, and this"
+    " session is on `%s`. One of two things is true and the page is wrong either way."
+    " If this is the same work on a renamed or escalated branch, re-seed it with"
+    " `run-checklist.py template --branch %s …` and publish that with `--update"
+    " <the recorded hash>`, never a plain publish — a plain one mints a new link and"
+    " freezes the one already in the change request's description. If the new branch"
+    " is a second piece of work, it is a second run and owes a checklist of its own:"
+    " seed a new items file, publish it, and write to both pages from here on. Either"
+    " write clears this hold, and it is spent for this branch either way. Only the"
+    " branch is compared, never the directory, and a session standing on the default"
+    " branch never reaches this message — so neither a worktree you entered or left"
+    " nor the window before this run cut its branch can produce it."
+)
+
 
 def checklist_reason(gate):
     stops = gate.get("stops")
@@ -1093,6 +1121,22 @@ def checklist_reason(gate):
         return ("it has not been written since %d turns ended"
                 % CHECKLIST_STALE_STOPS)
     return ""
+
+
+def checklist_fork(gate, state, payload):
+    recorded = str(gate.get("branch") or "").strip()
+    if not recorded:
+        return ""
+    cwd = payload.get("cwd") or os.getcwd()
+    here = branch_label(cwd)
+    if not here or here == recorded:
+        return ""
+    default = default_branch_label(cwd)
+    if here == default or (not default and here in ("main", "master")):
+        return ""
+    if state.get("checklist_forked") == here:
+        return ""
+    return here
 
 
 def checklist_gate(payload):
@@ -1109,11 +1153,22 @@ def checklist_gate(payload):
     if not isinstance(gate, dict) or not gate.get("open"):
         return None
     if gate_expired(gate):
-        merge_state(path, drop=("checklist_pending",))
+        merge_state(path, drop=("checklist_pending", "checklist_forked"))
         log("dropped a stale run checklist marker")
         return None
     if payload.get("hook_event_name") != "Stop" or payload.get("stop_hook_active"):
         return None
+
+    where = gate.get("url") or "the published page"
+    forked = checklist_fork(gate, state, payload)
+    if forked:
+        if not merge_state(path, {"checklist_forked": forked}):
+            return None
+        recorded = str(gate.get("branch") or "").strip()
+        log("Stop held: the run forked to %s from the checklist's %s"
+            % (forked, recorded))
+        return CHECKLIST_FORK % (where, recorded, forked, forked)
+
     if gate.get("held"):
         return None
 
@@ -1126,7 +1181,8 @@ def checklist_gate(payload):
     if not merge_state(path, {"checklist_pending": dict(gate, held=time.time())}):
         return None
     open_items = ", ".join(str(entry) for entry in gate["open"][:6])
-    return CHECKLIST_HOLD % (gate.get("url") or "the published page", open_items, reason)
+    log("Stop held: the run checklist is behind the run")
+    return CHECKLIST_HOLD % (where, open_items, reason)
 
 
 def gate_expired(gate):
@@ -1290,6 +1346,13 @@ def checklist_marker(session_id):
     return gate if isinstance(gate, dict) else {}
 
 
+def checklist_spent_fork(session_id):
+    state = read_json(session_path(session_id), {}) or {}
+    if not isinstance(state, dict):
+        return ""
+    return str(state.get("checklist_forked") or "")
+
+
 def checklist_ids(gate, field):
     found = gate.get(field)
     if not isinstance(found, list):
@@ -1335,7 +1398,8 @@ def cmd_checklist_clear(args):
             % (session_id[:8], len(open_ids)))
         return 1
 
-    merge_state(session_path(session_id), drop=("checklist_pending",))
+    merge_state(session_path(session_id),
+                drop=("checklist_pending", "checklist_forked"))
     log("run checklist marker cleared for %s" % session_id)
     print("cleared the run checklist marker for %s" % where)
     if expired:
@@ -1373,6 +1437,24 @@ def cmd_checklist_status(args):
           % (gate.get("verdict") or "unknown", stops,
              "" if stops == 1 else "s",
              "already held once" if gate.get("held") else "not yet held"))
+
+    recorded = str(gate.get("branch") or "").strip()
+    here = branch_label(os.getcwd())
+    default = default_branch_label(os.getcwd())
+    if not recorded:
+        print("no branch recorded, so a fork cannot be detected")
+    elif not here:
+        print("branch %s, and no branch resolves here" % recorded)
+    elif here == recorded:
+        print("branch %s, which is the branch this session is on" % recorded)
+    elif here == default or (not default and here in ("main", "master")):
+        print("branch %s, and this session is on the default branch %s, which is"
+              " never a fork" % (recorded, here))
+    else:
+        print("branch %s, but this session is on %s — the run has forked"
+              % (recorded, here))
+        if checklist_spent_fork(session_id) == here:
+            print("the fork was already held once")
 
     open_ids = checklist_ids(gate, "open")
     print(describe_open(open_ids) if open_ids else "nothing is open")
@@ -1644,7 +1726,6 @@ def main():
     hold = checklist_gate(payload)
     if hold:
         print(json.dumps({"decision": "block", "reason": hold}))
-        log("Stop held: the run checklist is behind the run")
         return 0
     log("%s %s" % (payload.get("hook_event_name"), handle(payload)))
     return 0

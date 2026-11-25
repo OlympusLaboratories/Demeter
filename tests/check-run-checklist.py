@@ -104,7 +104,21 @@ machine.
 """
 
 
+SANDBOX_HOME = None
+SANDBOX_SESSION = "00000000-1111-2222-3333-444444444444"
+
+
+def sandboxed(env):
+    env = dict(os.environ if env is None else env)
+    if SANDBOX_HOME:
+        env["HOME"] = SANDBOX_HOME
+    env["CLAUDE_CODE_SESSION_ID"] = SANDBOX_SESSION
+    env["CLAUDE_SESSION_ID"] = SANDBOX_SESSION
+    return env
+
+
 def run(script, *args, **kwargs):
+    kwargs["env"] = sandboxed(kwargs.get("env"))
     return subprocess.run(
         [sys.executable, script] + list(args),
         capture_output=True, text=True, **kwargs)
@@ -607,12 +621,17 @@ def main():
         print(RULES.strip())
         return 0
 
+    global SANDBOX_HOME
     suite = Suite()
     for profile in PROFILES:
         work = tempfile.mkdtemp()
+        SANDBOX_HOME = os.path.join(work, "home")
+        os.makedirs(os.path.join(SANDBOX_HOME, ".claude", "notify-state", "sessions"),
+                    exist_ok=True)
         try:
             check_profile(suite, profile, work)
         finally:
+            SANDBOX_HOME = None
             shutil.rmtree(work, ignore_errors=True)
 
     if suite.failures:

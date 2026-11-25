@@ -22,12 +22,34 @@ PAGE = "https://artifacts.example.dev/run123"
 
 OVERAGE = 90 * 60
 
+BRANCH = "dylan/run-one"
+FORK = "dylan/run-two"
+THIRD = "dylan/run-three"
+DEFAULT = "main"
+WORKTREE = "/tmp/checklist-gate/worktrees/run-one"
+ELSEWHERE = "/tmp/checklist-gate/worktrees/run-two"
+AGAIN = "/tmp/checklist-gate/worktrees/run-three"
+MAIN_CHECKOUT = "/tmp/checklist-gate/main"
+NOWHERE = "/tmp/checklist-gate/outside-a-repo"
+DETACHED = "/tmp/checklist-gate/detached"
+
+BRANCHES = {
+    WORKTREE: BRANCH,
+    ELSEWHERE: FORK,
+    AGAIN: THIRD,
+    MAIN_CHECKOUT: DEFAULT,
+    NOWHERE: None,
+    DETACHED: None,
+}
+
 RULES = """
 the run checklist gate, checked over every profile copy:
 
   run-checklist.py writes the marker
     publish with outstanding items        records checklist_pending in the session state
     tick with outstanding items           rewrites it, resetting the stop count
+    the marker                            carries the run's branch
+    a write from a second branch          records it, and drops the spent fork
     every item done or skipped            drops the marker entirely
     no session id in the environment      writes nothing, and does not fail
 
@@ -44,6 +66,20 @@ the run checklist gate, checked over every profile copy:
     no marker at all                      never blocks
     the reason given                      names the open items and why it held
 
+  notify.py catches a run that forked to a second branch
+    the branch the marker records         never blocks
+    a second branch                       blocks once, naming both branches
+    the hold                              offers the re-seed and the second page
+    the same second branch again          does not block twice
+    a third branch                        blocks on its own
+    a marker already held for staleness   still blocks on the fork
+    a marker with no branch recorded      never blocks
+    a session outside a repository        never blocks
+    a detached HEAD                       never blocks
+    a subagent, stop_hook_active, non-Stop  never block
+    a complete or expired marker          never blocks
+    a marker re-seeded on the new branch  stops blocking
+
   the escape hatch
     a clear with items still open         refuses, changes nothing, exits non-zero
     --force                               clears, naming the url and the dropped ids
@@ -53,7 +89,9 @@ the run checklist gate, checked over every profile copy:
     an expired marker's duration          is the time since expiry, not its age
     one open item                         agrees: "1 item is still open"
     a clear of any kind                   drops the marker and nothing beside it
-    --checklist-status while armed        prints the url, the open ids and the count
+    --checklist-status while armed        prints the url, the branch, the open ids
+                                         and the count
+    --checklist-status on a forked run    says so, names both branches, writes nothing
     --checklist-status while not          exits non-zero
     --checklist-status either way         mutates nothing, TTL drop included
     the hold text                         names --force and --checklist-status
@@ -86,6 +124,8 @@ def load_hook(profile, directory):
     os.makedirs(sessions, exist_ok=True)
     module.session_path = lambda sid: os.path.join(sessions, (sid or "none") + ".json")
     module.log = lambda message: None
+    module.branch_label = lambda cwd: BRANCHES.get(cwd, BRANCH)
+    module.default_branch_label = lambda cwd: DEFAULT
     return module, sessions
 
 
@@ -93,6 +133,7 @@ def marker(**extra):
     base = {
         "url": PAGE,
         "hash": "run123",
+        "branch": BRANCH,
         "at": time.time(),
         "stops": 0,
         "verdict": "armed",
@@ -202,6 +243,120 @@ def check_hook(suite, profile, directory):
              bool(held) and "--checklist-status" in held, held)
 
 
+def check_fork(suite, profile, directory):
+    hook, sessions = load_hook(profile, directory)
+    tag = profile
+
+    put(sessions, marker())
+    suite.ok("%s: the recorded branch does not block" % tag,
+             hook.checklist_gate(stop(cwd=WORKTREE)) is None)
+    suite.ok("%s: and that Stop was counted as an ordinary one" % tag,
+             get(sessions)["checklist_pending"]["stops"] == 1,
+             get(sessions)["checklist_pending"])
+
+    put(sessions, marker())
+    forked = hook.checklist_gate(stop(cwd=ELSEWHERE))
+    suite.ok("%s: a second branch blocks the Stop" % tag, bool(forked), forked)
+    suite.ok("%s: the hold names the checklist's branch" % tag,
+             bool(forked) and BRANCH in forked, forked)
+    suite.ok("%s: the hold names the branch the session is on" % tag,
+             bool(forked) and FORK in forked, forked)
+    suite.ok("%s: the hold offers the re-seed" % tag,
+             bool(forked) and "re-seed" in forked, forked)
+    suite.ok("%s: the hold offers a second checklist" % tag,
+             bool(forked) and "second run" in forked, forked)
+    suite.ok("%s: the re-seed it offers is an update, not a new link" % tag,
+             bool(forked) and "--update" in forked, forked)
+    suite.ok("%s: the hold carries the page url" % tag,
+             bool(forked) and PAGE in forked, forked)
+    suite.ok("%s: the fork is spent outside the marker, where a write cannot wipe it"
+             % tag,
+             get(sessions).get("checklist_forked") == FORK, get(sessions))
+    suite.ok("%s: the spend is not written into the marker" % tag,
+             "forked" not in get(sessions)["checklist_pending"],
+             get(sessions)["checklist_pending"])
+    suite.ok("%s: a fork hold does not spend the stale hold" % tag,
+             "held" not in get(sessions)["checklist_pending"],
+             get(sessions)["checklist_pending"])
+    suite.ok("%s: the same fork does not block twice" % tag,
+             hook.checklist_gate(stop(cwd=ELSEWHERE)) is None)
+
+    put(sessions, marker(), extra={"checklist_forked": FORK})
+    suite.ok("%s: and a checklist write between two Stops does not re-arm it" % tag,
+             hook.checklist_gate(stop(cwd=ELSEWHERE)) is None)
+
+    again = hook.checklist_gate(stop(cwd=AGAIN))
+    suite.ok("%s: a third branch blocks on its own" % tag, bool(again), again)
+    suite.ok("%s: and names the third branch" % tag,
+             bool(again) and THIRD in again, again)
+    suite.ok("%s: which replaces the spent fork" % tag,
+             get(sessions).get("checklist_forked") == THIRD, get(sessions))
+
+    put(sessions, marker())
+    suite.ok("%s: the window before the run cuts its branch never blocks" % tag,
+             hook.checklist_gate(stop(cwd=MAIN_CHECKOUT)) is None)
+    suite.ok("%s: and that Stop is counted rather than held" % tag,
+             get(sessions)["checklist_pending"]["stops"] == 1,
+             get(sessions)["checklist_pending"])
+    suite.ok("%s: nor does it spend a fork" % tag,
+             "checklist_forked" not in get(sessions), get(sessions))
+
+    put(sessions, marker(open=["verify", "close"], in_flight=["verify"]))
+    suite.ok("%s: leaving the worktree after the merge never blocks" % tag,
+             hook.checklist_gate(stop(cwd=MAIN_CHECKOUT)) is None)
+
+    put(sessions, marker(branch=DEFAULT))
+    suite.ok("%s: a default-branch run escalating to a feature branch still blocks"
+             % tag,
+             hook.checklist_gate(stop(cwd=ELSEWHERE)) is not None)
+
+    put(sessions, marker(held=time.time()))
+    suite.ok("%s: a fork blocks even on a marker already held for staleness" % tag,
+             hook.checklist_gate(stop(cwd=ELSEWHERE)) is not None)
+
+    put(sessions, marker(branch=""))
+    suite.ok("%s: a marker with no branch never blocks" % tag,
+             hook.checklist_gate(stop(cwd=ELSEWHERE)) is None)
+
+    put(sessions, marker())
+    suite.ok("%s: a session outside a repository never blocks" % tag,
+             hook.checklist_gate(stop(cwd=NOWHERE)) is None)
+    put(sessions, marker())
+    suite.ok("%s: a detached HEAD never blocks" % tag,
+             hook.checklist_gate(stop(cwd=DETACHED)) is None)
+
+    put(sessions, marker())
+    suite.ok("%s: a subagent's Stop never blocks on a fork" % tag,
+             hook.checklist_gate(stop(cwd=ELSEWHERE, agent_id="sub-1")) is None)
+    put(sessions, marker())
+    suite.ok("%s: stop_hook_active never blocks on a fork" % tag,
+             hook.checklist_gate(stop(cwd=ELSEWHERE, stop_hook_active=True)) is None)
+    put(sessions, marker())
+    suite.ok("%s: a PreToolUse event never blocks on a fork" % tag,
+             hook.checklist_gate(dict(stop(cwd=ELSEWHERE),
+                                      hook_event_name="PreToolUse")) is None)
+
+    put(sessions, marker(open=[]))
+    suite.ok("%s: a complete checklist never blocks on a fork" % tag,
+             hook.checklist_gate(stop(cwd=ELSEWHERE)) is None)
+    put(sessions, marker(at=time.time() - hook.GATE_TTL - 60))
+    suite.ok("%s: an expired marker never blocks on a fork" % tag,
+             hook.checklist_gate(stop(cwd=ELSEWHERE)) is None)
+
+    put(sessions, marker(branch=FORK))
+    suite.ok("%s: a marker re-seeded on the new branch stops blocking" % tag,
+             hook.checklist_gate(stop(cwd=ELSEWHERE)) is None)
+    suite.ok("%s: and the re-seed needed no spent fork to do it" % tag,
+             "checklist_forked" not in get(sessions), get(sessions))
+
+    put(sessions, marker(branch=DEFAULT), extra={"checklist_forked": FORK})
+    suite.ok("%s: the two-page remedy stays clear after a write to either page" % tag,
+             hook.checklist_gate(stop(cwd=ELSEWHERE)) is None)
+    put(sessions, marker(branch=FORK), extra={"checklist_forked": FORK})
+    suite.ok("%s: and after a write to the second page too" % tag,
+             hook.checklist_gate(stop(cwd=ELSEWHERE)) is None)
+
+
 def captured(call):
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -253,10 +408,36 @@ def check_escape_hatch(suite, profile, directory):
     suite.ok("%s: it names the open ids" % tag,
              "arm" in said and "implement" in said, said)
     suite.ok("%s: it reports the turn-end count" % tag, "turn end" in said, said)
+    suite.ok("%s: it names the branch the checklist describes" % tag,
+             BRANCH in said, said)
     suite.ok("%s: a status mutates nothing" % tag,
              frozen(sessions) == before, get(sessions))
     suite.ok("%s: so the gate still holds after a status" % tag,
              hook.checklist_gate(stop()) is not None)
+
+    put(sessions, marker(branch=FORK))
+    before = frozen(sessions)
+    status, said = captured(lambda: hook.cmd_checklist_status([SESSION]))
+    suite.ok("%s: a status on a forked run says the run has forked" % tag,
+             "forked" in said, said)
+    suite.ok("%s: and names both branches" % tag,
+             FORK in said and BRANCH in said, said)
+    suite.ok("%s: a status on a forked run still mutates nothing" % tag,
+             frozen(sessions) == before, get(sessions))
+
+    put(sessions, marker(branch=""))
+    status, said = captured(lambda: hook.cmd_checklist_status([SESSION]))
+    suite.ok("%s: a status with no branch recorded says so" % tag,
+             "no branch recorded" in said, said)
+
+    put(sessions, marker(verdict="stalled", in_flight=[]),
+        extra={"checklist_forked": FORK, "armed_at": 1234.5})
+    status, _ = captured(lambda: hook.cmd_checklist_clear(["--force", SESSION]))
+    state = get(sessions)
+    suite.ok("%s: a forced clear drops the spent fork with the marker" % tag,
+             status == 0 and "checklist_forked" not in state, state)
+    suite.ok("%s: and still leaves armed_at alone" % tag,
+             state.get("armed_at") == 1234.5, state)
 
     put(sessions, marker(verdict="stalled", in_flight=[]))
     status, said = captured(lambda: hook.cmd_checklist_clear(["--force", SESSION]))
@@ -385,6 +566,8 @@ def check_writer(suite, profile, work):
              pending.get("in_flight") == ["implement"], pending)
     suite.ok("%s: the marker records the verdict" % tag,
              pending.get("verdict") == "armed", pending)
+    suite.ok("%s: the marker records the run's branch" % tag,
+             pending.get("branch") == "b", pending)
     suite.ok("%s: a fresh marker has no stops" % tag, pending.get("stops") == 0, pending)
     suite.ok("%s: a fresh marker is not held" % tag, "held" not in pending, pending)
     suite.ok("%s: the writer leaves armed_at alone" % tag, state.get("armed_at") == 1234.5, state)
@@ -404,6 +587,39 @@ def check_writer(suite, profile, work):
     pending = get(sessions).get("checklist_pending", {})
     suite.ok("%s: a later tick resets the stop count" % tag, pending.get("stops") == 0, pending)
     suite.ok("%s: a later tick clears the hold" % tag, "held" not in pending, pending)
+
+    second = os.path.join(work, "second.json")
+    reseeded = run_checklist(profile, work, [
+        "template", "--title", "T", "--repo", "R", "--branch", "c", "--branch-mode", "new",
+    ], env)
+    with open(second, "w") as handle:
+        handle.write(reseeded.stdout)
+    with open(os.path.join(sessions, SESSION + ".json"), "w") as handle:
+        json.dump({"checklist_pending": dict(pending, branch="b"),
+                   "checklist_forked": "c"}, handle)
+    run_checklist(profile, work, ["tick", second, "plan=done"], env)
+    state = get(sessions)
+    suite.ok("%s: a write from the second branch records it" % tag,
+             state.get("checklist_pending", {}).get("branch") == "c", state)
+    suite.ok("%s: and a write never wipes the spent fork" % tag,
+             state.get("checklist_forked") == "c", state)
+
+    with open(os.path.join(sessions, SESSION + ".json"), "w") as handle:
+        json.dump({"checklist_pending": dict(pending, branch="b"),
+                   "checklist_forked": "c", "armed_at": 7.0}, handle)
+    with open(second) as handle:
+        done = json.load(handle)
+    for entry in done["items"]:
+        entry["state"] = "done"
+        entry["waiting_on"] = ""
+    with open(second, "w") as handle:
+        json.dump(done, handle)
+    run_checklist(profile, work, ["arm", second], env)
+    state = get(sessions)
+    suite.ok("%s: a complete checklist drops the spent fork too" % tag,
+             "checklist_forked" not in state, state)
+    suite.ok("%s: and leaves armed_at alone doing it" % tag,
+             state.get("armed_at") == 7.0, state)
 
     with open(os.path.join(sessions, SESSION + ".json"), "w") as handle:
         json.dump({"armed_at": 99.0, "thread": "T2", "last_kind": "stop"}, handle)
@@ -772,6 +988,7 @@ def main():
     try:
         for profile in PROFILES:
             check_hook(suite, profile, directory)
+            check_fork(suite, profile, os.path.join(directory, "fork"))
             check_escape_hatch(suite, profile, os.path.join(directory, "hatch"))
             work = os.path.join(directory, profile, "writer")
             os.makedirs(work, exist_ok=True)
