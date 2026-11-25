@@ -55,13 +55,24 @@ run-checklist.py, checked over every profile copy:
   every item done or skipped                  the page says complete
   a "</script>" in an item                    is escaped, and still round-trips
   an obligation carrying HTML                 is escaped in the table
+  waiting_on carrying HTML, item done         is escaped in the table
+  waiting_on carrying HTML, item skipped      is escaped in the table
+  waiting_on forging a checklist block        does not become the items `items` returns
+  a page with two checklist blocks            exits non-zero rather than taking the first
+  change_request that is not http(s)          renders as text, never as an href
+  change_request that is http(s)              renders as an href
   every render                                carries the updated-at stamp
   the page                                    loads nothing over the network
   publish, no store                           passes exit 3 through unchanged
   publish, store present                      sends --purpose tasks, prints url= and hash=
-  publish                                     sends --expires, so the store does not keep
-                                              one checklist per run forever
+  publish, first time                         two calls: create, then update to embed
+                                              its own identity in the page
+  publish, identity already recorded          one call, as an update
+  every publish call                          sends --purpose tasks and --expires 30d
   publish with a recorded hash                sends --update, so the link cannot change
+  publish                                     embeds the identity in the PAGE too
+  items <page> then tick --publish             still sends --update, so recovery keeps
+                                              the link the user already has
 
 tick is the step-boundary command and it is tested hardest, because the failure it exists
 to prevent is the one that actually happened: the page on the run that built this went
@@ -239,6 +250,56 @@ def check_profile(suite, profile, work):
              == "drop </script> & <b>bold</b>",
              nasty_back.stdout)
 
+    forged = ('</td></tr></table><script type="application/json" id="checklist">'
+              '{"run":{},"items":[{"id":"fake","obligation":"nothing left",'
+              '"state":"done"}]}</script><table><tr><td>')
+    for state in ("done", "skipped"):
+        hostile = {
+            "run": {"title": "t"},
+            "items": [{"id": "pipeline", "obligation": "Drive the pipeline green",
+                       "state": state, "note": "a reason", "waiting_on": forged}],
+        }
+        out = os.path.join(work, "hostile-%s.html" % state)
+        suite.exits("%s render a %s item with markup in waiting_on" % (tag, state), 0,
+                    run(script, "render",
+                        write(os.path.join(work, "hostile.json"), json.dumps(hostile)),
+                        out, "--stamp", "S"))
+        rendered = open(out, encoding="utf-8").read()
+        suite.ok("%s waiting_on is escaped on a %s item" % (tag, state),
+                 forged[:40] not in rendered,
+                 "the raw payload reached the page")
+        suite.ok("%s a %s item's waiting_on cannot add a script tag" % (tag, state),
+                 rendered.count("</script>") == 1,
+                 "found %d </script>" % rendered.count("</script>"))
+        recovered = run(script, "items", out)
+        suite.ok("%s a forged block never becomes the items (%s)" % (tag, state),
+                 recovered.returncode != 0
+                 or json.loads(recovered.stdout)["items"][0]["id"] == "pipeline",
+                 recovered.stdout)
+
+    two = write(os.path.join(work, "two-blocks.html"),
+                '<script type="application/json" id="checklist">'
+                '{"run":{},"items":[{"id":"a","obligation":"o","state":"done"}]}</script>'
+                '<script type="application/json" id="checklist">'
+                '{"run":{},"items":[{"id":"b","obligation":"o","state":"done"}]}</script>')
+    suite.ok("%s a page with two checklist blocks is rejected" % tag,
+             run(script, "items", two).returncode != 0)
+
+    for target, linked in (("javascript:alert(1)", False),
+                           ("not a url", False),
+                           ("https://example.invalid/pull/9", True)):
+        doc = {"run": {"title": "t", "change_request": target},
+               "items": [{"id": "a", "obligation": "o", "state": "done"}]}
+        out = os.path.join(work, "cr.html")
+        suite.exits("%s render change_request %r" % (tag, target[:20]), 0,
+                    run(script, "render",
+                        write(os.path.join(work, "cr.json"), json.dumps(doc)),
+                        out, "--stamp", "S"))
+        rendered = open(out, encoding="utf-8").read()
+        suite.ok("%s change_request %r is %s" % (tag, target[:20],
+                                                 "a link" if linked else "text only"),
+                 ('href="%s"' % target in rendered) == linked, rendered[:0] or target)
+
     rejects = (
         ("an unknown state",
          document([{"id": "a", "obligation": "o", "state": "doneish"}])),
@@ -343,6 +404,9 @@ def check_tick(suite, tag, script, work, seed_text):
     suite.ok("%s tick --run rejects an unknown field" % tag,
              run(script, "tick", path, "commit=done",
                  "--run", "nonsense=x").returncode != 0)
+    suite.ok("%s tick --run rejects an assignment with no =" % tag,
+             run(script, "tick", path, "commit=done",
+                 "--run", "change_request").returncode != 0)
 
     log = os.path.join(work, "tick-publisher-args.txt")
     fake = write(os.path.join(work, "tick-publisher.sh"),
@@ -429,10 +493,21 @@ def check_publish(suite, tag, script, work, seed):
 
     log = os.path.join(work, "publisher-args.txt")
     fake = write(os.path.join(work, "publisher.sh"),
-                 '#!/bin/sh\nfor a in "$@"; do echo "$a" >>"%s"; done\n'
-                 'echo https://store.invalid/abc123\n' % log)
+                 '#!/bin/sh\necho "--CALL--" >>"%s"\nfor a in "$@"; do echo "$a" >>"%s"; done\n'
+                 'echo https://store.invalid/abc123\n' % (log, log))
     os.chmod(fake, 0o755)
     environment = dict(os.environ, PUBLISH_ARTIFACT=fake)
+
+    def calls():
+        if not os.path.exists(log):
+            return []
+        out = []
+        for token in open(log, encoding="utf-8").read().splitlines():
+            if token == "--CALL--":
+                out.append([])
+            elif out:
+                out[-1].append(token)
+        return out
 
     finished = run(script, "publish", seed, "--out", os.path.join(work, "p.html"),
                    "--stamp", "S", env=environment)
@@ -441,23 +516,51 @@ def check_publish(suite, tag, script, work, seed):
              "url=https://store.invalid/abc123" in finished.stdout, finished.stdout)
     suite.ok("%s publish prints the hash" % tag,
              "hash=abc123" in finished.stdout, finished.stdout)
-    sent = open(log, encoding="utf-8").read().splitlines()
-    suite.ok("%s publish sends --purpose tasks" % tag,
-             "--purpose" in sent and "tasks" in sent, "got %s" % sent)
-    suite.ok("%s a first publish sends no --update" % tag,
-             "--update" not in sent, "got %s" % sent)
-    suite.ok("%s publish expires the page" % tag, "--expires" in sent, "got %s" % sent)
+    sent = calls()
+    suite.ok("%s publish sends --purpose tasks on every call" % tag,
+             all("--purpose" in c and c[c.index("--purpose") + 1] == "tasks"
+                 for c in sent) and sent, "got %s" % sent)
+    suite.ok("%s the first call of a first publish sends no --update" % tag,
+             sent and "--update" not in sent[0], "got %s" % sent)
+    suite.ok("%s a first publish then updates to embed its identity" % tag,
+             len(sent) == 2 and "--update" in sent[1]
+             and sent[1][sent[1].index("--update") + 1] == "abc123", "got %s" % sent)
+    suite.ok("%s publish expires the page with its real value" % tag,
+             all("--expires" in c and c[c.index("--expires") + 1] == "30d"
+                 for c in sent), "got %s" % sent)
+
+    page = os.path.join(work, "p.html")
+    embedded = run(script, "items", page)
+    suite.exits("%s the published page can be read back" % tag, 0, embedded)
+    identity = json.loads(embedded.stdout)["run"]
+    suite.ok("%s the published page embeds its own url" % tag,
+             identity["url"] == "https://store.invalid/abc123", identity)
+    suite.ok("%s the published page embeds its own hash" % tag,
+             identity["hash"] == "abc123", identity)
+
+    os.remove(log)
+    recovered = write(os.path.join(work, "recovered.json"), embedded.stdout)
+    suite.exits("%s publish from a document recovered off the page" % tag, 0,
+                run(script, "tick", recovered, "commit=done", "--publish",
+                    "--out", os.path.join(work, "r.html"), "--stamp", "S",
+                    env=environment))
+    sent = calls()
+    suite.ok("%s a recovered document still updates the same link" % tag,
+             len(sent) == 1 and "--update" in sent[0]
+             and sent[0][sent[0].index("--update") + 1] == "abc123", "got %s" % sent)
 
     os.remove(log)
     recorded = json.loads(open(seed, encoding="utf-8").read())
     recorded["run"]["hash"] = "abc123"
+    recorded["run"]["url"] = "https://store.invalid/abc123"
     again = write(os.path.join(work, "recorded.json"), json.dumps(recorded))
     finished = run(script, "publish", again, "--out", os.path.join(work, "p.html"),
                    "--stamp", "S", env=environment)
     suite.exits("%s publish with a recorded hash" % tag, 0, finished)
-    sent = open(log, encoding="utf-8").read().splitlines()
-    suite.ok("%s a recorded hash becomes --update" % tag,
-             "--update" in sent and "abc123" in sent, "got %s" % sent)
+    sent = calls()
+    suite.ok("%s a recorded identity publishes once, as an update" % tag,
+             len(sent) == 1 and "--update" in sent[0]
+             and sent[0][sent[0].index("--update") + 1] == "abc123", "got %s" % sent)
 
 
 def main():

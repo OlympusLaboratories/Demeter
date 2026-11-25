@@ -220,10 +220,14 @@ def source(location):
 
 def extract(location):
     page, page_path = source(location)
-    start = page.find(BLOCK_OPEN)
-    if start < 0:
+    found = page.count(BLOCK_OPEN)
+    if found < 1:
         raise ValueError("%s carries no %s block" % (page_path, BLOCK_ID))
-    start += len(BLOCK_OPEN)
+    if found > 1:
+        raise ValueError(
+            "%s carries %d %s blocks; refusing to guess which is the run's own"
+            % (page_path, found, BLOCK_ID))
+    start = page.find(BLOCK_OPEN) + len(BLOCK_OPEN)
     end = page.find(BLOCK_CLOSE, start)
     if end < 0:
         raise ValueError("%s has an unterminated %s block" % (page_path, BLOCK_ID))
@@ -260,18 +264,17 @@ def render(document, stamp=None):
     if run["ticket"]:
         facts.append("ticket %s" % escape(run["ticket"]))
     if run["change_request"]:
-        facts.append('<a href="%s">%s</a>'
-                     % (escape(run["change_request"]), escape(run["change_request"])))
+        target = run["change_request"]
+        if re.match(r"^https?://", target):
+            facts.append('<a href="%s">%s</a>' % (escape(target), escape(target)))
+        else:
+            facts.append(escape(target))
 
     rows = []
     for index, entry in enumerate(items, start=1):
-        waiting = entry["waiting_on"]
-        if entry["state"] not in OPEN_STATES:
-            waiting = waiting or "—"
-        elif not waiting:
-            waiting = "<em>nothing</em>"
-        else:
-            waiting = escape(waiting)
+        waiting = escape(entry["waiting_on"])
+        if not waiting:
+            waiting = "<em>nothing</em>" if entry["state"] in OPEN_STATES else "—"
         detail = escape(entry["note"]) if entry["note"] else ""
         rows.append(
             "<tr class=\"s-%s\">"
@@ -425,13 +428,9 @@ def cmd_items(args):
     return 0
 
 
-def publish(document, items_path, update, out, stamp):
+def send(document, page, update, stamp):
     run = document["run"]
-    update = update or run["hash"]
-    page = out or os.path.join(
-        os.environ.get("TMPDIR", "/tmp"), "run-checklist-%d.html" % os.getpid())
     write(page, render(document, stamp=stamp))
-
     command = [PUBLISH_SCRIPT, page, "--purpose", "tasks", "--expires", EXPIRES,
                "--title", run["title"] or "Run checklist",
                "--description", "run checklist"]
@@ -442,15 +441,13 @@ def publish(document, items_path, update, out, stamp):
         finished = subprocess.run(command, capture_output=True, text=True)
     except OSError as error:
         print("cannot run %s: %s" % (PUBLISH_SCRIPT, error), file=sys.stderr)
-        print("page=%s" % page)
-        return ABSENT
+        return ABSENT, ""
 
     if finished.stderr:
         sys.stderr.write(finished.stderr)
     if finished.returncode != 0:
         sys.stdout.write(finished.stdout)
-        print("page=%s" % page)
-        return finished.returncode
+        return finished.returncode, ""
 
     url = ""
     for line in finished.stdout.splitlines():
@@ -460,17 +457,36 @@ def publish(document, items_path, update, out, stamp):
     if not url:
         sys.stdout.write(finished.stdout)
         print("the publisher printed no url", file=sys.stderr)
-        return 1
+        return 1, ""
+    return 0, url
+
+
+def publish(document, items_path, update, out, stamp):
+    run = document["run"]
+    page = out or os.path.join(
+        os.environ.get("TMPDIR", "/tmp"), "run-checklist-%d.html" % os.getpid())
+
+    status, url = send(document, page, update or run["hash"], stamp)
+    if status != 0:
+        print("page=%s" % page)
+        return status
 
     digest = url.rstrip("/").rsplit("/", 1)[-1]
-    print("url=%s" % url)
-    print("hash=%s" % digest)
-    print("page=%s" % page)
-    if items_path and items_path != "-" and (run["url"] != url or run["hash"] != digest):
+    if run["url"] != url or run["hash"] != digest:
         run["url"] = url
         run["hash"] = digest
-        write(items_path, dump(document) + "\n")
-        print("recorded the page identity in %s" % items_path)
+        status, url = send(document, page, digest, stamp)
+        if status != 0:
+            print("published, but the page does not carry its own identity: "
+                  "url=%s hash=%s page=%s" % (run["url"], digest, page), file=sys.stderr)
+            return status
+        if items_path and items_path != "-":
+            write(items_path, dump(document) + "\n")
+            print("recorded the page identity in %s" % items_path)
+
+    print("url=%s" % run["url"])
+    print("hash=%s" % run["hash"])
+    print("page=%s" % page)
     return 0
 
 
@@ -508,6 +524,8 @@ def apply_ticks(document, ticks):
 
 def apply_run_fields(document, assignments):
     for assignment in assignments:
+        if "=" not in assignment:
+            raise ValueError("%r is not <field>=<value>" % assignment)
         field, _, value = assignment.partition("=")
         field = field.strip()
         if field not in RUN_FIELDS:
@@ -571,8 +589,24 @@ what it guarantees, and what each one is written against:
   carrying "not needed". A re-tick of the SAME state keeps its note, so
   annotating an item twice is not destructive
 
-  publish records the page's url and hash back into the items file, so the
-  caller cannot lose the identity that keeps the link stable
+  publish records the page's url and hash into BOTH the items file and the
+  page itself, which costs a second write on the first publish only. without
+  it the published page embeds an empty identity, so recovering a document
+  with `items <url>` - the documented /unpause route - loses the hash and the
+  next publish mints a new link, which is the one thing the design forbids
+
+  every field reaching the page is escaped, waiting_on included. that field is
+  rendered for a done or skipped item too, and when it was the one unescaped
+  path a crafted value could close the table and open a SECOND checklist block
+  ahead of the real one - whereupon `items` returned the forged obligations and
+  the run believed them, since it is told to trust the page over its context
+
+  extract refuses a page carrying more than one checklist block rather than
+  taking the first, so a forged block is a loud error and not a silent swap
+
+  change_request is only rendered as a link when it is http(s); anything else
+  is printed as text, so a javascript: value cannot become a clickable link on
+  a page that is published public
 
   every item carries an obligation, the skill that discharges it, what it
   applies to, what it is waiting on, and one of exactly four states
