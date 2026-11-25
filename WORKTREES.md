@@ -109,11 +109,14 @@ pulls the ground out from under your own shell.
 
 ## Cleanup is yours
 
-No skill ever removes a worktree. Cleanup is deliberately manual, because a worktree may
-hold uncommitted work and an agent cannot tell whether you still want it. What a skill does
-do is delete the **remote** branch once its change request merges — that is the signal
-`wtclean` reads, and it is the whole division of labour. When a branch is merged or
-abandoned:
+No skill removes a worktree by name, and none removes one holding work that has not merged.
+Cleanup is deliberately manual, because a worktree may hold uncommitted work and an agent
+cannot tell whether you still want it. What a skill does do is delete the **remote** branch
+once its change request merges — that is the signal `wtclean` reads, and it is the whole
+division of labour. `autopilot` then reads that signal rather than leaving it for you: its
+Step 10d runs your own `freshen`, so a worktree whose branch is gone from the remote is
+swept by `wtclean` on the same terms as if you had run `f` yourself. Nothing else is
+touched. To remove one by hand, when a branch is merged or abandoned:
 
 ```bash
 git worktree remove .claude/worktrees/<branch>
