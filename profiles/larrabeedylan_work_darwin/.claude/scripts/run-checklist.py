@@ -69,6 +69,7 @@ def template(options):
         items.append(item("push", "Push the default branch", "autopilot", branch))
     else:
         items.append(item("open", "Push and open %s" % request, "autopilot", branch))
+        items.append(item("link", "Send the user %s's link" % request, "ping", "the user"))
         items.append(item("pipeline", "Drive the pipeline green", "autopilot", request))
         if options.review:
             items.append(item("review", "Review the diff with the swarm",

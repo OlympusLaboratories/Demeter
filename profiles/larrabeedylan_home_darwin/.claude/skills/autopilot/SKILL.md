@@ -344,6 +344,8 @@ That single send does both jobs — it tells them the hand-off happened, and it 
 
 **Never arm when `--autopilot false`.** There is no unattended tail to notify about, and the user is at the keyboard by definition.
 
+**When a pull request for this branch is already open, this ping carries its URL.** That is the resumed and amended routes below: `/autopilot --merge` landing on work that is already pushed, or a run picking up the pull request an interrupted one left behind. Read it before composing the body — the forge helper's branch lookup answers it — and put the URL in the body, which discharges Step 4b's link ping as well. One that does not exist yet gets no placeholder and no promise; Step 4b sends the link the moment there is one.
+
 **A failed send never fails the run.** A missing or unconfigured `~/.claude/notify.json` makes the ping a no-op, and the `ping` skill deliberately does not write `armed_at` on a failed send. Report what it said in one line and carry on — the work is not contingent on the notification.
 
 **Then tick item 1 on the run checklist**, with the outcome rather than the intention: `done` on a send, `skipped` with the reason on a failure or an already-armed session. Arming is item 1 precisely because it is the obligation this skill has demonstrably skipped while carrying the instruction twice, and an item ticked `done` on a send that never landed is worse than no item at all.
@@ -423,13 +425,25 @@ Open it as a normal pull request, not a draft — the review bot runs as a CI jo
 **Run checklist:** <url> — what this run still owes, updated as it goes.
 ```
 
-Then tick the item and record the change request on the page, in this same batch:
+**Send the user the link, in this same batch.** The pull request is the one thing this run produces that the user might want to look at *before* it lands, and until this step existed nothing guaranteed they were ever told it was there. Step 0d's ping goes out before Step 1, so before there is anything to link; Step 11's goes out after the merge. In between, the only thing that could carry the link was the automatic turn-end notification — and that appends it **only when the turn's summary happens to name a pull request**. The summary is written by a model from a turn whose headline was *arming a pipeline watcher*, so on a quiet run the user was first handed the link once the change had already merged, which is the one moment it is no longer worth opening.
+
+So invoke the `ping` skill with the `Skill` tool, level `progress` — the work continues. The body carries the URL, what the run does next, and **where it stops**, because under `--merge true` that is the user being told how long they have to look:
+
+> `demeter opened a pull request` → *Opened the pull request for the notification fix; CI is running and it merges itself when green. Nothing needed.* plus the URL.
+
+**It is owed even when Step 0d was skipped.** An `armed_at` that was already present means the user walked away earlier, not that anything has told them about this pull request.
+
+**It is not owed when Step 0d's ping already carried the URL.** On a resumed or amended run the pull request can already be open before the opening ping goes out — Step 0d covers that case and its ping is then the delivery. Two notifications minutes apart carrying the same link is the noise this step is trying not to become.
+
+Then tick both items and record the change request on the page, in this same batch:
 
 ```bash
-~/.claude/scripts/run-checklist.py tick <items>.json open=done \
+~/.claude/scripts/run-checklist.py tick <items>.json open=done link=done \
   'pipeline=in-flight:the pipeline on the change request' \
   --run change_request=<url> --publish
 ```
+
+`link=done` records the send, not the intention. If the ping failed, correct it to `skipped` with what it printed, exactly as Step 0d does for the arming item.
 
 Two later edits append to this same description — the diagram link at Step 11.2 and the decision-record fold at Step 11.3 — and both must leave this line where it is. **On a `--branch default` run there is no description**, so the link goes into the Step 11 report and the ticket comment instead, exactly as the decision ledger already degrades there.
 
@@ -751,7 +765,7 @@ When the PR merges, when a `--branch default` run has pushed, or when you stop f
 2. **Attach the diagram** when `--diagram` is true and the run opened a pull request. On a `--branch default` run the fix skill already produced it at its own diagram step, so do not produce a second one — carry the link it gave you into the report and the ticket comment. Invoke `changes-diagram` with the `Skill` tool and append its link to the PR description — or, on a `--branch default` run, carry the link in the report and the ticket comment, since there is no description to append to. Do this once the code has settled — a diagram of a branch that changed three more times is worse than none. **A failed or unavailable diagram never fails the run**: say so in one line and carry on.
 3. **Append the decision record.** Take the scratchpad ledger, apply the filter and the budget from **The decision record**, and append it to the end of the change request description inside the collapsed `<details>` fold — one edit, after the diagram link. An empty ledger publishes nothing. **Never post it as a comment**: if the description edit fails, say so in one line and carry the ledger in the report instead.
 4. **Close the checklist.** One last `tick --publish`, against the identity recorded at the first publish so the link the user has open is the link that changes. Every item ends `done` or `skipped` **with a reason** — the renderer refuses a `skipped` item that carries none, and an item left `pending` on a finished run is the run telling the user it dropped something, which is exactly what the page is for. It should print `complete`; anything else names what the run did not finish.
-5. **Ping the user.** Invoke the `ping` skill with the `Skill` tool. This is the **closing** ping — Step 0d already sent the opening one and armed the session, so this is a report rather than an announcement. It is the only message the user is guaranteed to read, so it carries what happened and whether anything is needed — a ping that says "done" wastes it. **It carries Step 10b's verdict in Step 10b's own words**: deployed and verified, deploy failed, waiting on a human, or merged and unverified. "Merged" alone is the one word that reads as finished while leaving out whether the change is actually running. **A `--branch default` run says so in the ping**: the change is on the default branch, unreviewed, and already live. That is what the user chose, and it is also the single fact most worth knowing on a phone.
+5. **Ping the user.** Invoke the `ping` skill with the `Skill` tool. This is the **closing** ping — Step 0d already sent the opening one and armed the session, and Step 4b already carried the pull request's link, so this is a report rather than an announcement or the first the user hears of the change request. It is the only message the user is guaranteed to read, so it carries what happened and whether anything is needed — a ping that says "done" wastes it. **It carries Step 10b's verdict in Step 10b's own words**: deployed and verified, deploy failed, waiting on a human, or merged and unverified. "Merged" alone is the one word that reads as finished while leaving out whether the change is actually running. **A `--branch default` run says so in the ping**: the change is on the default branch, unreviewed, and already live. That is what the user chose, and it is also the single fact most worth knowing on a phone.
 6. **Name any signal that did not prove what it was meant to.** Where Step 0b's reading of the deploy path did not match what Step 10b actually observed, say so in the report in one line — the path you expected, the path it took, and which check turned out not to answer *is this SHA running*. A signal that looks authoritative and is not is the thing most likely to make the next run report a deploy it never saw, so it is worth naming even on a run that ended confirmed.
 
 ### When to stop and ping instead of continuing
@@ -790,3 +804,4 @@ Stopping and asking are both reserved for this list. Everything else — surpris
 13. **Pause on purpose; never run out mid-flight.** Read the quota from the `claude-usage` cache at step boundaries, never from the API, and pause at 85% of the session window. Journal the step, the next action and the ledger as you go, so the pause costs one write. **`session` is the only meter that gates the run** — `weekly`, `scoped:*` and `spend` are the user's to manage, never a reason to stop and never a question to ask.
 14. **Never hand the user a command you can run yourself.** If Step 0b found the deploy and this session can reach the target, Step 10c runs it. A run that finishes with a block of commands for the user to paste has failed at the one thing it was for, and it fails in the worst way — looking finished. The same goes for anything else in reach: pulling a repo, restarting a service, installing a file on a box you already have access to, and reclaiming the worktree and branch the merge just finished with (**Step 10d**).
 15. **A broken deploy is warned about, never fixed.** No rollback, no revert, no re-run of a deploy job, no touching the runtime. Gather the evidence, ping immediately, and stop. An unattended agent reverting production at 2am is worse than a bad deploy somebody has been told about.
+16. **Push the pull request's link the moment it exists.** Step 4b pings with the URL in the same batch that opens it, and Step 0d carries it instead on a run where it was already open. Never leave it to a turn-end notification: the hook appends a link only to a body that already **named** a pull request, and that body is a model's summary of a turn whose headline was something else, so an unmentioned pull request is simply never delivered. Pinging only at the merge hands over the link at the one moment it is no longer worth opening.
