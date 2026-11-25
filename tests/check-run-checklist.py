@@ -64,6 +64,8 @@ run-checklist.py, checked over every profile copy:
   change_request that is http(s)              renders as an href
   plan_page that is not http(s)               renders as text, never as an href
   plan_page that is http(s)                   renders as an href
+  either field, however rendered              appears once in the facts, never
+                                              duplicated by a shared helper
   tick --run plan_page=<url>                  sets it, and it survives the page
   every render                                carries the updated-at stamp
   the page                                    loads nothing over the network
@@ -125,6 +127,15 @@ class Suite:
         self.ok(label, finished.returncode == want,
                 "want exit %s, got %s\n%s" % (want, finished.returncode,
                                               finished.stderr or finished.stdout))
+
+
+def facts_block(rendered):
+    opener = '<p class="facts">'
+    start = rendered.find(opener)
+    if start < 0:
+        return ""
+    start += len(opener)
+    return rendered[start:rendered.find("</p>", start)]
 
 
 def document(items, run_fields=None):
@@ -289,7 +300,7 @@ def check_profile(suite, profile, work):
     suite.ok("%s a page with two checklist blocks is rejected" % tag,
              run(script, "items", two).returncode != 0)
 
-    for field in ("change_request", "plan_page"):
+    for field, label in (("change_request", ""), ("plan_page", "plan")):
         for target, linked in (("javascript:alert(1)", False),
                                ("not a url", False),
                                ("https://example.invalid/pull/9", True)):
@@ -304,6 +315,14 @@ def check_profile(suite, profile, work):
             suite.ok("%s %s %r is %s" % (tag, field, target[:20],
                                          "a link" if linked else "text only"),
                      ('href="%s"' % target in rendered) == linked, target)
+            shown = facts_block(rendered)
+            want = 2 if linked and not label else 1
+            suite.ok("%s %s %r appears %d time(s) in the facts"
+                     % (tag, field, target[:20], want),
+                     shown.count(target) == want, shown[:160])
+            if label:
+                suite.ok("%s %s %r carries its label" % (tag, field, target[:20]),
+                         shown.count(label) == 1, shown[:160])
 
     rejects = (
         ("an unknown state",

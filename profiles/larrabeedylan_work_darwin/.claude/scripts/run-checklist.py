@@ -302,6 +302,12 @@ def escape(text):
     return html.escape(text, quote=True)
 
 
+def link_fact(url, label=""):
+    if re.match(r"^https?://", url):
+        return '<a href="%s">%s</a>' % (escape(url), escape(label or url))
+    return "%s %s" % (escape(label), escape(url)) if label else escape(url)
+
+
 def render(document, stamp=None):
     run = document["run"]
     items = document["items"]
@@ -323,17 +329,9 @@ def render(document, stamp=None):
     if run["ticket"]:
         facts.append("ticket %s" % escape(run["ticket"]))
     if run["plan_page"]:
-        target = run["plan_page"]
-        if re.match(r"^https?://", target):
-            facts.append('<a href="%s">plan</a>' % escape(target))
-        else:
-            facts.append("plan %s" % escape(target))
+        facts.append(link_fact(run["plan_page"], "plan"))
     if run["change_request"]:
-        target = run["change_request"]
-        if re.match(r"^https?://", target):
-            facts.append('<a href="%s">%s</a>' % (escape(target), escape(target)))
-        else:
-            facts.append(escape(target))
+        facts.append(link_fact(run["change_request"]))
 
     rows = []
     for index, entry in enumerate(items, start=1):
