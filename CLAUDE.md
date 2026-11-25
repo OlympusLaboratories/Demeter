@@ -219,7 +219,7 @@ anything in its subtree.
 - **A pause is only graceful if it was affordable**: the run **journals as it goes**, and the state file must stand alone without the transcript. → `profiles/<p>/.claude/skills/AGENTS.md`
 - **Stopping a run means stopping it**: `TaskStop` every watcher and record a **re-arm instruction**; an armed auto-merge and an unverified deploy are unsafe to park on. → `profiles/<p>/.claude/skills/AGENTS.md`
 - **The resume trigger is a detached poll on wall-clock**: not `Monitor`, which caps at 30 minutes, and never a usage percentage, which nothing refreshes once windows close. → `profiles/<p>/.claude/skills/AGENTS.md`
-- **Quota comes from the `claude-usage` cache, never the API**: taking `usage.lock` or writing there is forbidden, `resetsAt` is epoch **milliseconds**, and all four meters get checked. → `profiles/<p>/.claude/skills/AGENTS.md`
+- **Quota comes from the `claude-usage` cache, never the API**: taking `usage.lock` or writing there is forbidden, `resetsAt` is epoch **milliseconds**, and **`session` is the only meter that gates an autopilot pause** — the other three are diagnostic there, and it is the `/unpause` wake that re-reads all four. → `profiles/<p>/.claude/skills/AGENTS.md`
 - **`/resume` is a built-in, so the skill is `/unpause`**: a name a built-in owns silently never fires. → `profiles/<p>/.claude/skills/AGENTS.md`
 - **A `$<digit>` anywhere in a skill body is rewritten at invocation**: it corrupts any `awk` program while the file on disk still looks correct. Sweep including `$0`. → `profiles/<p>/.claude/skills/AGENTS.md`
 - **A swarm's resume cache is keyed on the diff**: a moved branch voids it entirely, and the state file keeps an **ordered chain** of run ids. → `profiles/<p>/.claude/skills/AGENTS.md`

@@ -52,7 +52,9 @@ print_help() {
       print "  ndjson  one JSON object per line, zero or more - an empty answer is no bytes"
       print "  text    plain lines, not JSON"
       print "  mixed   plain-text section headers interleaved with ndjson"
-      print "A failed request is reported as a single JSON object carrying an error key."
+      print "A handled failure prints a single JSON object with an error key. An"
+      print "unhandled one exits non-zero with nothing on stdout, so judge a call"
+      print "by its exit status rather than by parsing an empty stream."
     }
   ' "$0"
 }

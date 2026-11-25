@@ -901,11 +901,16 @@ def _arguments_of(fn):
     return match.group(1).strip() if match else ''
 
 
-def _calls_named(node, name):
-    return any(isinstance(inner, ast.Call)
-               and isinstance(inner.func, ast.Name)
-               and inner.func.id == name
-               for inner in ast.walk(node))
+def _calls_to_stdout(node, name):
+    for inner in ast.walk(node):
+        if not isinstance(inner, ast.Call):
+            continue
+        if not isinstance(inner.func, ast.Name) or inner.func.id != name:
+            continue
+        if any(kw.arg == 'file' for kw in inner.keywords):
+            continue
+        return True
+    return False
 
 
 def _shape_of(fn):
@@ -913,10 +918,10 @@ def _shape_of(fn):
         tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
     except (OSError, TypeError, SyntaxError):
         return ''
-    if _calls_named(tree, 'print'):
+    if _calls_to_stdout(tree, 'print'):
         return 'text'
     for loop in ast.walk(tree):
-        if isinstance(loop, (ast.For, ast.While)) and _calls_named(loop, 'emit'):
+        if isinstance(loop, (ast.For, ast.While)) and _calls_to_stdout(loop, 'emit'):
             return 'ndjson'
     return 'json'
 
@@ -931,7 +936,9 @@ def cmd_help(token, args):
     print('  json    exactly one JSON object')
     print('  ndjson  one JSON object per line, zero or more — an empty answer is no bytes')
     print('  text    plain lines, not JSON')
-    print('A failure on any path is a single JSON object carrying an "error" key.')
+    print('A handled failure prints a single JSON object with an "error" key. An')
+    print('unhandled HTTP error exits non-zero with nothing on stdout, so judge a')
+    print('call by its exit status rather than by parsing an empty stream.')
 
 
 COMMANDS = {

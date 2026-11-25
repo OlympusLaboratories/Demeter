@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import ast
 import glob
+import importlib.machinery
 import importlib.util
 import inspect
 import os
@@ -18,129 +19,208 @@ PYTHON_ADAPTER = 'github-api.sh'
 BASH_ADAPTER = 'gitlab-api.sh'
 
 EXPECTED = {
-    PYTHON_ADAPTER: {'pr-checks': 'ndjson', 'pr-reviews': 'ndjson',
-                     'pr-status': 'json', 'pr-info': 'json', 'job-log': 'text'},
-    BASH_ADAPTER: {'mr-discussions': 'ndjson', 'mr-notes': 'ndjson',
-                   'merge-status': 'json', 'mr-info': 'json', 'job-log': 'text',
-                   'protected-refs': 'mixed'},
+    PYTHON_ADAPTER: {
+        'help': 'text',
+        'current-user': 'json',
+        'open-prs': 'ndjson',
+        'merged-prs': 'ndjson',
+        'pr-info': 'json',
+        'pr-reviews': 'ndjson',
+        'pr-changes': 'ndjson',
+        'pr-commits': 'ndjson',
+        'pr-for-branch': 'ndjson',
+        'reply-to-thread': 'json',
+        'resolve-thread': 'json',
+        'unresolve-thread': 'json',
+        'create-diff-comment': 'json',
+        'create-pr': 'json',
+        'update-pr-description': 'json',
+        'pr-checks': 'ndjson',
+        'pr-merge': 'json',
+        'pr-auto-merge': 'json',
+        'pr-cancel-auto-merge': 'json',
+        'pr-status': 'json',
+        'pr-notes': 'ndjson',
+        'rerun-check': 'json',
+        'rerun-workflow': 'json',
+        'pr-review-list': 'ndjson',
+        'dismiss-review': 'json',
+        'request-review': 'json',
+        'job-log': 'text',
+    },
+    BASH_ADAPTER: {
+        'help': 'text',
+        'current-user': 'json',
+        'merged-mrs': 'ndjson',
+        'open-mrs': 'ndjson',
+        'mr-info': 'json',
+        'mr-discussions': 'ndjson',
+        'mr-notes': 'ndjson',
+        'mr-changes': 'ndjson',
+        'reply-to-thread': 'json',
+        'reply-to-thread-stdin': 'json',
+        'resolve-thread': 'json',
+        'update-mr-title': 'json',
+        'update-note': 'json',
+        'create-note': 'json',
+        'mr-commits': 'ndjson',
+        'mr-pipelines': 'ndjson',
+        'pipeline-jobs': 'ndjson',
+        'pipeline-bridges': 'ndjson',
+        'job-log': 'text',
+        'retry-job': 'json',
+        'create-mr': 'json',
+        'update-mr-description': 'json',
+        'mr-for-branch': 'ndjson',
+        'create-diff-comment': 'json',
+        'project-info': 'json',
+        'project-runners': 'ndjson',
+        'runner-info': 'json',
+        'ci-variable-keys': 'ndjson',
+        'protected-refs': 'mixed',
+        'group-members': 'ndjson',
+        'merge-mr': 'json',
+        'cancel-auto-merge': 'json',
+        'rebase-mr': 'json',
+        'mr-approvals': 'json',
+        'merge-status': 'json',
+        'project-members': 'ndjson',
+    },
 }
 
 RULES = """the output-shape column every forge adapter prints in `help`
 
-  one row per subcommand, and the shape is the row's last field
+the oracle is the EXPECTED table in this file, written by hand and independent of
+both adapters. three things are checked against it, and a fourth against the source:
+
+  every subcommand the adapter implements appears in EXPECTED
+      so a new subcommand nobody classified fails here rather than shipping blank
+  every subcommand in EXPECTED has exactly one help row, and its last field is the shape
   every shape is one of: json, ndjson, text, mixed
-  the shape `help` prints equals the shape this test derives from the source
-  every subcommand the script implements has a row
-  `help` runs with no credentials at all
+  gitlab-api.sh's declared `# Shape:` comment equals EXPECTED for that arm
+  the shape derived from the source equals EXPECTED
+      a drift check, not the oracle -- it catches an adapter whose behaviour changed
+      without its annotation or this table changing with it
 
-how each shape is derived here, independently of the script:
+`help` must also run with no credentials at all, on both adapters.
 
-  github-api.sh   an ast walk of each cmd_* function — a bare `print` on the
-                  success path is text, an `emit` inside a for/while is ndjson,
-                  anything else emits exactly one object and is json
-  gitlab-api.sh   each `case` arm's text — no `print(json.dumps` is text, a bare
-                  `echo` beside one is mixed, a `print(json.dumps` under a python
+how the source-derived shape is computed, independently of either adapter:
+
+  github-api.sh   an ast walk of each cmd_* function -- a bare `print` on the success
+                  path (one with no `file=` keyword, so a stderr write does not count)
+                  is text, an `emit` inside a for/while is ndjson, anything else emits
+                  exactly one object and is json
+  gitlab-api.sh   each `case` arm's text, sliced from its label to its `;;` terminator
+                  rather than to the next label -- no JSON print at all is text, an
+                  unredirected `echo` beside one is mixed, a JSON print under a python
                   `for` is ndjson, anything else is json
 
 Why this test exists. A watcher that parses the adapter with a whole-stream
-`json.load` works on a single-item subcommand and throws on a multi-item one,
-and the obvious `except: sys.exit(0)` turns that into no output — which a
-monitor renders as "nothing to report". A blocking review then arrives as zero
-unresolved threads. The shape column is how a run avoids guessing, and the
-GitLab adapter declares it in a comment, so without this test it is a
-hand-maintained list that can drift from the code beside it."""
+`json.load` works on a single-item subcommand and throws on a multi-item one, and
+the obvious `except: sys.exit(0)` turns that into no output -- which a monitor
+renders as "nothing to report". A blocking review then arrives as zero unresolved
+threads. The shape column is how a run avoids guessing.
+
+Why the oracle is a table rather than a derivation. It used to be a derivation
+copied from the adapter, which made the python half compare the adapter against its
+own algorithm: a wrong rule was wrong identically in both copies and the test
+passed. A hand-written table cannot agree with a bug by construction, and it is
+also what makes an unclassified new subcommand fail."""
 
 
 def load_module(path):
-    spec = importlib.util.spec_from_loader(
-        'adapter_under_test',
-        importlib.machinery.SourceFileLoader('adapter_under_test', path),
-    )
+    loader = importlib.machinery.SourceFileLoader('adapter_under_test', path)
+    spec = importlib.util.spec_from_loader('adapter_under_test', loader)
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    loader.exec_module(module)
     return module
 
 
-def calls_named(node, name):
-    return any(isinstance(inner, ast.Call)
-               and isinstance(inner.func, ast.Name)
-               and inner.func.id == name
-               for inner in ast.walk(node))
+def calls_to_stdout(node, name):
+    for inner in ast.walk(node):
+        if not isinstance(inner, ast.Call):
+            continue
+        if not isinstance(inner.func, ast.Name) or inner.func.id != name:
+            continue
+        if any(kw.arg == 'file' for kw in inner.keywords):
+            continue
+        return True
+    return False
 
 
 def derive_python(source):
     tree = ast.parse(textwrap.dedent(source))
-    if calls_named(tree, 'print'):
+    if calls_to_stdout(tree, 'print'):
         return 'text'
     for node in ast.walk(tree):
-        if isinstance(node, (ast.For, ast.While)) and calls_named(node, 'emit'):
+        if isinstance(node, (ast.For, ast.While)) and calls_to_stdout(node, 'emit'):
             return 'ndjson'
     return 'json'
 
 
+JSON_PRINT = re.compile(r'print\s*\(\s*json\.dumps|json\.dump\s*\(|print\s*\([^)]*json\.')
+BARE_ECHO = re.compile(r'^\s*(\|\|\s*)?echo\b')
+PY_FOR = re.compile(r'^(\s*)for\b.*:\s*(\S.*)?$')
+
+
 def derive_bash(body):
-    if not any('print(json.dumps' in line for line in body):
+    json_lines = [i for i, l in enumerate(body) if JSON_PRINT.search(l)]
+    if not json_lines:
         return 'text'
-    if any(re.match(r'\s*echo ', line) for line in body):
+    if any(BARE_ECHO.match(l) and '>&2' not in l for l in body):
         return 'mixed'
     for index, line in enumerate(body):
-        loop = re.match(r'(\s*)for .*:\s*$', line)
+        loop = PY_FOR.match(line)
         if not loop:
             continue
+        if loop.group(2) and JSON_PRINT.search(loop.group(2)):
+            return 'ndjson'
         indent = len(loop.group(1))
         for follower in body[index + 1:]:
             if not follower.strip():
                 continue
             if len(follower) - len(follower.lstrip()) <= indent:
                 break
-            if 'print(json.dumps' in follower:
+            if JSON_PRINT.search(follower):
                 return 'ndjson'
     return 'json'
 
 
-def truth_python(path):
-    module = load_module(path)
-    return {name: derive_python(inspect.getsource(fn))
-            for name, fn in module.COMMANDS.items()}
+LABEL = re.compile(r'^  ([a-z][a-z0-9-]*)\)$')
+TERMINATOR = re.compile(r'^\s*;;\s*$')
+SHAPE_COMMENT = re.compile(r'^    # Shape: (\S+)$')
 
 
-def truth_bash(path):
+def bash_arms(path):
     with open(path) as handle:
         lines = handle.read().split('\n')
-    label = re.compile(r'^  ([a-z][a-z0-9-]*)\)$')
-    shapes = {}
-    name = None
-    start = None
-    for index, line in enumerate(lines):
-        match = label.match(line)
-        if match or re.match(r'^  \*\)$', line):
-            if name is not None:
-                shapes[name] = derive_bash(lines[start:index])
-            if not match:
-                break
-            name = match.group(1)
-            start = index + 1
-    return shapes
-
-
-def declared_bash(path):
-    with open(path) as handle:
-        lines = handle.read().split('\n')
-    label = re.compile(r'^  ([a-z][a-z0-9-]*)\)$')
-    declared = {}
+    arms = {}
     index = 0
     while index < len(lines):
-        match = label.match(lines[index])
+        match = LABEL.match(lines[index])
         if not match:
             index += 1
             continue
         name = match.group(1)
-        index += 1
-        while index < len(lines) and lines[index].startswith('    #'):
-            found = re.match(r'^    # Shape: (\S+)$', lines[index])
+        start = index + 1
+        end = start
+        while end < len(lines) and not TERMINATOR.match(lines[end]):
+            if LABEL.match(lines[end]):
+                break
+            end += 1
+        arms[name] = lines[start:end]
+        index = end
+    return arms
+
+
+def declared_bash(arms):
+    declared = {}
+    for name, body in arms.items():
+        for line in body:
+            found = SHAPE_COMMENT.match(line)
             if found:
                 declared[name] = found.group(1)
-            index += 1
+                break
     return declared
 
 
@@ -150,62 +230,77 @@ def run_help(path):
     environment['GITLAB_PERSONAL_ACCESS_TOKEN'] = ''
     with tempfile.TemporaryDirectory() as empty:
         environment['HOME'] = empty
-        command = (['python3', path] if path.endswith(PYTHON_ADAPTER)
-                   else ['bash', path])
-        done = subprocess.run(command + ['help'], env=environment,
+        runner = ['python3'] if path.endswith(PYTHON_ADAPTER) else ['bash']
+        return subprocess.run(runner + [path, 'help'], env=environment,
                               capture_output=True, text=True)
-    return done
+
+
+ROW = re.compile(r'^([a-z][a-z0-9-]*)\s+(.*\S)\s*$')
 
 
 def parse_help(text):
     rows = {}
     for line in text.split('\n'):
-        if not line.strip():
+        if line.lower().startswith('output shape'):
             break
-        match = re.match(r'^([a-z][a-z0-9-]*)\s+(.*\S)\s*$', line)
-        if not match:
-            continue
-        rows[match.group(1)] = match.group(2).split()[-1]
+        match = ROW.match(line)
+        if match:
+            rows.setdefault(match.group(1), match.group(2).split()[-1])
     return rows
 
 
 def check(path):
     adapter = os.path.basename(path)
+    expected = EXPECTED[adapter]
     failures = []
 
     done = run_help(path)
     if done.returncode != 0:
         return [f'      help exited {done.returncode} with no credentials: '
-                f'{done.stderr.strip()[:120]}']
+                f'{done.stderr.strip()[:140]}']
 
     printed = parse_help(done.stdout)
-    truth = truth_python(path) if adapter == PYTHON_ADAPTER else truth_bash(path)
 
-    for name in sorted(truth):
+    if adapter == PYTHON_ADAPTER:
+        module = load_module(path)
+        implemented = set(module.COMMANDS)
+        derived = {name: derive_python(inspect.getsource(fn))
+                   for name, fn in module.COMMANDS.items()}
+        declared = None
+    else:
+        arms = bash_arms(path)
+        implemented = set(arms)
+        derived = {name: derive_bash(body) for name, body in arms.items()}
+        declared = declared_bash(arms)
+
+    for name in sorted(implemented - set(expected)):
+        failures.append(f'      {name}: implemented but absent from this test\'s '
+                        f'EXPECTED table — classify it')
+    for name in sorted(set(expected) - implemented):
+        failures.append(f'      {name}: in EXPECTED but the adapter does not implement it')
+
+    for name in sorted(set(expected) & implemented):
+        want = expected[name]
+        if want not in SHAPES:
+            failures.append(f'      {name}: EXPECTED holds "{want}", not one of '
+                            f'{", ".join(SHAPES)}')
         if name not in printed:
             failures.append(f'      {name}: no row in help')
-            continue
-        if printed[name] not in SHAPES:
-            failures.append(f'      {name}: shape "{printed[name]}" is not one of '
-                            f'{", ".join(SHAPES)}')
-        if printed[name] != truth[name]:
-            failures.append(f'      {name}: help says {printed[name]}, '
-                            f'the source says {truth[name]}')
-
-    for name in sorted(set(printed) - set(truth)):
-        failures.append(f'      {name}: a help row for a subcommand that is not implemented')
-
-    if adapter == BASH_ADAPTER:
-        declared = declared_bash(path)
-        for name in sorted(truth):
+        elif printed[name] != want:
+            failures.append(f'      {name}: help prints {printed[name]}, '
+                            f'EXPECTED is {want}')
+        if derived.get(name) != want:
+            failures.append(f'      {name}: the source derives {derived.get(name)}, '
+                            f'EXPECTED is {want}')
+        if declared is not None:
             if name not in declared:
                 failures.append(f'      {name}: no "# Shape:" comment beside the case arm')
+            elif declared[name] != want:
+                failures.append(f'      {name}: "# Shape: {declared[name]}" beside the '
+                                f'arm, EXPECTED is {want}')
 
-    for name, shape in EXPECTED[adapter].items():
-        if name in printed and printed[name] != shape:
-            failures.append(f'      {name}: expected {shape}, help says {printed[name]}')
-        elif name not in printed:
-            failures.append(f'      {name}: expected a {shape} row, found none')
+    for name in sorted(set(printed) - set(expected)):
+        failures.append(f'      {name}: a help row for a subcommand this test does not know')
 
     return failures
 
@@ -236,9 +331,8 @@ def main():
             for line in failures:
                 print(line)
         else:
-            adapter = os.path.basename(path)
-            truth = truth_python(path) if adapter == PYTHON_ADAPTER else truth_bash(path)
-            print(f'  ok   — {relative} ({len(truth)} subcommands)')
+            count = len(EXPECTED[os.path.basename(path)])
+            print(f'  ok   — {relative} ({count} subcommands)')
     print()
     if broken:
         print('failed')
