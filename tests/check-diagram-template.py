@@ -157,6 +157,49 @@ const FLOOR = 8 / 12.5;
 }
 
 {
+  const offset = { left: 120, top: 64, width: 500, height: 500 };
+  const v = { x: 1000, y: 2000, w: 1000, h: 1000 };
+  const p = VM.toSvg(v, offset, offset.left + 250, offset.top + 250);
+  ok("toSvg subtracts the element's origin", near(p.x, 1500) && near(p.y, 2500),
+     JSON.stringify(p));
+  const atOrigin = VM.toSvg(v, offset, offset.left, offset.top);
+  ok("toSvg maps the element's top-left to the view's top-left",
+     near(atOrigin.x, v.x) && near(atOrigin.y, v.y), JSON.stringify(atOrigin));
+  const from = { ax: offset.left + 200, ay: offset.top + 250,
+                 bx: offset.left + 300, by: offset.top + 250 };
+  const to = { ax: offset.left + 150, ay: offset.top + 250,
+               bx: offset.left + 350, by: offset.top + 250 };
+  const anchor = VM.toSvg(v, offset, offset.left + 250, offset.top + 250);
+  const pinched = VM.pinch(v, offset, from, to);
+  const after = VM.toSvg(pinched, offset, offset.left + 250, offset.top + 250);
+  ok("a pinch on an offset element still halves the view", near(pinched.w, v.w / 2), pinched.w);
+  ok("a pinch on an offset element holds its anchor",
+     near(after.x, anchor.x) && near(after.y, anchor.y),
+     JSON.stringify(after) + " vs " + JSON.stringify(anchor));
+}
+
+{
+  const bounds = { x: 0, y: 0, w: 1000, h: 400 };
+  const tight = VM.clampZoom({ x: 500, y: 200, w: 1e-9, h: 4e-10 }, bounds);
+  ok("clampZoom bounds how far in the view goes", tight.w >= 1000 / 4000 - 1e-12, tight.w);
+  ok("clampZoom keeps the aspect zooming in", near(tight.w / tight.h, 1e-9 / 4e-10), tight.w / tight.h);
+  ok("clampZoom never yields a zero-width view", tight.w > 0 && tight.h > 0, JSON.stringify(tight));
+}
+
+{
+  const tallGraph = { x: 0, y: 0, w: 400, h: 4000 };
+  const widePort = { left: 0, top: 0, width: 1200, height: 400 };
+  const v = VM.fitAll(tallGraph, widePort.width / widePort.height);
+  ok("fitAll contains a graph taller than it is wide",
+     v.x <= tallGraph.x && v.y <= tallGraph.y &&
+     v.x + v.w >= tallGraph.x + tallGraph.w && v.y + v.h >= tallGraph.y + tallGraph.h,
+     JSON.stringify(v));
+  ok("fitAll keeps the viewport aspect on a tall graph",
+     near(v.w / v.h, widePort.width / widePort.height), v.w / v.h);
+  ok("fitAll grew the width, not the height", near(v.h, tallGraph.h), v.h);
+}
+
+{
   const flat = { left: 0, top: 0, width: 0, height: 0 };
   const v = { x: 0, y: 0, w: 100, h: 100 };
   ok("legible survives a zero-sized viewport",
@@ -185,7 +228,8 @@ class Suite:
 
 
 def read(profile):
-    return open(os.path.join(REPO, TEMPLATE % profile), "rb").read()
+    with open(os.path.join(REPO, TEMPLATE % profile), "rb") as handle:
+        return handle.read()
 
 
 def view_math(page):
@@ -217,6 +261,14 @@ def main():
 
     suite.ok("the page declares the device-width viewport",
              re.search(r'<meta name="viewport"[^>]*width=device-width', page) is not None)
+    suite.ok("the opening view is the legible one, not fit-all",
+             re.search(r"bounds = \{[^}]*\};\s*\n\s*fitLegible\(\);", page) is not None)
+    suite.ok("the Fit button is still wired to fit-all",
+             're.sub' not in page and '$("zoom-fit").addEventListener("click", fit)' in page)
+    suite.ok("a tap only arms the double-tap timer when it was a tap",
+             re.search(r"if \(!tapped \|\| ev\.pointerType === \"mouse\"", page) is not None)
+    suite.ok("dropping to two pointers re-seeds the pinch",
+             re.search(r"if \(pointers\.size >= 2\) \{\s*\n\s*measure\(\);\s*\n\s*pinchFrom = gesture\(\);", page) is not None)
     suite.ok("word-break: break-all is gone", "word-break: break-all" not in page)
     suite.ok("resize is not wired straight to fit", 'addEventListener("resize", fit)' not in page)
     suite.ok("the canvas still owns its touches", "touch-action: none" in page)
@@ -231,13 +283,17 @@ def main():
             handle.write(block + "\nmodule.exports = ViewMath;\n")
         with open(driver, "w") as handle:
             handle.write(DRIVER)
-        finished = subprocess.run([shutil.which("node") or "node", driver, module],
-                                  capture_output=True, text=True)
-        suite.ok("the view-math block runs under node", finished.returncode == 0,
-                 finished.stderr or finished.stdout)
-        if finished.returncode == 0:
-            for case in json.loads(finished.stdout):
-                suite.ok(case["label"], case["ok"], case["detail"])
+        node = shutil.which("node")
+        suite.ok("node is on PATH, so the view maths can be driven", node is not None,
+                 "no node found; the view-math half of this check could not run")
+        if node is not None:
+            finished = subprocess.run([node, driver, module],
+                                      capture_output=True, text=True)
+            suite.ok("the view-math block runs under node", finished.returncode == 0,
+                     finished.stderr or finished.stdout)
+            if finished.returncode == 0:
+                for case in json.loads(finished.stdout):
+                    suite.ok(case["label"], case["ok"], case["detail"])
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

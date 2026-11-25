@@ -240,7 +240,7 @@ const ViewMath = (() => {
     const widest = reach * 8, narrowest = reach / 4000;
     const w = Math.min(widest, Math.max(narrowest, view.w));
     if (w === view.w) return view;
-    const h = view.h * (w / span(view.w));
+    const h = view.w > 0 ? view.h * (w / view.w) : w;
     const cx = view.x + view.w / 2, cy = view.y + view.h / 2;
     return { x: cx - w / 2, y: cy - h / 2, w, h };
   }
@@ -432,9 +432,13 @@ const ViewMath = (() => {
   function reflow() {
     const before = lastSize;
     measure();
-    if (before && before.width > 0 && before.height > 0 && rect.width > 0 && rect.height > 0) {
-      apply(ViewMath.rescale(view, before, rect));
+    if (!(rect.width > 0 && rect.height > 0)) return;
+    if (!before || !(before.width > 0) || !(before.height > 0)) {
+      fitLegible();
+      return;
     }
+    apply(ViewMath.rescale(view, before, rect));
+    if (drag) { drag.vx = view.x; drag.vy = view.y; drag.x = drag.lastX; drag.y = drag.lastY; }
   }
 
   let nodeEls = {}, edgeEls = [];
@@ -606,6 +610,7 @@ const ViewMath = (() => {
     });
     applyHighlight(state.selected);
     renderPanel();
+    if (state.selected && canvas.classList.contains("full")) toggleFull();
   }
 
   // Controls
@@ -663,7 +668,7 @@ const ViewMath = (() => {
   };
   const startDrag = (id, x, y, moved) => {
     measure();
-    drag = { id, x, y, vx: view.x, vy: view.y, moved };
+    drag = { id, x, y, vx: view.x, vy: view.y, moved, lastX: x, lastY: y };
     svg.classList.add("dragging");
   };
 
@@ -695,6 +700,8 @@ const ViewMath = (() => {
     }
     if (!drag || drag.id !== ev.pointerId) return;
     measure();
+    drag.lastX = ev.clientX;
+    drag.lastY = ev.clientY;
     const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
     if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
     view = {
@@ -710,12 +717,17 @@ const ViewMath = (() => {
     pointers.delete(ev.pointerId);
     release(ev.pointerId);
     if (wasPinching) {
-      pinchFrom = null;
-      if (pointers.size === 1) {
+      lastTap = 0;
+      if (pointers.size >= 2) {
+        measure();
+        pinchFrom = gesture();
+      } else if (pointers.size === 1) {
+        pinchFrom = null;
         const [id] = [...pointers.keys()];
         const [at] = [...pointers.values()];
         startDrag(id, at.x, at.y, true);
       } else {
+        pinchFrom = null;
         drag = null;
         svg.classList.remove("dragging");
       }
@@ -725,7 +737,10 @@ const ViewMath = (() => {
     drag = null;
     svg.classList.remove("dragging");
     if (tapped) select(null);
-    if (ev.pointerType === "mouse" || ev.target.closest(".node")) return;
+    if (!tapped || ev.pointerType === "mouse" || ev.target.closest(".node")) {
+      lastTap = 0;
+      return;
+    }
     const now = Date.now();
     if (now - lastTap < 320) {
       measure();
