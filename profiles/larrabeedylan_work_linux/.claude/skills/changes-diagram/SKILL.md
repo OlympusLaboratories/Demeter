@@ -38,8 +38,26 @@ Use `$CR` whenever you have to name the change request in what you write back to
 Run from the repo root (`git rev-parse --show-toplevel`).
 
 - **Base**: `git merge-base <default-branch> HEAD`, or the target branch of the change when you know it. The diff is base → working tree, so committed *and* uncommitted tracked changes are both included; untracked files are not.
-- If `git diff --stat <base>` is empty, stop and tell the user there is nothing to draw — most often the wrong base, or a branch that is already merged. Do not publish an empty page.
+- If `git diff --stat <base>` is empty, stop and tell the user there is nothing to draw — most often the wrong base, or a branch that is already merged. An already-merged branch has an answer rather than only a stop; it is below. Do not publish an empty page.
 - **Title**: the title of the change if you know it, else the ticket id and subject from the branch name or the most recent commit (e.g. `ENG-412 split the dispatch loop`).
+
+### After the merge: the base is the merge commit's parent, and the working tree moves with it
+
+`autopilot` draws the diagram before the merge (its Step 8b) so that this case never arises on an ordinary run. It still arises: a `--diagram true` amendment can land after the branch is gone, and the amendment is honoured rather than refused.
+
+**Choosing a base is only half of it, and this is the trap.** Every diff here is base → **the working tree on disk**, never base → some other ref. The builder reads the before-side with `git show <base>:<path>` and the after-side with a plain file read, so after a merge the after-side is whatever the default branch holds *now* — this change plus everything that landed after it.
+
+So move the working tree to the merge commit rather than looking for a cleverer base:
+
+```bash
+git worktree add --detach <scratch>/diagram-<sha> <sha>
+# run every step of this skill from there, with BASE=<sha>~1
+git worktree remove <scratch>/diagram-<sha>
+```
+
+`<sha>` is the squash commit on the default branch; `<sha>~1` is its parent. The detached worktree makes the on-disk after-side exactly that commit, so both sides belong to this change and nothing merged later can contaminate them.
+
+**Never pass a range as the base.** `<sha>~1..<sha>` is the shape that suggests itself, and it fails *silently*, which is worse than failing at all. `git diff --name-status`, `--numstat` and `--unified` all accept a range and return the right file list, so the build succeeds and reports a sensible node count. `git show "<sha>~1..<sha>:<path>"` returns nothing, and that empty result is swallowed into "no before-side" — so every changed file is rendered as **added**. The page comes out all-green and confidently wrong about a change that mostly modified things.
 
 ## Step 3: Build the graph JSON
 
@@ -51,6 +69,8 @@ OUT=<scratchpad>/changes-diagram/<branch-name-with-slashes-replaced>
 mkdir -p "$OUT"
 python3 "$SKILL/scripts/build_changes_graph.py" . "$BASE" "$OUT/graph.json" --title "<title>"
 ```
+
+**When the branch is gone** — the post-merge case in Step 2 — name the folder after the merge commit instead, `<scratchpad>/changes-diagram/<sha>`. Do not derive it from the checked-out branch there: that answers the default branch from the main checkout and `HEAD` from the detached one, and neither is unique to this change, so two post-merge diagrams would share one folder and the second would overwrite the first.
 
 It prints `N nodes, M edges, K groups, mode=<callgraph|files>`.
 
