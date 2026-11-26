@@ -47,15 +47,19 @@ Run from the repo root (`git rev-parse --show-toplevel`).
 
 **Choosing a base is only half of it, and this is the trap.** Every diff here is base → **the working tree on disk**, never base → some other ref. The builder reads the before-side with `git show <base>:<path>` and the after-side with a plain file read, so after a merge the after-side is whatever the default branch holds *now* — this change plus everything that landed after it.
 
-So move the working tree to the merge commit rather than looking for a cleverer base:
+So move the working tree to the merge commit rather than looking for a cleverer base. **These are two blocks with the rest of the skill in between, not a sequence to run in one go** — the teardown is last because the worktree is what every step until then reads from. Set it up:
 
 ```bash
 git worktree add --detach <scratch>/diagram-<sha> <sha>
-# run every step of this skill from there, with BASE=<sha>~1
+```
+
+Then run **Steps 3 through 6 from inside `<scratch>/diagram-<sha>`**, with `BASE=<sha>~1`. Only once the page is published, tear it down:
+
+```bash
 git worktree remove <scratch>/diagram-<sha>
 ```
 
-`<sha>` is the squash commit on the default branch; `<sha>~1` is its parent. The detached worktree makes the on-disk after-side exactly that commit, so both sides belong to this change and nothing merged later can contaminate them.
+`<sha>` is the squash commit on the default branch; `<sha>~1` is its parent. The detached worktree makes the on-disk after-side exactly that commit, so both sides belong to this change and nothing merged later can contaminate them — and removing it before the build has run puts the after-side back to the contaminated main checkout, silently, with a plausible node count.
 
 **Never pass a range as the base.** `<sha>~1..<sha>` is the shape that suggests itself, and it fails *silently*, which is worse than failing at all. `git diff --name-status`, `--numstat` and `--unified` all accept a range and return the right file list, so the build succeeds and reports a sensible node count. `git show "<sha>~1..<sha>:<path>"` returns nothing, and that empty result is swallowed into "no before-side" — so every changed file is rendered as **added**. The page comes out all-green and confidently wrong about a change that mostly modified things.
 
