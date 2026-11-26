@@ -30,12 +30,11 @@ SUBSTITUTIONS = [
 TRANSFORM_EXEMPT = {
     'environment.json.example':
         'the per-profile forge, reviewer and store values skill-env.sh exists to carry',
-    'notify.json.example':
-        'Slack on work, Telegram on home',
     'scripts/skill-env.sh':
         'the seam itself: each profile carries its own defaults in code',
     'scripts/notify-send.sh':
-        'Slack and Telegram delivery differ beyond vocabulary',
+        'the home copy also speaks Telegram, which the Pi reaches through its '
+        'scripts/ symlink; the Slack half is this file',
     'skills/fix-feedback/SKILL.md':
         "documents the forge adapter's response shape, which is per-forge",
     'skills/changes-explain/SKILL.md':

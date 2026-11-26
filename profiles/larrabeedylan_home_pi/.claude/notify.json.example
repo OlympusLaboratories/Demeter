@@ -1,6 +1,12 @@
 {
-  "_comment": "This box already holds the bot's credential for its own alerting, so the token is referenced rather than copied. bot_token/chat_id still work if a literal value is ever needed; the _file forms win only when the direct key is empty.",
-  "transport": "telegram",
+  "_comment": "A thread per session is why this box is on Slack with the Mac: a flat chat interleaves a dozen concurrent sessions unreadably. The telegram section below still works and is the one-word fallback - set transport back to \"telegram\" and nothing else changes. Its bot_token_file/chat_id_file form is right there because this box already holds that credential for its own alerting, so there is one owner per credential and no second copy to rotate; the _file forms win only when the direct key is empty, and they work for the slack keys too.",
+  "transport": "slack",
+  "slack": {
+    "bot_token": "REPLACE_ME",
+    "channel": "REPLACE_ME",
+    "mention": "REPLACE_ME",
+    "webhook_url": ""
+  },
   "telegram": {
     "bot_token_file": "~/.telegram-jarvis-token",
     "chat_id_file": "~/.telegram-alert-chat"

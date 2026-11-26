@@ -787,7 +787,7 @@ Check it on any machine with `notify.py --test`, which prints the CLI it resolve
 
 The installer creates `~/.claude/notify.json` from your profile's `notify.json.example` at mode 600 and tells you which fields still need filling. Until they are filled the hook is **dormant** — it runs, logs why it did nothing, and sends nothing. Nothing in the repo ever holds a token.
 
-**Work profiles (Slack).** Two routes, and which you want depends on where the messages should land.
+**Work and home_darwin profiles (Slack).** Two routes, and which you want depends on where the messages should land.
 
 *An incoming webhook* is the quickest: create one at <https://api.slack.com/messaging/webhooks>, paste the URL into `slack.webhook_url`, done — no scopes to request. The channel picker does let you choose your own DM, so this can be private. The catch is that a webhook is permanently bound to the conversation you picked and ignores `thread_ts`, so every session's messages land flat in one stream.
 
@@ -803,7 +803,9 @@ To have it DM **only you**, put your own member ID (`U…`, from your Slack prof
 
 Do not skip that resolution by hand: passing a `U…` id straight to `chat.postMessage` is accepted but posts to that user's DM with **Slackbot**, not with your app — the message arrives somewhere you are not looking, and nothing errors. The `D…` conversation id is what `chat.postMessage` needs, and `conversations.open` is what turns one into the other. Putting a `D…` or `C…` id in `slack.channel` skips the lookup entirely.
 
-**Home profile (Telegram).** Message [@BotFather](https://t.me/BotFather), `/newbot`, and put the token in `telegram.bot_token`. Send your new bot a message, then read your chat id out of `https://api.telegram.org/bot<token>/getUpdates` and put it in `telegram.chat_id`.
+**Pi profile (Telegram).** Message [@BotFather](https://t.me/BotFather), `/newbot`, and put the token in `telegram.bot_token`. Send your new bot a message, then read your chat id out of `https://api.telegram.org/bot<token>/getUpdates` and put it in `telegram.chat_id`.
+
+The Pi is the only Telegram profile left, and it is the reason the home sender speaks both transports rather than only Slack. Its `scripts/` is a symlink into `home_darwin`, so a Slack-only sender there would read a `slack` section its config does not have and mute the box on every send — a box whose sessions run unattended, which is the one place a silent transport costs most. `notify-send.sh` therefore dispatches on `transport`, and the Slack half of it is byte-for-byte the work profiles' behaviour.
 
 On a machine that already holds that bot's credential for its own alerting, use `telegram.bot_token_file` and `telegram.chat_id_file` instead and point them at the existing files. The `_file` form is read only when the direct key is empty, so there is one owner per credential and no second copy to rotate. The Pi profile ships configured this way, which is why notifications there are live on the first install rather than dormant.
 

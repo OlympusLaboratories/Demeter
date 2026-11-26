@@ -1,8 +1,16 @@
 {
-  "transport": "telegram",
-  "telegram": {
-    "bot_token": "REPLACE_ME",
-    "chat_id": "REPLACE_ME"
+  "transport": "slack",
+  "slack": {
+    "webhook_url": "REPLACE_ME",
+    "bot_token": "",
+    "channel": "",
+    "mention": "",
+    "mention_levels": [
+      "stop",
+      "question",
+      "permission",
+      "failure"
+    ]
   },
   "host_label": "",
   "min_turn_seconds": 60,
