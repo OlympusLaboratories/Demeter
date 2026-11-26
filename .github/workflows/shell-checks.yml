@@ -12,6 +12,8 @@ on:
       - 'profiles/*/.claude/hooks/**'
       - 'profiles/*/.claude/scripts/**'
       - 'profiles/*/.claude/skills/changes-diagram/**'
+      - 'profiles/*/.claude/skills/review-code/**'
+      - 'profiles/*/.claude/skills/changes-description/**'
       - 'tools/forge-watch/**'
       - '.github/workflows/shell-checks.yml'
 
@@ -89,3 +91,6 @@ jobs:
 
       - name: Diagram py_root derivation
         run: tests/check-py-root.py
+
+      - name: Workflow skills' prose/script seam
+        run: tests/check-workflow-scripts.py

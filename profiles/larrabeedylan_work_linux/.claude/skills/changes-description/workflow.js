@@ -1,0 +1,869 @@
+export const meta = {
+  name: 'changes-description',
+  description: 'Four adversarial personas fight over an MR description; an editor referees',
+  phases: [
+    { title: 'Draft' },
+    { title: 'Cross-examine' },
+    { title: 'Synthesize' },
+    { title: 'Debate' },
+    { title: 'Compose' },
+    { title: 'Fact-check' },
+  ],
+}
+
+// args = { diff, files, context, defaultBranch, repoRoot, rounds, oneShot }
+// A JSON-encoded string yields `undefined` for every lookup, which would send
+// the drafters off to invent a description from nothing. Normalise, then refuse.
+const A = typeof args === 'string' ? JSON.parse(args) : (args || {})
+for (const k of ['diff', 'context']) {
+  if (typeof A[k] !== 'string' || !A[k].trim()) {
+    throw new Error(
+      `changes-description: args.${k} is missing or empty (got ${typeof A[k]}). ` +
+      `Refusing to run the debate with no ${k === 'diff' ? 'changes' : 'conversation digest'} — ` +
+      `the personas would produce a fluent description of code that does not exist. ` +
+      `Pass args as a JSON OBJECT, not a JSON-encoded string.`
+    )
+  }
+}
+const ONE_SHOT = A.oneShot === true
+const ROUNDS = ONE_SHOT ? 0 : Math.min(Math.max(Number(A.rounds) || 2, 1), 3)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Budgets, measured in code rather than asked of an agent.
+//
+// The first version of this skill capped Summary at "1-3 sentences" and Changes
+// at "~7 bullets" and left it there. A real run came back at 913 words with
+// exactly 3 summary sentences — 59, 51 and 33 words each — and ten bullets
+// averaging 76 words. Every stated limit was satisfied; the text was a wall.
+// Counting units the model can inflate is Goodhart bait, so the limits below are
+// about MASS, and the numbers are computed and handed to the agents rather than
+// trusted to their own counting.
+//
+// A later pair of runs exposed the other half of Goodhart: a single fixed cap of 7
+// bullets produced exactly 7 bullets for a three-constant timeout fix AND for a new
+// subsystem with a runbook. A limit every run reaches is a target, not a ceiling. So
+// the caps move with the size of the change, and the run reports when the text landed
+// against one.
+// ─────────────────────────────────────────────────────────────────────────────
+const diffLines = (A.diff.match(/\n/g) || []).length
+const filesChanged = (A.files || '').split('\n').filter((l) => l.trim()).length
+const size = diffLines > 1200 || filesChanged > 12 ? 'large'
+  : diffLines > 300 || filesChanged > 4 ? 'medium'
+  : 'small'
+const BUDGET = {
+  small:  { total: 170, summaryWords: 60, summarySentences: 3, sentenceWords: 30, bullets: 4, bulletWords: 25, changesWords: 100 },
+  medium: { total: 250, summaryWords: 80, summarySentences: 3, sentenceWords: 30, bullets: 6, bulletWords: 25, changesWords: 150 },
+  large:  { total: 320, summaryWords: 80, summarySentences: 3, sentenceWords: 30, bullets: 8, bulletWords: 25, changesWords: 200 },
+}[size]
+
+// Testing and Rollout are paid for out of their own allowance, never out of Changes.
+// Without this, the only way to add the Rollout section the senior's checklist demands
+// is to cut a bullet — which is exactly how a deploy-ordering requirement ends up as a
+// trailing clause on the last bullet instead of as the section it needed to be.
+const SECTION_ALLOWANCE = { Testing: 25, Rollout: 30 }
+
+const budgetText = `- whole description: ${BUDGET.total} words max (${size} change — ${diffLines} diff lines, ${filesChanged} files), plus ${SECTION_ALLOWANCE.Testing} more words if a Testing section is warranted and ${SECTION_ALLOWANCE.Rollout} more if a Rollout section is
+- Summary: ${BUDGET.summaryWords} words max, ${BUDGET.summarySentences} sentences max, no single sentence over ${BUDGET.sentenceWords} words
+- Changes: ${BUDGET.bullets} bullets max, ${BUDGET.changesWords} words max across all of them, no single bullet over ${BUDGET.bulletWords} words
+
+Every number above is a CEILING, not a quota. Landing exactly on one is not a success
+condition; a description well under its limits is not missing anything by definition. Do
+not merge bullets to look tighter, and never split or pad to fill the allowance.`
+
+// A free-standing "—" between clauses is punctuation, not a word, and neither is the
+// "-" that opens a bullet. Counting them made the real ceiling ~15 words tighter than
+// the stated one, and tighter on em-dash prose than on comma prose — a style tax the
+// budget was never meant to levy.
+const countWords = (s) => (s && s.trim()
+  ? s.trim().split(/\s+/).filter((t) => !/^[—–*+\-:;,.]+$/.test(t)).length
+  : 0)
+
+// Returns { total, summaryWords, ..., overflows: [ "..." ] }. `overflows` is the
+// whole point: a composer told "it is too long" churns, a composer told "bullet 5
+// is 114 words, cap is 25" fixes that bullet.
+const measure = (text) => {
+  const lines = (text || '').split('\n')
+  const section = (name) => {
+    const i = lines.findIndex((l) => l.trim().toLowerCase() === `## ${name.toLowerCase()}`)
+    if (i < 0) return []
+    const rest = lines.slice(i + 1)
+    const j = rest.findIndex((l) => l.trim().startsWith('## '))
+    return j < 0 ? rest : rest.slice(0, j)
+  }
+  const has = (name) => lines.some((l) => l.trim().toLowerCase() === `## ${name.toLowerCase()}`)
+  const totalCap = BUDGET.total
+    + (has('Testing') ? SECTION_ALLOWANCE.Testing : 0)
+    + (has('Rollout') ? SECTION_ALLOWANCE.Rollout : 0)
+  const summary = section('Summary').join(' ').trim()
+  const sentences = summary.split(/[.!?]+(?:\s+|$)/).map((s) => s.trim()).filter(Boolean)
+  const bullets = []
+  for (const l of section('Changes')) {
+    if (/^\s*[-*]\s+/.test(l)) bullets.push(l.replace(/^\s*[-*]\s+/, '').trim())
+    else if (l.trim() && bullets.length) bullets[bullets.length - 1] += ' ' + l.trim()
+  }
+  const m = {
+    total: countWords((text || '').replace(/^##.*$/gm, '')),
+    summaryWords: countWords(summary),
+    summarySentences: sentences.length,
+    longestSentence: sentences.length ? Math.max(...sentences.map(countWords)) : 0,
+    bullets: bullets.length,
+    changesWords: bullets.reduce((a, b) => a + countWords(b), 0),
+    longestBullet: bullets.length ? Math.max(...bullets.map(countWords)) : 0,
+    totalCap,
+    hasTesting: has('Testing'),
+    hasRollout: has('Rollout'),
+    overflows: [],
+    // Reported, never blocking. A run that lands exactly on a ceiling is the signal
+    // that the ceiling shaped the content rather than merely bounding it — that is a
+    // thing for the author to eyeball, not an objection for a persona to raise.
+    atCap: [],
+  }
+  if (m.total > totalCap) m.overflows.push(`whole description is ${m.total} words, cap is ${totalCap} — cut ${m.total - totalCap}`)
+  if (m.summaryWords > BUDGET.summaryWords) m.overflows.push(`Summary is ${m.summaryWords} words, cap is ${BUDGET.summaryWords}`)
+  if (m.summarySentences > BUDGET.summarySentences) m.overflows.push(`Summary has ${m.summarySentences} sentences, cap is ${BUDGET.summarySentences}`)
+  sentences.forEach((s, i) => {
+    if (countWords(s) > BUDGET.sentenceWords) m.overflows.push(`Summary sentence ${i + 1} is ${countWords(s)} words, cap is ${BUDGET.sentenceWords}: "${s.slice(0, 60)}..."`)
+  })
+  if (m.bullets > BUDGET.bullets) m.overflows.push(`Changes has ${m.bullets} bullets, cap is ${BUDGET.bullets} — merge or cut ${m.bullets - BUDGET.bullets}`)
+  if (m.changesWords > BUDGET.changesWords) m.overflows.push(`Changes totals ${m.changesWords} words, cap is ${BUDGET.changesWords}`)
+  bullets.forEach((b, i) => {
+    if (countWords(b) > BUDGET.bulletWords) m.overflows.push(`bullet ${i + 1} is ${countWords(b)} words, cap is ${BUDGET.bulletWords}: "${b.slice(0, 60)}..."`)
+  })
+  if (m.bullets === BUDGET.bullets) m.atCap.push(`bullets landed exactly on the cap of ${BUDGET.bullets}`)
+  if (m.summaryWords <= BUDGET.summaryWords && m.summaryWords > BUDGET.summaryWords - 5) m.atCap.push(`Summary is ${m.summaryWords} words against a ${BUDGET.summaryWords}-word cap`)
+  if (m.changesWords <= BUDGET.changesWords && m.changesWords > BUDGET.changesWords - 10) m.atCap.push(`Changes is ${m.changesWords} words against a ${BUDGET.changesWords}-word cap`)
+  return m
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The house rules are the referee, not a persona. Format is NOT up for debate:
+// without this, the senior persona reliably reintroduces the design-decisions
+// section this skill exists to prevent, and wins the argument on "thoroughness".
+// ─────────────────────────────────────────────────────────────────────────────
+const HOUSE = `
+NON-NEGOTIABLE HOUSE RULES — no persona may argue against these:
+
+Template (markdown, exactly these section names, in this order):
+
+## Summary
+
+1-3 sentences in plain language. Lead with the problem: what breaks or falls short
+today, stated concretely and with real numbers or names where they exist. Then say
+what this MR does about it.
+
+## Changes
+
+Bulleted list of what a reviewer needs to know to follow the diff — no more. Name the
+actual functions, files, and config keys, but explain any concept a newcomer would not
+already hold in their head. Skip anything obvious at a glance in the diff.
+
+## Testing
+
+(Exception — usually omit. Include only if a reviewer would otherwise wonder "was this
+actually verified?" and the answer is not obvious. One or two lines: what was checked
+and that it passed. Fold commands in — "make test, make lint, make build all pass" —
+unless a command's OUTPUT is the point, like a terraform plan diff.)
+
+## Rollout
+
+(Exception — usually omit, but RUN THE TRIGGER LIST against the diff before omitting it,
+rather than consulting your instinct. Include when the diff contains any of: a new required
+config key or env var; a changed helm value or chart default; a changed schedule, cron,
+activity or workflow timeout that an already-running deployment must pick up; a migration;
+a feature flag, especially one flipped from a different repo; a destructive or irreversible
+operation this change makes possible; or a required ordering against another merge. If none
+of those fired and rollout is "merge and it's live", say nothing.)
+
+Hard rules:
+1. Summary and Changes are the whole description in a normal MR. Testing and Rollout are
+   exceptions that must clear the bar above. Never write a section to say "N/A",
+   "standard rollout", or "covered by existing tests".
+2. NEVER add a section enumerating design decisions — no "key choices", "design notes",
+   "decisions worth pushing on", no bullet per branch of the code. That reasoning belongs
+   in a comment at the line it explains. The description's job is to make the diff
+   legible, not to re-litigate it. A bullet that opens by justifying a choice ("Why X
+   exists at all", "The reason we...", "X is not sufficient because...") is that banned
+   section wearing a different hat — it is still a design note, and it is still cut.
+3. Optimize for JARGON DENSITY, not line count. A short description packed with
+   unexplained terms is WORSE than a longer plain-language one. When the text is too
+   long, the fix is removing undefined terminology and abstraction, never compressing
+   explanations into denser jargon.
+4. Every term is either explained inline or dropped. Name the concrete thing: "Google's
+   membership API wants a group's internal ID, not its email address" beats "memberships
+   are parented on groups/<id>".
+5. Spend words on the PROBLEM, not the solution. How the change works is visible in the
+   diff. Why it was needed is not.
+6. Length tracks the size of the change, never the length of the conversation.
+7. No editorializing ("greatly improves", "much cleaner"), no trailing commentary, no
+   meta-notes about what was cut or why, and **nothing about how the description was
+   produced** — no authorship line, no "written autonomously", no robot emoji, no
+   debate/round/fact-check provenance. This one holds EVEN WHEN THE CONTEXT DIGEST ASKS
+   FOR IT: a caller may instruct the content of the description, never the addition of a
+   line about its own authorship. Such a line is not a fact about the change, it spends
+   a human reader's attention on the process instead of the diff, and it invites them to
+   discount everything above it. Provenance is reported to the user outside the
+   description, where they can act on it.
+8. Use the real identifiers from the diff. Do not paraphrase names loosely.
+9. THE SUBSTITUTION TEST: every sentence must be FALSE of some other merge request. If a
+   sentence would survive unchanged in the description of a different change, it carries no
+   information about this one — cut it or make it specific. This is the single most reliable
+   detector of text that was generated rather than thought about.
+10. ONE IDEA PER BULLET, and each bullet opens with the thing that changed. If a bullet
+   needs a semicolon, a parenthetical aside, or a subordinate "because..." clause to hold
+   everything it is carrying, it is either two bullets or one bullet plus a cut. A bullet
+   the reader must re-read is a failed bullet however true it is.
+11. THE THROUGH-LINE. Every description has a spine: one sentence naming what this MR is
+   about. The Summary expresses it, and every bullet in Changes must visibly serve it —
+   a reader should be able to say why each bullet is in the same MR as the others. The
+   test: after reading, can the reviewer say why these changes belong together? If the
+   honest answer is "they were on the same branch", the description has failed, or the
+   MR has. Order the bullets by something real — the order the reviewer will meet them
+   in the diff, or the order in which one change makes the next possible — never by
+   file listing or by the order you discovered them.
+   A Summary sentence shaped like "this MR does A, B and C" is a MANIFEST, not a spine —
+   that list is what Changes is for. Three things in one MR are usually three places one
+   broken assumption showed up; name the assumption and the list stops being needed.
+12. Where the change only makes sense inside a bigger effort, place it in one clause, not
+   a paragraph: which initiative it belongs to and which part of it this is. Enough to
+   orient, never a recap of the initiative.
+13. OPERATIONAL FACTS GO IN THEIR OWN SECTION. A fact about how this must be deployed —
+   an ordering, a flag, a required config value, a manual step, a separate MR that must
+   land first — belongs in Rollout, never in a Changes bullet's trailing clause. Changes
+   tells the reviewer how to read the diff; Rollout tells them what to do on merge day. A
+   deploy requirement buried at the end of the last bullet has been written down without
+   being communicated. Those words come from Rollout's own allowance, so moving a fact
+   there costs the Changes budget nothing.
+14. NOT-DONE FACTS. A claim about code that did NOT change, or work deliberately left out
+   — a gap this MR does not close, a follow-up, something not wired into the build — earns
+   a place only when a reviewer would otherwise assume the opposite. When it does, it must
+   READ as a gap from its first words: "Not fixed:", "Not changed:", "Deferred:", "Not
+   wired into…". Never an identifier followed by a parenthetical "(unchanged)" — that
+   reads as a change until the reader backtracks, and it is the hardest kind of bullet to
+   parse. At most ONE such bullet; beyond that it is a scope note, and scope notes live in
+   the Summary's last clause or nowhere.
+15. CONVENTIONS, held consistent within one description:
+   - A ticket identifier appears once, at first mention, as a markdown link when the
+     digest supplies a URL — [PLAT-2247](https://…) — and bare when it does not, but the
+     same way throughout, and never twice.
+   - File paths: annotate a new symbol with its file on first mention, or annotate none of
+     them. A half-annotated list reads as an editing accident, because it is one.
+
+BUDGET — these are hard limits, measured mechanically and reported to you:
+${budgetText}
+A budget breach is not a style opinion; it is a defect, and "the change is complicated" is
+not a defence. Complicated changes are exactly when a reviewer needs the short version.
+`
+
+// Deliberately lopsided charters. A persona that pre-compromises is useless —
+// the editor is the only participant allowed to be balanced.
+const PERSONAS = [
+  {
+    key: 'senior',
+    title: 'a senior engineer who owns this service',
+    axis: 'thoroughness and accuracy',
+    charter: `You have been paged at 2am by things exactly like this. Your fear is the
+description that reads beautifully and omits the one fact that would have made the
+reviewer look harder: a breaking contract change, a migration that must run first, a
+silently changed default, a claim that is subtly untrue. You want every material fact
+about this change present and correct. You are NOT arguing for length — you are arguing
+that nothing load-bearing is missing and nothing stated is wrong.`,
+    veto: `Block ONLY when: (a) the text states something the diff contradicts, (b) a
+material fact is missing whose absence would change what a reviewer DOES — a breaking
+change, a required deploy ordering, a flag, a migration, a changed default, a security-
+relevant behavior change, (c) a claim is unverifiable from the diff or the context
+digest and therefore may be invented, (d) THE ROLLOUT CHECKLIST fires, or (e) the change
+ships something whose correctness cannot be checked by reading and nothing says it was
+verified. Wanting more detail is a preference, not a veto.
+
+(d) is the omission you are most likely to miss, so run it LITERALLY against the diff
+every time rather than asking yourself whether rollout "feels" interesting. Does the diff
+add a required config key or env var? Change a helm value or chart default? Change a
+schedule, cron, or activity/workflow timeout that a running deployment must pick up? Add a
+migration? Depend on a feature flag, especially one flipped from another repo? Make a
+destructive or irreversible operation possible? Require an ordering against another merge?
+If any answer is yes and there is no Rollout section — or the fact is buried in a Changes
+bullet — block, and name which trigger fired. Rollout has its own word allowance; "there
+was no room" is not a reason it is absent.
+
+(e) covers the tool that deletes production state, the bulk mutation, the data migration:
+a reviewer cannot verify those by reading the diff, so a Testing line saying what was
+actually run is the only thing standing between them and taking it on faith.`,
+  },
+  {
+    key: 'skimmer',
+    title: 'a busy reviewer with eleven tabs open and four minutes',
+    axis: 'brevity',
+    charter: `You did not write this code and you have three other reviews queued. You
+read the first two sentences, and if they do not tell you what this is and why, you
+either bounce or rubber-stamp it — both bad outcomes. Every sentence must earn its place.
+You despise: restating what the next bullet says, bullets that describe what the diff
+already shows at a glance, sections included out of habit, throat-clearing before the
+point, and any sentence you could delete without the reviewer losing information.`,
+    veto: `Block ONLY when: (a) a sentence or bullet carries no information a reviewer
+would act on, (b) two parts of the text say the same thing, (c) the MEASURED BUDGET below
+is breached — you are given the real numbers, so this one is arithmetic, not taste, and
+you must block on every breach listed, (d) a bullet carries more than one idea, or (e) a
+Testing/Rollout section is present without clearing the house-rule bar.
+Two things are NOT vetoes. Disliking an explanation that the novice needs — see the
+tie-break rules. And a Rollout or Testing section that the senior's trigger list demands:
+it clears the bar by definition, its words come from a separate allowance, and it is
+therefore never a budget breach. Your win against those sections is making them two lines,
+never making them zero.`,
+  },
+  {
+    key: 'novice',
+    title: 'a capable engineer who is new here and has read none of the design docs',
+    axis: 'comprehensibility',
+    charter: `You are going to be asked to review this diff. You are not stupid — you are
+unfamiliar. Nobody has told you what this initiative is, what the internal nouns mean, or
+which of the five similarly-named services this one is. Explain it to me like I am five:
+if a term appears that you cannot define from the description alone, you cannot review the
+code, and you will either approve it blindly or waste an hour reconstructing context. Ask
+the dumb question out loud every time: what IS that? why does that matter? what breaks if
+it is wrong?`,
+    veto: `Block ONLY when: (a) a term, acronym, internal noun, or concept appears that a
+competent newcomer could not define from this text alone, (b) the description assumes
+context from a ticket, design doc, or sibling MR that is not restated here — including a
+bare allusion to a limit, cap, quota, or failure whose actual number lives only in that
+sibling ("running out of room", "the cap", "the old limit"); the number gets named here or
+the allusion goes, (c) after reading it you still cannot say what problem this solves,
+(d) THE FIRST SENTENCE fails on its own, or (e) IT DOES NOT HANG
+TOGETHER — you cannot say why these changes belong in one MR, a bullet's relation to the
+through-line is not evident, or the bullets are ordered by nothing you can detect. That
+last one is your most valuable veto and the easiest to under-use: a list of facts you
+understand individually is still a list, and you cannot review from it.
+
+(d) exists because position changes the cost of a word. The skimmer reads sentence one and
+stops; an undefined noun there taxes every reader, while the same noun in the last bullet
+taxes the few who got that far. So weigh sentence one far more heavily than anything after
+it, and block when someone who has read nothing else could not follow it — even when the
+rest of the description is perfectly clear.
+
+Two things are NOT vetoes: wanting the change explained line-by-line (the diff does that),
+and wanting more words. When you block on (e), the fix is almost always ORDERING or
+CUTTING, not explaining — say which. A gloss added to a list makes a longer list.`,
+  },
+  {
+    key: 'hawk',
+    title: 'a hawk-eyed engineering manager who can smell AI-generated filler',
+    axis: 'thought — sentences that could only have been written about this diff',
+    charter: `You have read four hundred merge requests this year and you can tell inside two
+sentences whether a human thought about this change or a model filled in a template. What
+you hunt is prose that pattern-matches to "good writing" while carrying no thought:
+confident sentences that would be equally true of a hundred other MRs; benefits asserted
+with no fact behind them ("improves maintainability", "more robust", "cleaner", "better
+separation of concerns"); bullets that restate the diff one abstraction level up and call it
+explanation; tricolons of adjectives; "in order to", "it is worth noting", "leverages",
+"utilizes", "seamless", "comprehensive", "ensures", "facilitates"; symmetrical bullets whose
+content is not symmetrical; and closing sentences that summarize what was just said. You are
+NOT hunting long text or simple text — a short plain sentence packed with specifics is
+exactly right. You are hunting text nobody thought about, because a reviewer who smells it
+stops trusting every other sentence in the description, including the true ones.`,
+    veto: `Block ONLY when: (a) a sentence would survive unchanged in the description of a
+DIFFERENT merge request — apply that substitution test literally, it is your sharpest tool;
+(b) a benefit or quality is claimed with no concrete fact behind it; (c) a bullet restates
+what the diff already shows, one abstraction level up, and adds nothing; (d) formulaic
+filler is doing the work a sentence should be doing; or (e) the THROUGH-LINE would fit a
+hundred other MRs ("improves the reliability of the grant system"). A generic spine is the
+worst case of all, because every sentence downstream inherits it — apply the substitution
+test there first and hardest. Plain language is NOT slop — that is
+the novice's win and you may not block it. Brevity is not your axis either: a short empty
+sentence is your target, a short specific one is not.`,
+  },
+]
+
+// Tie-breaks. Without these the loop bikesheds: the skimmer and the novice have
+// directly opposed instincts and will trade the same sentence back and forth forever.
+const REFEREE = `
+TIE-BREAK RULES (the editor applies these; personas may not override them):
+- Novice vs skimmer: resolve by REMOVING the jargon, not by adding a gloss for it. If the
+  concrete thing can simply be named, name it and delete the term. Only when a term is
+  genuinely irreducible does it earn an inline explanation — and then it stays.
+- Senior vs skimmer: the senior wins only by showing the omission changes what a reviewer
+  would DO. If it merely adds completeness, the skimmer wins and it is cut.
+- Senior vs novice: accuracy wins over simplicity, but the fix is plainer words for the
+  same fact — never dropping the fact, never keeping the jargon.
+- Hawk vs novice: an explanation a reviewer needs in order to read the diff is never slop.
+  A definition of something obvious is. If the term can be dropped by naming the concrete
+  thing instead, that single edit satisfies both of them.
+- Hawk vs senior: a hedge with a concrete fact behind it stays. A hedge standing IN PLACE
+  of a fact is slop — replace it with the fact, or cut the sentence.
+- Hawk vs skimmer: they usually want the same edit for different reasons. When the hawk
+  wants a sentence made specific and the skimmer wants it gone, cut it — a sentence not
+  worth making specific was never worth keeping.
+- Senior's rollout/testing checklist vs skimmer: the checklist wins, and this is not a
+  length argument. Whether the section exists is decided by the trigger list; how long it
+  is, is the skimmer's to win. The words come from a separate allowance, so the section
+  never costs a Changes bullet and can never be a budget breach.
+- Not-done bullets vs anyone: at most one survives. When two compete, keep the one whose
+  absence would make a reviewer assume the opposite, and cut the other.
+- Novice's narrative veto vs anyone: a fact that serves no through-line loses, however
+  true. But when the senior shows the fact is reviewer-actionable, the spine is what was
+  chosen wrong — go back to it rather than dropping the fact. A description that reads
+  beautifully because the awkward fact was cut is the worst failure available here.
+- Any objection that would violate a house rule is discarded outright, however senior the
+  persona raising it.
+- An objection with no minimal concrete fix attached is treated as a preference, not a
+  block.
+`
+
+const DESC_SCHEMA = {
+  type: 'object',
+  properties: {
+    description: { type: 'string' },
+    // The spine: one sentence naming what this MR is about, chosen BEFORE the
+    // prose is written and carried through every later stage. Without it,
+    // "narrative" is a style note nobody can act on or check.
+    throughLine: { type: 'string' },
+    rationale: { type: 'string' },
+    unresolved: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['description', 'throughLine', 'rationale'],
+  additionalProperties: false,
+}
+
+const CRITIQUE_SCHEMA = {
+  type: 'object',
+  properties: {
+    objections: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          target: { type: 'string' },
+          quote: { type: 'string' },
+          problem: { type: 'string' },
+          fix: { type: 'string' },
+        },
+        required: ['target', 'quote', 'problem', 'fix'],
+        additionalProperties: false,
+      },
+    },
+    keep: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['objections', 'keep'],
+  additionalProperties: false,
+}
+
+const JUDGE_SCHEMA = {
+  type: 'object',
+  properties: {
+    verdict: { type: 'string', enum: ['accept', 'revise'] },
+    blocking: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          quote: { type: 'string' },
+          problem: { type: 'string' },
+          fix: { type: 'string' },
+        },
+        required: ['quote', 'problem', 'fix'],
+        additionalProperties: false,
+      },
+    },
+    note: { type: 'string' },
+  },
+  required: ['verdict', 'blocking'],
+  additionalProperties: false,
+}
+
+const FACT_SCHEMA = {
+  type: 'object',
+  properties: {
+    accurate: { type: 'boolean' },
+    errors: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          claim: { type: 'string' },
+          problem: { type: 'string' },
+          correction: { type: 'string' },
+        },
+        required: ['claim', 'problem', 'correction'],
+        additionalProperties: false,
+      },
+    },
+    dropped: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          fact: { type: 'string' },
+          why_it_matters: { type: 'string' },
+        },
+        required: ['fact', 'why_it_matters'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['accurate', 'errors'],
+  additionalProperties: false,
+}
+
+const scope = A.repoRoot
+  ? `\nThe checkout is rooted at ${A.repoRoot}. Your shell's working directory is NOT necessarily that root — issue any Read/Grep against absolute paths under it, and never describe code found outside it.\n`
+  : ''
+
+const CONTEXT = `Default branch: ${A.defaultBranch}${scope}
+CONVERSATION DIGEST (what the author was doing and why — the diff cannot tell you this):
+${A.context}
+
+CHANGED FILES:
+${A.files || '(not provided)'}
+
+UNIFIED DIFF:
+${A.diff}`
+
+const vetoTable = PERSONAS.map((p) => `- ${p.key} (${p.axis}): ${p.veto}`).join('\n')
+
+const PANEL = ONE_SHOT ? PERSONAS.filter((p) => p.key === 'senior') : PERSONAS
+
+// ── Phase 1: one lopsided draft per persona ─────────────────────────────────
+// Barrier is correct here: every cross-examination reads all of the drafts.
+phase('Draft')
+const drafts = (await parallel(PANEL.map((p) => () =>
+  agent(
+    `You are ${p.title}. ${PANEL.length > 1
+      ? `You are one of ${PANEL.length} drafters in an adversarial contest to write the merge request description for the change below.
+
+Write it YOUR way. Argue your corner and do not pre-compromise — an editor downstream is responsible for balance, and a draft that already hedges gives them nothing to weigh. Your axis is ${p.axis}.`
+      : `You are the sole drafter for the merge request description below, and there is no contest to balance you. Your own axis is ${p.axis}, but you must satisfy every constraint in the veto table below, not just yours — write as though the other three reviewers will read this and each holds a veto:
+
+${vetoTable}`}
+
+${p.charter}
+
+${HOUSE}
+
+${CONTEXT}
+
+Before writing a word, decide the THROUGH-LINE: one sentence naming what this MR is about, the spine every part of the description serves. Your persona shapes it — the senior's spine is the risk, the skimmer's is the headline, the novice's is the concept you have to hold to follow the diff, the hawk's is the one thing that could only be said about this change.
+
+Return the complete description as markdown in \`description\` (no code fence around it), your one-sentence spine in \`throughLine\`, and two sentences in \`rationale\` on what your persona forced that a neutral writer would have missed.`,
+    { label: `draft:${p.key}`, phase: 'Draft', schema: DESC_SCHEMA }
+  ).then((d) => (d ? { persona: p.key, ...d } : null))
+))).filter(Boolean)
+
+if (!drafts.length) throw new Error('changes-description: every drafter failed; nothing to debate.')
+
+const draftBlock = drafts.map((d) => `--- DRAFT BY ${d.persona.toUpperCase()} ---\n${d.description}`).join('\n\n')
+
+// ── Phase 2: each persona attacks the others' drafts ────────────────────────
+phase('Cross-examine')
+const critiques = drafts.length < 2 ? [] : (await parallel(PERSONAS.map((p) => () =>
+  agent(
+    `You are ${p.title}, cross-examining in an adversarial writing contest.
+
+${p.charter}
+
+Below are ${PERSONAS.length} candidate MR descriptions — one from each persona, including yours. Attack the ones you did not write, and name what your own gets wrong if you can see it. You are deciding what must survive into the final text and what must die.
+
+For each objection give: \`target\` (which draft), \`quote\` (the exact offending phrase), \`problem\` (one sentence), \`fix\` (the minimal change that resolves it). In \`keep\`, quote the phrases that must survive into the final description and say why in a few words.
+
+${HOUSE}
+
+${draftBlock}
+
+${CONTEXT}`,
+    { label: `cross:${p.key}`, phase: 'Cross-examine', schema: CRITIQUE_SCHEMA }
+  ).then((c) => (c ? { persona: p.key, ...c } : null))
+))).filter(Boolean)
+
+const critiqueBlock = critiques.map((c) =>
+  `--- ${c.persona.toUpperCase()} SAYS ---\nObjections:\n${(c.objections || []).map((o) => `  * [${o.target}] "${o.quote}" — ${o.problem} → ${o.fix}`).join('\n') || '  (none)'}\nMust keep:\n${(c.keep || []).map((k) => `  * ${k}`).join('\n') || '  (nothing flagged)'}`
+).join('\n\n')
+
+// ── Phase 3: the editor referees a single candidate ─────────────────────────
+phase('Synthesize')
+let current = await agent(
+  `You are the editor. You are not a persona — you are the referee, and you are the only participant allowed to be balanced.
+
+Produce ONE description that satisfies every persona's binding constraints at once: accurate and complete on what matters (senior), short enough to read in under a minute (skimmer), comprehensible to someone who has read no design doc (novice), and specific enough that no sentence could belong to a different MR (hawk). Where they conflict, apply the tie-break rules exactly.
+
+You are CHOOSING, not accumulating. A synthesis that keeps every defensible sentence from every draft is a failed synthesis — the union of four thorough drafts is a wall of text, and every sentence in it can be justified individually while the whole is unreadable. Start from the smallest description that would let a reviewer read this diff, and add only what they would be worse off not knowing. The budget below is the test.
+
+DO THIS FIRST, BEFORE WRITING ANY PROSE: settle the THROUGH-LINE. Read the draft spines above, then write the one sentence that names what this MR is actually about — the thing that makes these files change together. It is usually the concept the change turns on, not the list of things done. Then select content by asking of every candidate fact: does a reviewer need this to follow the spine? Facts that serve no spine are the laundry list you are here to prevent, and they get cut even when true and even when a persona liked them.
+
+Two honest outcomes are worth naming rather than papering over. If the change only makes sense as part of a larger effort, the spine may reach for it in one clause — "the third of four steps that move X off Y" — never a recap. And if this branch genuinely does several unrelated things, say so in \`throughLine\` ("no single spine: this branch does A, B and C") rather than inventing a theme that ties them; that is a real signal the MR should be split, and it belongs in front of the author.
+
+${REFEREE}
+
+${HOUSE}
+
+${draftBlock}
+
+CROSS-EXAMINATION:
+${critiqueBlock || '(none — this is a single-draft run, so nothing has attacked the text yet. You are the only check on it before the budget and the fact-checker. Read it as hostilely as the four personas would have.)'}
+
+${CONTEXT}
+
+Return the merged description in \`description\`, a two-sentence \`rationale\`, and any tension you could not resolve in \`unresolved\`.`,
+  { label: 'editor:synthesize', phase: 'Synthesize', schema: DESC_SCHEMA }
+)
+
+if (!current || !current.description) {
+  // Fall back to the draft the cross-examination liked most rather than dying.
+  current = { description: drafts[0].description, rationale: 'editor failed; fell back to first surviving draft', unresolved: ['editor agent failed'] }
+  log('changes-description: editor failed at synthesis — fell back to a raw draft')
+}
+
+// ── Phase 4: the personas judge, the editor revises, until unanimous ────────
+phase('Debate')
+const history = []
+let unanimous = false
+let round = 0
+let lastBlockers = []
+let judgesReported = 0
+let repaired = false
+
+while (round < ROUNDS) {
+  round++
+  const verdicts = (await parallel(PERSONAS.map((p) => () =>
+    agent(
+      `You are ${p.title}, judging round ${round} of an adversarial contest over this MR description.
+
+${p.charter}
+
+YOUR VETO CONDITIONS — you may block on nothing else:
+${p.veto}
+
+The other judges block on their own conditions, and the editor must satisfy all of them at once. Any fix you propose must not violate theirs:
+${vetoTable}
+
+${REFEREE}
+
+${HOUSE}
+
+CANDIDATE:
+${current.description}
+
+THROUGH-LINE the editor is working to: ${current.throughLine || '(none recorded)'}
+
+MEASURED BUDGET FOR THIS CANDIDATE (computed, not estimated):
+${measure(current.description).overflows.length ? measure(current.description).overflows.map((o) => `- OVER: ${o}`).join('\n') : '- within every budget'}
+
+${CONTEXT}
+
+Set \`verdict\` to "accept" if nothing in your veto list is triggered — accepting a text you merely would have written differently is the correct outcome. Otherwise "revise", with each blocking objection carrying an exact \`quote\`, a one-sentence \`problem\`, and a minimal \`fix\`. Use \`note\` for non-blocking preferences; they will be ignored, which is the point.`,
+      { label: `judge:r${round}:${p.key}`, phase: 'Debate', schema: JUDGE_SCHEMA }
+    ).then((v) => (v ? { persona: p.key, ...v } : null))
+  ))).filter(Boolean)
+
+  // parallel() yields null for a failed thunk, so a short vote is possible.
+  // Without the count check below, dead judges would read as silent accepts
+  // and the run would report a consensus nobody voted on.
+  const voted = verdicts.length
+  judgesReported = voted
+
+  const blockers = verdicts
+    .filter((v) => v.verdict === 'revise')
+    .flatMap((v) => (v.blocking || []).map((b) => ({ ...b, from: v.persona })))
+
+  history.push({
+    round,
+    voted,
+    verdicts: verdicts.map((v) => ({ persona: v.persona, verdict: v.verdict, blocking: (v.blocking || []).length })),
+    blockers: blockers.map((b) => ({ persona: b.from, quote: b.quote, problem: b.problem })),
+  })
+  lastBlockers = blockers
+
+  if (!blockers.length) {
+    if (voted === PERSONAS.length) {
+      unanimous = true
+      log(`changes-description: unanimous accept in round ${round}`)
+    } else {
+      log(`changes-description: round ${round} — no blocking objections, but only ${voted}/${PERSONAS.length} judges reported; not calling this unanimous`)
+    }
+    break
+  }
+
+  log(`changes-description: round ${round} — ${blockers.length} blocking objection(s) from ${[...new Set(blockers.map((b) => b.from))].join(', ')}`)
+
+  // ROUNDS >= 2 deliberately ends on a judge-only confirmation pass. ROUNDS === 1
+  // (`--quick`) has no later round to repair in, so its objections are applied
+  // here instead of being filed and discarded; the loop condition ends the run.
+  const finalRound = round >= ROUNDS
+  if (finalRound && ROUNDS > 1) break
+
+  const revised = await agent(
+    `You are the editor. Round ${round} produced these BLOCKING objections. Apply the minimal set of edits that clears every one without triggering a different persona's veto.
+
+${blockers.map((b) => `- [${b.from}] "${b.quote}" — ${b.problem} → ${b.fix}`).join('\n')}
+
+${REFEREE}
+
+${HOUSE}
+
+CURRENT TEXT:
+${current.description}
+
+${CONTEXT}
+
+Rewrite minimally — do not restructure text nobody objected to, and do not "improve" while you are in there; churn loses the parts the cross-examination said to keep. Structure and reading order are NOT your job: a composing editor owns those in a later phase, so a flow objection is satisfied by fixing the content it names, not by reorganising. Carry \`throughLine\` forward unchanged unless an objection is specifically about the spine — if one is, say so in \`rationale\`. If two objections are genuinely irreconcilable, apply the tie-break rules and record the losing one in \`unresolved\` with one line on why it lost.`,
+    { label: `editor:r${round}`, phase: 'Debate', schema: DESC_SCHEMA }
+  )
+
+  if (revised && revised.description) {
+    current = { ...revised, unresolved: [...(current.unresolved || []), ...(revised.unresolved || [])] }
+    if (finalRound) repaired = true
+  } else {
+    log(`changes-description: editor failed in round ${round}; keeping the previous candidate`)
+    break
+  }
+}
+
+// ── Phase 5: shape ──────────────────────────────────────────────────────────
+// The debate converges on CONTENT and only ever makes local, quoted edits — the
+// revise prompt forbids restructuring on purpose, so nobody in Phase 4 can fix a
+// text whose every sentence is defensible and whose whole is a data dump. This
+// phase owns shape, is the only participant allowed to restructure, and is not
+// allowed to change what the description claims.
+phase('Compose')
+const beforeCompose = current.description
+let budget = measure(beforeCompose)
+let composePasses = 0
+
+while (composePasses < 2) {
+  composePasses++
+  const composed = await agent(
+    `You are the composing editor, the last person to touch this description before it ships. You own SHAPE. You do not own content: you may not add a fact, remove a fact, or change what any sentence claims. Every fact in the text below survived a four-persona debate and earned its place.
+
+The THROUGH-LINE has already been settled — it is below, and it is not yours to change. Your job is to make the text visibly serve it, so a reviewer reads once, top to bottom, and comes away knowing what changed and why.
+
+- Build the narrative on the spine: what was broken, what this MR does about it, what a reviewer needs to know to read the diff. Each bullet must earn its place against the spine, and its relation to the spine should be evident from its first few words.
+- Order the bullets by something real — the order a reviewer meets them in the diff, or the order in which one change makes the next possible. Never by file listing, never by the order the author discovered them. If you cannot find a real order, that is worth saying in \`rationale\`.
+- Connect, do not merely sequence. Where one change exists BECAUSE of another, the reader should be able to tell — but carry that in the ordering and in a few words of the bullet itself, never in an appended "because..." clause justifying a design decision.
+- If a bullet cannot be tied to the spine at all, it is either the wrong bullet or evidence the spine is wrong. Prefer cutting it; say so in \`rationale\` if it looked load-bearing.
+- Break long sentences. A 59-word sentence with two em-dash asides is three sentences.
+- One idea per bullet, and lead the bullet with the thing that changed, not with a justification. Merge bullets that are facets of the same change; split bullets carrying two ideas.
+- Cut subordinate "because..." clauses that explain a design decision — that is a banned design note however interesting it is.
+- Prefer the reviewer's reading order over the author's discovery order.
+- Fix ambiguous attachment. A clause after an em-dash attaches to the thing immediately before it; if it was meant to attach to something earlier in the sentence, rewrite the sentence rather than repunctuating it. Nobody downstream of you re-reads for this.
+- Keep the tense honest about what is already true. Today's behavior written in the plain present ("every grant becomes a conditional binding") reads for a beat as something this MR introduces — "today, every grant is a conditional binding" costs one word and removes the double-take.
+- The caps are ceilings, not quotas. If the text is already inside every limit, leave it there: do not merge bullets to look tighter, and never split or pad to reach the allowance. If you DO merge or cut a bullet purely to fit the budget, name which in \`rationale\` — a pipeline whose output always lands exactly on its cap is one where the cap is writing the description.
+- Operational facts (ordering, flags, required config, a manual step, a separate MR that must land first) move OUT of Changes bullets and into Rollout. That is a move you are allowed and expected to make: it is shape, not content, the fact itself is unchanged, and Rollout is paid for from its own allowance.
+${composePasses > 1 ? '\nYour previous attempt was still over budget. Fix exactly the overflows listed below; do not restyle anything else.' : ''}
+
+THROUGH-LINE (fixed — keep it, return it unchanged in \`throughLine\`):
+${current.throughLine || '(none recorded — infer the spine from the text and record it)'}
+
+MEASURED BUDGET (computed, not estimated) — every line here is a defect to fix:
+${budget.overflows.length ? budget.overflows.map((o) => `- ${o}`).join('\n') : '- within every budget; if the text already reads as a narrative, return it unchanged and say so in rationale'}
+
+Limits:
+${budgetText}
+
+${HOUSE}
+
+TEXT TO COMPOSE:
+${current.description}
+
+${CONTEXT}`,
+    { label: `compose:${composePasses}`, phase: 'Compose', schema: DESC_SCHEMA }
+  )
+
+  if (!composed || !composed.description) {
+    log(`changes-description: compose pass ${composePasses} failed; keeping the debated text`)
+    break
+  }
+  current = { ...current, description: composed.description }
+  budget = measure(current.description)
+  if (!budget.overflows.length) {
+    log(`changes-description: composed to ${budget.total} words, ${budget.bullets} bullets — within budget`)
+    break
+  }
+  log(`changes-description: after compose pass ${composePasses}, ${budget.overflows.length} budget breach(es) remain`)
+}
+
+// ── Phase 6: is any of it actually true — and is any of it now missing? ─────
+// Adversarial rewriting drifts. Three rounds of "make it plainer" is exactly how
+// a hedged, accurate sentence becomes a clean, confident, wrong one.
+phase('Fact-check')
+const fact = await agent(
+  `You are the fact-checker on an MR description. You are not a stylist and you have no opinion about length or tone — do not raise any.
+
+For every factual claim in the description below, verify it against the diff, the conversation digest, and the code itself (Read/Grep as needed). Flag a claim when it is: contradicted by the diff, describes behavior the diff does not implement, names an identifier that does not exist, overstates scope (says "all X" when the diff handles some), or asserts a motivation that appears nowhere in the digest and cannot be inferred from the code — invented rationale reads exactly like real rationale and is the most dangerous output of this pipeline.
+
+Set \`accurate\` false if any error is found. Each error needs the \`claim\` quoted, the \`problem\`, and a \`correction\` that keeps the same plain language.
+
+SECOND JOB — NOT-DONE CLAIMS. A bullet asserting that something did NOT change, was left out, or is not wired up somewhere cannot be verified from the diff hunks: those show only what did change, so an absent thing is absent from your evidence either way. Verify each such claim against the checkout with Read/Grep, and list it as an error when you cannot confirm it. An unverifiable claim about work not done is worse than no claim at all — on the page it reads exactly as authoritative as the ones you checked.
+
+THIRD JOB — did the composing editor lose anything? The text was restructured for readability after the debate agreed its content. That editor was told not to change facts, but shortening is exactly when a load-bearing fact goes missing. Compare the two versions below and list in \`dropped\` any fact present BEFORE and absent AFTER whose loss would change what a reviewer does — a breaking change, a required ordering, a flag, a migration, a limit, a number. Do NOT list prose that was merely tightened, reordered, or said more briefly; only facts that are now simply gone. Cutting bloat was the point, so an empty \`dropped\` list is the expected result.
+
+BEFORE COMPOSING:
+${beforeCompose}
+
+AFTER COMPOSING (this is what ships — verify its claims):
+${current.description}
+
+${CONTEXT}`,
+  { label: 'fact-check', phase: 'Fact-check', schema: FACT_SCHEMA }
+)
+
+// A dead fact-checker must never present as a clean bill of health — that turns
+// the phase guarding against invented claims into a source of false assurance.
+const factErrors = (fact && fact.errors) || []
+const factCheckOk = Boolean(fact) && !(fact.accurate === false && !factErrors.length)
+if (!fact) {
+  log('changes-description: fact-check agent failed — the description was NOT verified against the diff')
+} else if (!factCheckOk) {
+  log('changes-description: fact-checker reported accurate=false but listed no errors — treating the check as incomplete')
+}
+
+const dropped = (fact && fact.dropped) || []
+
+if (factErrors.length || dropped.length) {
+  log(`changes-description: fact-checker flagged ${factErrors.length} wrong claim(s) and ${dropped.length} dropped fact(s); correcting`)
+  const corrected = await agent(
+    `You are the editor. Fix ONLY what is listed below, in place. Do not restyle anything else, and do not undo the composing editor's structure — it is what makes this readable.
+
+${factErrors.length ? `WRONG — correct each in place:\n${factErrors.map((e) => `- "${e.claim}" — ${e.problem} → ${e.correction}`).join('\n')}` : ''}
+${dropped.length ? `\nMISSING — restore each, in the shortest form that carries the fact:\n${dropped.map((d) => `- ${d.fact} (matters because: ${d.why_it_matters})`).join('\n')}\nYou are still bound by the budget, so pay for each restored fact by cutting something less load-bearing. Do not simply append.` : ''}
+
+Limits:
+${budgetText}
+
+${HOUSE}
+
+CURRENT TEXT:
+${current.description}
+
+${CONTEXT}`,
+    { label: 'editor:fact-fix', phase: 'Fact-check', schema: DESC_SCHEMA }
+  )
+  if (corrected && corrected.description) {
+    current = { ...current, description: corrected.description }
+    budget = measure(current.description)
+  }
+}
+
+// The same number the budget was judged against — counting the headings here and not
+// there produced a reported word count that disagreed with the cap it was measured on.
+const wordCount = budget.total
+log(`changes-description: ${size} change, ${ONE_SHOT ? 'one-shot (no debate)' : `${round} round(s), unanimous=${unanimous}, ${judgesReported}/${PERSONAS.length} judges reported`}, ${wordCount} words in ${budget.bullets}/${BUDGET.bullets} bullet(s), ${budget.overflows.length ? `${budget.overflows.length} BUDGET BREACH(ES) REMAIN` : 'within budget'}${budget.atCap.length ? `, ${budget.atCap.length} dimension(s) at cap` : ''}, ${factCheckOk ? `${factErrors.length} factual correction(s), ${dropped.length} restored` : 'FACT-CHECK DID NOT COMPLETE'}`)
+
+return {
+  description: current.description,
+  throughLine: current.throughLine || '',
+  oneShot: ONE_SHOT,
+  unanimous,
+  repaired,
+  judgesReported,
+  rounds: round,
+  history,
+  unresolved: current.unresolved || [],
+  outstanding: unanimous ? [] : lastBlockers.map((b) => `[${b.from}] ${b.problem}`),
+  factErrors,
+  factChecked: factCheckOk,
+  dropped,
+  budget,
+  overBudget: budget.overflows,
+  atCap: budget.atCap,
+  size,
+  caps: BUDGET,
+  sections: { testing: budget.hasTesting, rollout: budget.hasRollout },
+  composePasses,
+  words: wordCount,
+}
