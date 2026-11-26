@@ -1035,7 +1035,16 @@ def build_envelope(level, title, body, repo, branch, session_id, label, cwd, thr
     return envelope
 
 
-STATE_CARRIED = ("title", "change_request", "thread")
+STATE_CARRIED = ("title", "change_request", "thread", "thread_transport")
+
+
+def carried_thread(state, transport):
+    thread = state.get("thread")
+    if not thread or not transport:
+        return None
+    if state.get("thread_transport") != transport:
+        return None
+    return thread
 
 
 def merge_state(path, updates=(), drop=()):
@@ -1049,7 +1058,8 @@ def merge_state(path, updates=(), drop=()):
     return write_json(path, state)
 
 
-def record_sent(session_id, state, now, kind=None, thread=None, arm=False, drop=()):
+def record_sent(session_id, state, now, kind=None, thread=None, arm=False, drop=(),
+                transport=None):
     updates = dict((key, state[key]) for key in STATE_CARRIED if key in state)
     if kind is not None:
         updates["last_sent"] = now
@@ -1058,6 +1068,10 @@ def record_sent(session_id, state, now, kind=None, thread=None, arm=False, drop=
         updates["armed_at"] = now
     if thread:
         updates["thread"] = thread
+        if transport:
+            updates["thread_transport"] = transport
+        else:
+            updates.pop("thread_transport", None)
     return merge_state(session_path(session_id), updates, drop)
 
 
@@ -1292,7 +1306,7 @@ def handle(payload):
     envelope = build_envelope(
         kind, "%s %s" % (repo, label), body, repo, branch, session_id,
         session_title(payload.get("transcript_path"), config, state),
-        cwd, state.get("thread"))
+        cwd, carried_thread(state, config.get("transport")))
     envelope["away"] = away
 
     # A session's first notification becomes the thread root, and the root is
@@ -1308,6 +1322,7 @@ def handle(payload):
         if anchored:
             envelope["thread"] = anchored
             state["thread"] = anchored
+            state["thread_transport"] = config.get("transport")
             log("anchored thread %s for %s" % (anchored, repo))
         else:
             log("anchor failed (%s); sending as root" % anchor_problem)
@@ -1330,7 +1345,8 @@ def handle(payload):
         return "error: %s" % problem
 
     spent = ("gate_pending",) if (stranded_gate or kind == "question") else ()
-    record_sent(session_id, state, now, kind=kind, thread=thread, drop=spent)
+    record_sent(session_id, state, now, kind=kind, thread=thread, drop=spent,
+                transport=config.get("transport"))
     if unarmed_blocking:
         how += "; unarmed: blocking gate"
     if stranded_gate:
@@ -1579,7 +1595,7 @@ def cmd_ping(args):
 
     envelope = build_envelope(
         level, title, body, repo, branch_label(cwd), session_id, label,
-        cwd, state.get("thread"))
+        cwd, carried_thread(state, (config or {}).get("transport")))
     thread, problem = send(envelope)
     if problem:
         log("--ping %s failed: %s" % (level, problem))
@@ -1587,7 +1603,8 @@ def cmd_ping(args):
         return 1
 
     if session_id:
-        if not record_sent(session_id, state, time.time(), thread=thread, arm=True):
+        if not record_sent(session_id, state, time.time(), thread=thread, arm=True,
+                           transport=(config or {}).get("transport")):
             print("sent, but %s could not be written: this session is NOT armed"
                   % session_path(session_id), file=sys.stderr)
     else:
