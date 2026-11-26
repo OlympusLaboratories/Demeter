@@ -171,7 +171,7 @@ PY
 
 If that prints `undefined`, stop the run immediately (`TaskStop`) — every finding it produces will be about the wrong code.
 
-Use this script verbatim (it encodes the review → collapse → adversarial-verify pipeline). **The barrier between the review stage and the verify stage is deliberate, and it is the one place in this skill where a barrier is right.** Every lens is a separate agent writing its own prose, so two lenses that find the identical defect at the identical line produce two different summaries, and a key over the summary text can only ever catch a byte-identical restatement — which independent agents do not produce. Collapsing candidates by `file:line` needs every lens's findings at once, and it has to happen *before* the skeptics are spawned, because that is where the spend is: `VOTES` agents per surviving candidate. Five lenses finding one defect used to buy fifteen verifiers proving the same thing, and five near-identical rows for you to collapse by hand. The barrier costs the gap between the fastest and the slowest lens, once — wall clock is the slowest review plus the slowest verify rather than the slowest single chain, and that gap is worth a fifth of the agents. Do not restructure it back into a `pipeline` over the dimensions.
+Use this script verbatim (it encodes the review → collapse → adversarial-verify pipeline). **The barrier between the review stage and the verify stage is deliberate, and it is the one place in this skill where a barrier is right.** Every lens is a separate agent writing its own prose, so two lenses that find the identical defect at the identical line produce two different summaries, and a key over the summary text can only ever catch a byte-identical restatement — which independent agents do not produce. Collapsing candidates by `file:line` needs every lens's findings at once, and it has to happen *before* the skeptics are spawned, because that is where the spend is: `VOTES` agents per surviving candidate. Five lenses finding one defect used to buy fifteen verifiers proving the same thing, and five near-identical rows for you to collapse by hand. The barrier costs the gap between the fastest and the slowest lens, once — wall clock is the slowest review plus the slowest verify rather than the slowest single chain, and that gap is worth a fifth of the agents. Do not restructure it back into a `pipeline` over the dimensions. **One panel is not one verdict**: a location can hold two unrelated defects, so each skeptic returns a verdict per *claim* and the entry is headlined by the highest-severity claim the panel actually upheld — pooling them into a single boolean reported a refuted critical finding as confirmed.
 
 **Always pass the script inline via `script`. Never invoke this skill's workflow with `scriptPath` or `resumeFromRunId`.** Every Workflow call snapshots its script to disk and offers that path back for cheap re-runs — but the snapshot is frozen at the moment it was taken. Reusing it silently replays whatever version of this pipeline was current *then*, discarding any correction made to this file since, while the run looks entirely normal. That has already happened once: a fixed skill was bypassed by a `scriptPath` pointing at the pre-fix snapshot from the run it was fixing. If you are re-running after a failed review — the exact moment the shortcut is most tempting — resend the script from this file.
 
@@ -251,10 +251,21 @@ const FINDINGS_SCHEMA = {
 const VERDICT_SCHEMA = {
   type: 'object',
   properties: {
-    real: { type: 'boolean' },
-    reason: { type: 'string' },
+    verdicts: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          claim: { type: 'integer' },
+          real: { type: 'boolean' },
+          reason: { type: 'string' },
+        },
+        required: ['claim', 'real', 'reason'],
+        additionalProperties: false,
+      },
+    },
   },
-  required: ['real', 'reason'],
+  required: ['verdicts'],
   additionalProperties: false,
 }
 
@@ -295,8 +306,9 @@ const scopePath = (f) => {
   if (f.startsWith('/') && !f.startsWith(repoRoot)) return null
   for (const c of changedFiles) if (f === c) return c
   for (const c of changedFiles) if (f.endsWith('/' + c)) return c
-  for (const c of changedFiles) if (c.endsWith(f)) return c
-  return null
+  const tails = [...changedFiles].filter((c) => c.endsWith('/' + f))
+  if (tails.length === 1) return tails[0]
+  return tails.length ? f : null
 }
 
 // Strays are recorded where they are actually dropped (the intake fold,
@@ -338,7 +350,7 @@ for (const f of candidates) {
   }
   if (!c.lenses.includes(f.dimension)) c.lenses.push(f.dimension)
   if (!c.claims.some((x) => x.summary === f.summary && x.failure_scenario === f.failure_scenario)) {
-    c.claims.push({ dimension: f.dimension, summary: f.summary, failure_scenario: f.failure_scenario })
+    c.claims.push({ dimension: f.dimension, severity: f.severity, category: f.category, summary: f.summary, failure_scenario: f.failure_scenario })
   }
   if (rank(f.severity) < rank(c.severity)) {
     c.severity = f.severity
@@ -348,26 +360,53 @@ for (const f of candidates) {
   }
 }
 
-// Stage 2 — one adversarial panel per location, voting on the union of what
-// every lens claimed there.
+// Stage 2 — one adversarial panel per location, returning a verdict per claim.
+const unverified = []
 const verified = await parallel(clusters.map((c) => () =>
   parallel(Array.from({ length: VOTES }, (_unused, i) => () =>
     agent(
-      `You are skeptic #${i + 1} on a verification panel. Your job is to REFUTE the review finding(s) below. Assume they are wrong until the code proves otherwise.\n\nInspect the actual code with Read/Grep. Set real=false unless you can trace a concrete, reachable code path that produces one of the claimed failures with realistic inputs. Guarding code, callers that make the input impossible, or framework behavior that prevents it all count as refutation.\n\nLocation: ${c.file}:${c.line}\nSeverity claimed: ${c.severity}\nRaised independently by ${c.lenses.length} review lens(es): ${c.lenses.join(', ')}\n\n${c.claims.map((x, n) => `Claim ${n + 1} (${x.dimension}): ${x.summary}\nClaimed failure: ${x.failure_scenario}`).join('\n\n')}\n\nThe claims above describe one location from different angles. Set real=true if ANY ONE of them genuinely holds, and say in your reason which one. Set real=false only if you can refute every one of them. Agreement between lenses is not evidence of a defect — judge the code, not how many lenses raised it.\n\n${context}`,
+      `You are skeptic #${i + 1} on a verification panel. Your job is to REFUTE each review finding below. Assume every one of them is wrong until the code proves otherwise.\n\nInspect the actual code with Read/Grep. For EACH claim separately, set real=false unless you can trace a concrete, reachable code path that produces THAT claim's own failure with realistic inputs. Guarding code, callers that make the input impossible, or framework behavior that prevents it all count as refutation.\n\nLocation: ${c.file}:${c.line}\nRaised by ${c.lenses.length} review lens(es): ${c.lenses.join(', ')}\n\n${c.claims.map((x, n) => `Claim ${n + 1} (${x.dimension}, severity ${x.severity}): ${x.summary}\nClaimed failure: ${x.failure_scenario}`).join('\n\n')}\n\nReturn one verdict per claim, each carrying that claim's number. These claims share a line and may be entirely unrelated defects: upholding one says nothing about the others, and a claim you cannot refute is not made true by a neighbour that holds. Agreement between lenses is not evidence of a defect either — judge the code, not how many lenses raised it.\n\n${context}`,
       { label: `verify:${c.file}:${c.line}`, phase: 'Verify', schema: VERDICT_SCHEMA }
     )
   )).then((votes) => {
     const clean = votes.filter(Boolean)
-    const realCount = clean.filter((v) => v.real).length
+    const judged = c.claims.map((x, n) => {
+      const cast = clean
+        .map((v) => ((v && v.verdicts) || []).find((w) => w && w.claim === n + 1))
+        .filter(Boolean)
+      const realCount = cast.filter((w) => w.real).length
+      return {
+        ...x,
+        upheld: cast.length > 0 && realCount > cast.length / 2,
+        votes_real: realCount,
+        votes_total: cast.length,
+        grounds: cast.filter((w) => w.real).map((w) => w.reason).slice(0, 3),
+        refutations: cast.filter((w) => !w.real).map((w) => w.reason).slice(0, 3),
+      }
+    })
+    const upheld = judged.filter((x) => x.upheld)
+    const head = upheld.slice().sort((a, b) => rank(a.severity) - rank(b.severity))[0]
+    if (!clean.length) unverified.push(`${c.file}:${c.line}`)
     return {
       ...c,
-      confirmed: realCount > clean.length / 2,
-      votes_real: realCount,
-      votes_total: clean.length,
-      refutations: clean.filter((v) => !v.real).map((v) => v.reason).slice(0, 3),
+      claims: judged,
+      confirmed: Boolean(clean.length && head),
+      panel_votes: clean.length,
+      severity: head ? head.severity : c.severity,
+      category: head ? head.category : c.category,
+      summary: head ? head.summary : c.summary,
+      dimension: head ? head.dimension : c.dimension,
+      lenses: upheld.length ? [...new Set(upheld.map((x) => x.dimension))] : c.lenses,
+      votes_real: head ? head.votes_real : 0,
+      votes_total: head ? head.votes_total : 0,
+      refutations: judged.filter((x) => !x.upheld).flatMap((x) => x.refutations).slice(0, 3),
     }
   })
 ))
+
+if (unverified.length) {
+  log(`review-code: ${unverified.length} location(s) returned NO usable skeptic votes and are reported as UNVERIFIED, not refuted: ${unverified.join(', ')}`)
+}
 
 // Keep only confirmed, rank by severity. The collapse above already left one
 // entry per location, so there is nothing further to dedupe.
@@ -384,7 +423,7 @@ const raw = candidates.length + strays.length
 const collapsed = candidates.length - clusters.length
 log(`review-code: ${dimsRun.length} lenses, ${raw} candidate findings, ${strays.length} out-of-scope, ${collapsed} collapsed into a location another lens already raised, ${clusters.length} locations verified, ${confirmed.length} confirmed after ${VOTES}-vote adversarial verification`)
 
-return { confirmed, dimensions: dimsRun, candidates: raw, clusters: clusters.length, collapsed, votes: VOTES, discarded: strays.length, discardedFiles: [...new Set(strays)], reviewedFiles: [...changedFiles] }
+return { confirmed, dimensions: dimsRun, candidates: raw, clusters: clusters.length, collapsed, votes: VOTES, unverified, discarded: strays.length, discardedFiles: [...new Set(strays)], reviewedFiles: [...changedFiles] }
 ````
 
 ## Step 3b: Surface the Run ID for `wfwatch`
@@ -409,11 +448,14 @@ When the workflow returns, read `journal.jsonl` semantics from the returned obje
 
 - A header line: `[SEVERITY] path/to/file.ext:line — one-sentence summary` (make the `file:line` a clickable markdown link).
 - The concrete **failure scenario**.
-- **Every** lens in `lenses`, and the verification vote — e.g. "confirmed 3/3; raised independently by correctness, concurrency, edge-cases, regressions and tests". A finding several lenses reached on their own is stronger evidence than one lens's, and `lenses` is the only place that signal now lives: the swarm verifies each location once, so naming a single lens where five raised it throws the agreement away. The entry's `summary` is the highest-severity member's wording; where another lens framed the same defect usefully differently, `claims` carries every framing and that is worth a sentence.
+- **Every** lens in `lenses`, and the verification vote — e.g. "confirmed 3/3; raised independently by correctness, concurrency, edge-cases, regressions and tests". A finding several lenses reached on their own is stronger evidence than one lens's, and `lenses` is the only place that signal now lives: the swarm verifies each location once, so naming a single lens where five raised it throws the agreement away. **`lenses` holds the lenses whose claims were upheld, not everyone who spoke** — a lens whose own claim the panel refuted is not evidence for the one that survived.
+- **`claims` carries a verdict per claim, and the entry is headlined by the highest-severity one that was upheld.** Read it before writing the finding up: a refuted claim sitting beside an upheld one at the same line is a *different defect that is not there*, and reporting its wording would be reporting something the panel disproved. Where a refuted claim is interesting — two lenses contradicting each other on one line — say so in a sentence; its reasons are in that claim's `refutations`, and the upheld claim's are in `grounds`.
 
 Then a short summary line built from the returned counts: how many lenses ran, `candidates` raised, `collapsed` folded into a location another lens had already reported, `clusters` locations actually verified, and how many survived adversarial verification (the noise the swarm filtered out is a feature — say so). If **nothing** was confirmed, state that clearly and mention which lenses ran, so the user knows the review was thorough rather than skipped.
 
-**Group confirmed findings that sit within a few lines of each other in one file.** The swarm collapses candidates on an exact `file:line` match and deliberately goes no wider: three findings three lines apart may be one defect described three times, or three defects, and merging them before verification would hand two distinct claims a single verdict — so a real one could be masked by a false neighbour. That judgement needs the file open, which the swarm cannot do and you can. Present such a group under one heading listing each line, rather than as separate discoveries, and say that is what you did.
+**Group confirmed findings that sit within a few lines of each other in one file.** The swarm collapses candidates on an exact `file:line` match and deliberately goes no wider. Within a line it is safe, because each claim keeps its own verdict; across lines it would not be, because the cluster is what the panel is pointed at, and three findings three lines apart may be one defect described three times or three separate defects. Deciding that needs the file open, which the swarm cannot do and you can. Present such a group under one heading listing each line, rather than as separate discoveries, and say that is what you did.
+
+**Check `unverified` too, and never read it as a clean result.** A location listed there got no usable skeptic votes at all — every agent on its panel died — so it is neither confirmed nor refuted, and the one panel per location means nothing else covered it. Name those locations and read them yourself; silence from a dead panel is the one failure that looks exactly like a defect that was not there.
 
 **Check `discarded` before you report anything.** If it is non-zero, reviewers strayed outside the diff, and `discardedFiles` names where they went. Say so plainly and up front — and if `discarded` is a large share of `candidates`, do not present the run as a clean review at all. "Zero confirmed findings" and "the swarm never looked at the right file" produce the same empty list and mean opposite things; conflating them tells the user their change is safe when it is merely unexamined. In that case, say the review did not happen, and offer to review a small diff directly yourself rather than re-running a fleet.
 
