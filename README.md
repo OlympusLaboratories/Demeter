@@ -641,7 +641,7 @@ It reports one of five outcomes, and the last three are the point: confirmed, fa
 
 A long `autopilot` run can outlive a 5-hour quota window. Running out mid-flight is not a graceful stop — swarms, watchers and in-flight subagents are left wherever they were, and nothing records what the run was doing or what to do next.
 
-`/pause` parks a run at a safe point and `/unpause` brings it back. Autopilot also pauses itself: it reads the quota at step boundaries and pauses at **85% of the session window**, pings you, arms a return, and resumes when the window resets.
+`/pause` parks a run at a safe point and `/unpause` brings it back. Autopilot also pauses itself: it reads the quota at step boundaries and pauses at **90% of the session window**, pings you, arms a return, and resumes when the window resets.
 
 **The name is `/unpause`, not `/resume`,** because `/resume` is already a built-in Claude Code command (the past-session picker) and a skill by that name would be unreachable.
 
