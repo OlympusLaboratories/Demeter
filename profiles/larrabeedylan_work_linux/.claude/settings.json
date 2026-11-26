@@ -71,6 +71,7 @@
     ]
   },
   "remoteControlAtStartup": true,
+  "inputNeededNotifEnabled": true,
   "hooks": {
     "PreToolUse": [
       {
