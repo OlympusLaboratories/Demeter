@@ -38,11 +38,11 @@ TITLE_PROMPT = (
     "quotes, no trailing punctuation, no preamble.\n\n%s"
 )
 SUMMARY_MODEL = "claude-haiku-4-5-20251001"
-SUMMARY_MAX_WORDS = 68
+SUMMARY_MAX_WORDS = 75
 SUMMARY_MIN_CHARS = 200
 SUMMARY_MAX_INPUT = 8000
 SUMMARY_TIMEOUT = 180
-CONDENSE_LIMIT = 360
+CONDENSE_LIMIT = 400
 SUMMARY_GUARD = "NOTIFY_SUMMARIZING"
 SUMMARY_SETTINGS = os.path.join(STATE, "summarize-settings.json")
 SUMMARY_CWD = os.path.join(STATE, "summarize-cwd")

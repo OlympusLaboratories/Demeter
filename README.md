@@ -828,7 +828,7 @@ Then check it:
 | `events` | all `true` | switch off any of `stop`, `permission`, `question`, `idle`, `failure` |
 | `summarize.command` | probe | path to the `claude` CLI; empty searches the usual install locations |
 | `summarize.model` | `claude-haiku-4-5-20251001` | model that writes the notification line |
-| `summarize.max_words` | 45 | hard word budget, enforced after the model answers |
+| `summarize.max_words` | 75 | hard word budget, enforced after the model answers |
 | `summarize.timeout` | 180 | seconds the summarizer may take before falling back to a condense |
 | `summarize.enabled` | `true` | `false` skips the model and always condenses mechanically |
 | `slack.mention` | `slack.channel` when it is a `U…` id | member ID to `<@…>` so a threaded reply still notifies |

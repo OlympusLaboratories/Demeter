@@ -48,12 +48,12 @@ Whatever in `$ARGUMENTS` is not a level word is a note from the user about what 
 
 The title is `<repo> <short label>` — the same shape the automatic notifications use: `demeter finished`, `ingestion needs a decision`, `billing-api failed`.
 
-The body is **one to three sentences, and never more than 68 words**. That is a hard budget, not a style note. It must answer both of these:
+The body is **one to three sentences, and never more than 75 words**. That is a hard budget, not a style note. It must answer both of these:
 
 1. What was this session working on?
 2. What does it need from the user — or does it need nothing?
 
-Take the context from the session, never from imagination. If the work cannot be described in 68 words, that is a signal the line is too vague, not that the budget is too small. Only the first ~140 characters reach a lock screen, so put the answer first and the detail second.
+Take the context from the session, never from imagination. If the work cannot be described in 75 words, that is a signal the line is too vague, not that the budget is too small. Only the first ~140 characters reach a lock screen, so put the answer first and the detail second.
 
 **A change request gets its full URL, never just its number, and Step 3 fetches it for you.** `notify.py --ping` resolves this session's change request from its own transcript and appends it **only when the body actually names one** — so a line about a change request carries its link whether or not you remembered it, and a line about anything else is left alone. Three things narrow which URL wins, because a transcript routinely names several: the change request opened from this session's **current branch** is preferred, a URL carrying the session's own `owner/repo` is the fallback, and one the transcript shows as **closed or merged** is never offered as if it were open. A body already carrying a change-request URL is left untouched; a body carrying some *other* link — a published page, a doc — still gets the change request's, which it did not before. Write it into the body yourself when you know it; the append is the backstop, not the plan. `PR #10` is unopenable from a lock screen; the URL is the only thing on that screen the user can act on. The same goes for a ticket, a pipeline or a published artifact — if the message names a thing that lives behind a link, the link goes in the body. Markdown link syntax is pointless here, so write the bare URL. A file path is the exception: it opens nothing on a phone, so name it without one.
 
@@ -61,7 +61,7 @@ Take the context from the session, never from imagination. If the work cannot be
 
 **Never paste your chat response into the body.** A turn's closing message is written for someone reading a terminal with the diff in front of them — it has headings, tables, file links and backticks, none of which survive a notification, and it is routinely twenty times the budget. Write the line from scratch, for someone holding a phone who cannot see any of that.
 
-Before sending, count. If the body is over 68 words, cut it rather than sending it long — drop the detail and keep the outcome and the ask, in that order. These are the things to cut first, in order: file paths and counts, tool and library names, anything about how the work was done, and every clause that would still be true if the work had gone differently.
+Before sending, count. If the body is over 75 words, cut it rather than sending it long — drop the detail and keep the outcome and the ask, in that order. These are the things to cut first, in order: file paths and counts, tool and library names, anything about how the work was done, and every clause that would still be true if the work had gone differently.
 
 ### Worked examples
 
@@ -161,7 +161,7 @@ Other skills reach this one through the `Skill` tool rather than by re-implement
 ## Important Rules
 
 - **Never send a body without context.** "Done", "Finished", "Task complete" are failures. State what the work was and what is needed.
-- **Never exceed 68 words.** A notification that has to be opened and scrolled has failed at the one job it has. Over budget means cut, never means send anyway.
+- **Never exceed 75 words.** A notification that has to be opened and scrolled has failed at the one job it has. Over budget means cut, never means send anyway.
 - **Never say what is or is not needed unless you know.** If the user has to do something, name it. If they do not, say so explicitly — "nothing needed" is information.
 - **Never name the transport.** Say "your phone" or nothing. The transport is a per-machine detail of `notify-send.sh` and this skill is identical on every machine.
 - **Never put the body in the argument list.** Prose contains quotes, apostrophes, backticks and newlines. `--body -` with a quoted heredoc carries all of them through untouched; an argument does not. Never rebuild the envelope or the session state file here either — `notify.py` owns both, and a second copy of its keying goes stale silently.
