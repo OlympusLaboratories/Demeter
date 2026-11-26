@@ -36,6 +36,11 @@ Demeter/
     check-verdict-commands.sh # the forge helpers' verdict-clearing subcommands
     check-diagram-template.py # the diagram page's viewport, its view maths under node, and
                               # that the three profile copies stay byte-identical; `rules` prints it
+    check-workflow-scripts.py # the prose/script seam for the Workflow skills: the extracted
+                              # workflow.js exists, opens with its meta literal and parses under
+                              # node, no ````js fence drifts back into SKILL.md, the invocation path
+                              # stays named, and no identifier living in the script is described as
+                              # being in a step of SKILL.md; `rules` prints it
   tools/                  # First-party projects shared by every profile
     claude-usage/         # VS Code extension, linked into ~/.claude/tools/
     worktree-sync/        # VS Code extension, linked into ~/.claude/tools/
@@ -68,6 +73,8 @@ Demeter/
         skills/           # Claude Code skills, synced to ~/.claude/skills/
           <skill-name>/
             SKILL.md
+            workflow.js   # review-code and changes-description only: the swarm script, passed to
+                          # the Workflow tool by path so it is never re-sent or snapshotted
         hooks/            # Hook scripts, synced to ~/.claude/hooks/
         scripts/          # Helper scripts used by skills
           skill-env.sh    # the per-machine seam; `check` prints what a skill will see
@@ -244,7 +251,7 @@ anything in its subtree.
 - **`/resume` is a built-in, so the skill is `/unpause`**: a name a built-in owns silently never fires. → `profiles/<p>/.claude/skills/AGENTS.md`
 - **A `$<digit>` anywhere in a skill body is rewritten at invocation**: it corrupts any `awk` program while the file on disk still looks correct. Sweep including `$0`. → `profiles/<p>/.claude/skills/AGENTS.md`
 - **A swarm's resume cache is keyed on the diff**: a moved branch voids it entirely, and the state file keeps an **ordered chain** of run ids. → `profiles/<p>/.claude/skills/AGENTS.md`
-- **`scriptPath` is a trap for resuming a swarm**: the snapshot is frozen, so it replays the *pre-fix* pipeline; `workflow-resume` is the only sanctioned route. → `profiles/<p>/.claude/skills/AGENTS.md`
+- **A *snapshot* `scriptPath` is the trap, not `scriptPath` itself**: the old ban forbade a path because every path anyone had seen was a snapshot, and a snapshot really is frozen — replaying one runs the *pre-fix* pipeline while the run looks entirely normal, which happened here once. But a `scriptPath` is **re-read at invocation** and writes no snapshot of its own, so `review-code` and `changes-description` keep their scripts in a sibling `workflow.js` and launch with `$HOME/.claude/skills/<skill>/workflow.js`, which cannot be stale because it is the only copy. The safe/unsafe test is therefore a **directory** rather than a provenance claim, which is what makes it enforceable where *only reuse your own session's snapshot* would not have been. Extraction took `review-code/SKILL.md` from 49,714 to 37,459 characters and `changes-description/SKILL.md` from 78,915 to 29,620, and it needed no new test — `check-transform.py` already compares every tracked file, and `changes-diagram` already kept its payload beside its prose. **`args` is the half that stays expensive, and that is structural**: the tool has no file-based form for it and scripts have no filesystem access at all, and hiding the diff behind a path is refused because the resume cache is content-addressed over each agent's prompt, which is exactly what makes a moved branch void it. `workflow-resume` remains the only sanctioned user of `resumeFromRunId`, now pairing it with that live script. → `profiles/<p>/.claude/skills/AGENTS.md`
 - **Recorded authority survives a pause; recorded evidence does not**: a recorded `--merge true` still authorises the merge, but approvals, pipeline state and apply markers are all re-read. → `profiles/<p>/.claude/skills/AGENTS.md`
 - **Run state belongs outside the repository**: it lives under `~/.claude`, keyed by repo and branch so another session can find it. → `profiles/<p>/.claude/skills/AGENTS.md`
 - **A cleanup command is only as complete as the thing it iterates**: `wtclean` sweeps branches, not just worktrees, and merges in memory because **ancestry cannot see a squash merge**. → `shell/AGENTS.md`
