@@ -13,20 +13,19 @@ PROFILES = [
     'larrabeedylan_work_linux',
 ]
 SKILLS = ['review-code', 'changes-description']
+INLINE_ONLY = ['review-kludge', 'docs-humanize']
 
-FENCE = re.compile(r'^````js$', re.M)
+FENCE = re.compile(r'^`{3,}js$', re.M)
 IDENT = re.compile(r'`([A-Z][A-Z0-9_]{2,})`')
+INLINE_REVIVED = re.compile(r'pass(?:ing)?\s+the\s+script\s+inline|script\s+inline\s+via', re.I)
 
 
 def STEP_NEAR(name):
     token = re.escape(name)
+    step = r'Step\s+\d+[a-z]?'
     return re.compile(
-        r'(?:Step\s+\d+[a-z]?(?:’s|\'s)?[^.\n]{0,40}?`' + token + r'`'
-        r'|`' + token + r'`[^.\n]{0,40}?\bin\s+Step\s+\d+[a-z]?)')
-
-
-def strip_backticked(text, name):
-    return text.replace('`' + name + '`', '')
+        r'(?:' + step + r'[^.\n]{0,80}?`' + token + r'`'
+        r'|`' + token + r'`[^.\n]{0,80}?' + step + r')')
 
 RULES = """check-workflow-scripts.py — the prose/script seam for the Workflow skills.
 
@@ -37,28 +36,44 @@ what it checks, and what each one is written against:
   the meta literal, and a missing file is an invocation that fails at launch
   with the swarm already announced
 
-  no SKILL.md carries a ````js fence any more. the script moved out so that it
-  stops being re-sent on every launch; a fence drifting back would restore the
-  cost silently while the scriptPath instruction beside it still read correctly
+  no SKILL.md carries a js fence any more, at any backtick count. the script
+  moved out so that it stops being re-sent on every launch; a fence drifting
+  back would restore the cost silently while the scriptPath instruction beside
+  it still read correctly. the pattern is `{3,} rather than exactly four: four
+  is used in these files only because the scripts contain three-backtick blocks
+  of their own, so nothing makes it the form a later paste would take
 
   SKILL.md names the absolute invocation path, $HOME/.claude/skills/<skill>/
   workflow.js. the tool does not expand ~, and a skill that stopped naming the
   path would leave the reader to guess it
 
-  SKILL.md does not tell anyone to pass a snapshot. the whole point of the
-  rewrite is that a live path cannot be stale and a snapshot under
-  <session>/workflows/scripts/ can, so prose recommending the second is the
-  one failure the design removes
+  SKILL.md does not tell the reader to pass the script inline. that is the
+  drift worth catching - a revert to the old instruction - and it is a literal
+  phrase rather than a judgement. what this replaced was a check for prose
+  "recommending a snapshot", which was polarity-inverted: measured, it fired on
+  "Never pass a snapshot scriptPath" (a prohibition, so a false failure) and
+  stayed silent on "Use the snapshot scriptPath for a cheap re-run" (the thing
+  it was for). a regex over prose cannot tell a prohibition from a
+  recommendation, so that check is gone rather than widened
+
+  the skills that have NOT been migrated keep their inline fence and have no
+  workflow.js, and that is asserted too. a half-migration is the defect:
+  workflow-resume names all four Workflow skills and sends every resume at
+  $HOME/.claude/skills/<skill>/workflow.js, so a skill moved out of INLINE_ONLY
+  without gaining the file leaves that instruction naming a path that does not
+  exist. checking only the migrated two could not see it
 
   no ALL_CAPS identifier that lives only in workflow.js is described as being
   in a step of SKILL.md. this is the regression that happened during the
   extraction: changes-description told its --inline path three times to read
   the HOUSE block "in Step 2", and Step 2 no longer contained it. the
   identifier had moved and the prose had not, so the cheapest path through the
-  skill pointed at nothing. the weaker version of this check - "SKILL.md must
-  mention workflow.js somewhere" - is dead, because the invocation path the
-  rule above requires already contains that string, so it could never fail on
-  its own
+  skill pointed at nothing. the window is wide and takes either order, because
+  the first draft matched only two phrasings and missed "see Step 2 for the
+  HOUSE block". an earlier escape - skip the identifier if it also appears
+  unbackticked anywhere in the file - is gone: it disabled this whole rule on
+  one stray mention, and an unbackticked mention was never evidence of
+  anything
 
   workflow.js parses under node, wrapped the way the runtime wraps it — the
   body is an async function, so a bare module rejects its top-level return and
@@ -137,20 +152,20 @@ def main():
 
             fences = len(FENCE.findall(md))
             if fences:
-                fail(problems, f'{label}: SKILL.md carries {fences} ````js fence(s); '
+                fail(problems, f'{label}: SKILL.md carries {fences} js fence(s); '
                                f'the script belongs in workflow.js')
 
             path_literal = f'$HOME/.claude/skills/{skill}/workflow.js'
             if path_literal not in md:
                 fail(problems, f'{label}: SKILL.md never names {path_literal}')
 
-            if re.search(r'pass(?:ing)?\s+(?:a\s+)?snapshot', md, re.I):
-                fail(problems, f'{label}: SKILL.md appears to recommend a snapshot path')
+            revived = INLINE_REVIVED.search(md)
+            if revived:
+                fail(problems, f'{label}: SKILL.md tells the reader to pass the script inline '
+                               f'({revived.group(0)!r}); the script is passed by path now')
 
             for name in sorted(set(IDENT.findall(md))):
                 if not re.search(r'\b' + re.escape(name) + r'\b', js):
-                    continue
-                if re.search(r'\b' + re.escape(name) + r'\b', strip_backticked(md, name)):
                     continue
                 for stray in STEP_NEAR(name).finditer(md):
                     fail(problems, f'{label}: prose places `{name}` in a step of SKILL.md '
@@ -161,6 +176,22 @@ def main():
                 if not ok:
                     fail(problems, f'{label}: workflow.js does not parse:\n{stderr}')
 
+        for skill in INLINE_ONLY:
+            where = os.path.join(REPO, 'profiles', profile, '.claude', 'skills', skill)
+            md_path = os.path.join(where, 'SKILL.md')
+            label = f'{profile}/{skill}'
+            if not os.path.isfile(md_path):
+                fail(problems, f'{label}: no SKILL.md, but it is listed as inline-only')
+                continue
+            if os.path.isfile(os.path.join(where, 'workflow.js')):
+                fail(problems, f'{label}: has a workflow.js but is still listed in '
+                               f'INLINE_ONLY; move it to SKILLS so its seam is checked')
+            with open(md_path, encoding='utf-8') as handle:
+                if not FENCE.search(handle.read()):
+                    fail(problems, f'{label}: no js fence in SKILL.md and no workflow.js '
+                                   f'either, so workflow-resume names a path that does '
+                                   f'not exist for it')
+
     if not have_node:
         print('note: node is absent, so the syntax check was skipped')
 
@@ -170,7 +201,7 @@ def main():
             print(f'  {problem}')
         return 1
 
-    print(f'ok: {checked} workflow skill(s) across {len(PROFILES)} profiles')
+    print(f"ok: {checked} migrated + {len(INLINE_ONLY) * len(PROFILES)} inline-only skill(s) across {len(PROFILES)} profiles")
     return 0
 
 

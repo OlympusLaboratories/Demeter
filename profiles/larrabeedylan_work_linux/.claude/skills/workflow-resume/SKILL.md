@@ -87,13 +87,13 @@ python3 ~/.claude/scripts/workflow-runs.py merge <id-1> <id-2> --into <new-id>
 Re-invoke the `Workflow` tool with:
 
 - `resumeFromRunId` set to the run id (the merged id, if Step 3 merged).
-- `scriptPath` set to the owning skill's **live `workflow.js`**, beside its `SKILL.md` — `$HOME/.claude/skills/<skill>/workflow.js`, resolved absolute, since the tool does not expand `~`.
+- `scriptPath` set to the owning skill's **live `workflow.js`**, beside its `SKILL.md` — `$HOME/.claude/skills/<skill>/workflow.js`, resolved absolute, since the tool does not expand `~`. **Two of the four skills above have no `workflow.js`:** `review-kludge` and `docs-humanize` still carry their script in a fenced block, so for those two pass `script` **inline, re-read from the owning skill's live `SKILL.md`**. Either way what goes over is the live script, which is the whole requirement — the path is only the cheaper way to send it where it exists.
 - `args` from the original run when HEAD has not moved:
   ```bash
   python3 ~/.claude/scripts/workflow-runs.py args <run_id>
   ```
 
-**Never pass a `scriptPath` that points at a Workflow snapshot, and this is the one rule here with scar tissue behind it.** A call that passed its script inline leaves a snapshot under `…/<session>/workflows/scripts/`, frozen at the moment it was taken. Resuming through that silently replays whatever version of the pipeline was current *then*, discarding any correction made to the skill since — while the run looks entirely normal. It has already happened in this repo once: a fixed skill was bypassed by a `scriptPath` pointing at the pre-fix snapshot **from the very run it was fixing**. `list` prints that path as `scriptPath`, which is there for the Step 1 diff and is never the path you resume with.
+**Never pass a `scriptPath` that points at a Workflow snapshot, and this is the one rule here with scar tissue behind it.** A call that passed its script inline leaves a snapshot under `…/<session>/workflows/scripts/`, frozen at the moment it was taken. Resuming through that silently replays whatever version of the pipeline was current *then*, discarding any correction made to the skill since — while the run looks entirely normal. It has already happened in this repo once: a fixed skill was bypassed by a `scriptPath` pointing at the pre-fix snapshot **from the very run it was fixing**. `list` prints that path as `scriptPath`, which is there for the Step 4 diff and is never the path you resume with.
 
 The skill's own `workflow.js` is the opposite and is what you pass instead. It is the only copy of the script, it is the one under version control, and the tool re-reads it on every invocation — so the correction cannot be discarded, because there is no second copy holding the old version. `review-code` names this skill as the one sanctioned user of `resumeFromRunId` precisely because it pairs it with that live script.
 
@@ -117,7 +117,7 @@ State in one line what the resume actually cost: how many agents replayed from c
 ## Important Rules
 
 1. **Never re-run a swarm from scratch as a fallback.** If it cannot be resumed or harvested, say that and ask. A silent full-price re-run is the exact outcome this skill exists to prevent.
-2. **Never pass a snapshot `scriptPath`.** Pass the owning skill's live `workflow.js` instead, so a correction made since the run is not silently discarded by a frozen copy. Do not hand-edit `args`.
+2. **Never resume through a frozen copy of the script.** Pass the owning skill's live `workflow.js` where it has one, and the script re-read inline from its live `SKILL.md` where it does not (`review-kludge`, `docs-humanize`) — never the snapshot path `list` prints. Do not hand-edit `args`.
 3. **Never read a partial run as a complete one.** Name the missing agents and what they would have covered.
 4. **Never link over a real directory**, and never force a refused link.
 5. **Check `repoRoot` before resuming.** A run from another repository reviews the wrong diff and will look entirely plausible doing it.
