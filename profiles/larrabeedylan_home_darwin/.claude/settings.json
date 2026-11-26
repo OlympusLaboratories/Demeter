@@ -5,7 +5,6 @@
     "pr": ""
   },
   "permissions": {
-    "defaultMode": "auto",
     "allow": [
       "WebSearch",
       "WebFetch",
@@ -68,9 +67,9 @@
       "Bash(column:*)",
       "Bash(true:*)",
       "Bash(test:*)"
-    ]
+    ],
+    "defaultMode": "auto"
   },
-  "remoteControlAtStartup": true,
   "hooks": {
     "PreToolUse": [
       {
@@ -155,5 +154,7 @@
         ]
       }
     ]
-  }
+  },
+  "remoteControlAtStartup": true,
+  "inputNeededNotifEnabled": true
 }
