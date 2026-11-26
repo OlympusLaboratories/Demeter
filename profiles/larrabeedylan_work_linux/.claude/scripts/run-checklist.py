@@ -82,14 +82,14 @@ def template(options):
         if options.iac:
             items.append(item("apply", "Apply the infrastructure plan before the merge",
                               "autopilot", request))
+        if options.diagram:
+            items.append(item("diagram", "Attach the call-flow diagram",
+                              "changes-diagram", request))
         if options.merge:
             items.append(item("merge", "Merge %s" % request, "autopilot", request))
         else:
             items.append(item("ready", "Hand over a ready %s without merging" % request,
                               "autopilot", request))
-        if options.diagram:
-            items.append(item("diagram", "Attach the call-flow diagram",
-                              "changes-diagram", request))
         items.append(item("ledger", "Append the decision record to the description",
                           "autopilot", request))
 
@@ -941,6 +941,10 @@ what it guarantees, and what each one is written against:
 
   the template is shaped by the resolved flags, so the page can neither list a
   diagram the run will not draw nor omit a merge it will perform
+
+  the items are in the order the run discharges them, and the diagram comes
+  before the merge: autopilot draws it at Step 8b, because the merge deletes
+  the branch and the worktree that changes-diagram derives its base from
 
   "nothing armed" is computed from the items, never asserted: outstanding work
   with no item in flight renders as an alarm, which is what makes autopilot's

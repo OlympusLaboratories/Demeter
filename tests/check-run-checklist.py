@@ -23,6 +23,9 @@ run-checklist.py, checked over every profile copy:
   template                                    a valid document, arming first
   template                                    carries the link item ping discharges
   template --review / --diagram / --merge     gate the review, diagram and merge items
+  template --diagram                          the diagram sits after the apply gate and
+                                              before the merge, and before the ready
+                                              hand-over when there is no merge
   template --merge absent                     a "ready, not merged" item instead
   template --branch-mode default              no change request, no merge, no ledger item
   template --request-name                     this machine's word reaches every item
@@ -190,6 +193,19 @@ def check_profile(suite, profile, work):
     for wanted in ("review", "diagram", "merge", "apply", "ledger", "link", "close"):
         suite.ok("%s template carries the %s item" % (tag, wanted),
                  wanted in full_ids, "got %s" % full_ids)
+    suite.ok("%s the diagram comes before the merge" % tag,
+             full_ids.index("diagram") < full_ids.index("merge"),
+             "got %s" % full_ids)
+    suite.ok("%s the diagram comes after the apply gate" % tag,
+             full_ids.index("apply") < full_ids.index("diagram"),
+             "got %s" % full_ids)
+
+    held = run(script, "template", "--diagram")
+    suite.exits("%s template --diagram without --merge" % tag, 0, held)
+    held_ids = ids(held.stdout)
+    suite.ok("%s the diagram comes before the ready hand-over" % tag,
+             held_ids.index("diagram") < held_ids.index("ready"),
+             "got %s" % held_ids)
 
     bare = run(script, "template")
     suite.exits("%s template with no flags" % tag, 0, bare)
