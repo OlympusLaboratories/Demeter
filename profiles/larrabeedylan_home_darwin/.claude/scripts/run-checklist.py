@@ -13,6 +13,10 @@ import urllib.request
 
 STATES = ("pending", "in-flight", "done", "skipped")
 OPEN_STATES = ("pending", "in-flight")
+PLAN_ITEM = "plan"
+PLAN_DEPENDENT = ("implement", "commit", "describe", "open")
+PLAN_CLEARED = ("done", "skipped")
+PLAN_STARTED = ("in-flight", "done")
 ITEM_FIELDS = ("id", "obligation", "skill", "target", "waiting_on", "state", "note",
                "link", "stage")
 STAGE_FIELDS = ("id", "label", "branch", "change_request", "after")
@@ -912,6 +916,29 @@ def cmd_publish(args):
     return status
 
 
+PLAN_REFUSED = (
+    "the plan gate is not waivable by the size of the change: plan is %s, so"
+    " %s cannot be in flight or done. Tick plan=done once the user has"
+    " approved the plan, or plan=skipped:<reason> to record that the user"
+    " waived it - a reason is required and lands on the page. Either can go"
+    " in this same command."
+)
+
+
+def plan_first(items):
+    plan = [entry for entry in items if base_id(entry["id"]) == PLAN_ITEM]
+    if not plan or any(entry["state"] in PLAN_CLEARED for entry in plan):
+        return
+    started = [entry for entry in items
+               if base_id(entry["id"]) in PLAN_DEPENDENT
+               and entry["state"] in PLAN_STARTED]
+    if not started:
+        return
+    raise ValueError(PLAN_REFUSED % (
+        plan[0]["state"],
+        ", ".join("%s=%s" % (entry["id"], entry["state"]) for entry in started)))
+
+
 def apply_ticks(document, ticks):
     by_id = {entry["id"]: entry for entry in document["items"]}
     for tick in ticks:
@@ -936,6 +963,7 @@ def apply_ticks(document, ticks):
             entry["waiting_on"] = ""
             if text:
                 entry["note"] = text
+    plan_first(document["items"])
     return document
 
 
@@ -1262,6 +1290,20 @@ what it guarantees, and what each one is written against:
 
   tick refuses an id the page does not have, so a typo is an error rather than
   a silent no-op that leaves the item behind
+
+  tick refuses to put implement, commit, describe or open in flight or done
+  while plan is still pending, because the plan gate is armed only by
+  complying with it: a run that never publishes a plan sets no gate marker
+  for the Stop hook to hold on, and standing() reads ANY in-flight item as
+  healthy, so plan can sit open for a whole run behind a watcher whose
+  per-poll reconcile keeps resetting the staleness count. a run judged a
+  one-line change too small for a plan and shipped it, which is the judgement
+  this refusal takes away. the way through is plan=done, or
+  plan=skipped:<reason> - and canonical already requires that reason, so a
+  waiver lands on the page the user reads rather than being taken silently.
+  both can go in the same command as the tick they unblock, which is the
+  shape the fix skills already prescribe, and reconcile writes item states
+  directly rather than through this path, so a watcher is never wedged by it
 
   tick clears waiting_on when an item leaves in-flight, so a finished item
   cannot keep advertising a blocker that is gone
