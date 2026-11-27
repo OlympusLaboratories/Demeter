@@ -582,7 +582,7 @@ Execute the approved plan:
     <WORKTREE>/install.sh <profile> -y
   ```
 
-  The absolute path is the load-bearing part: `install.sh` resolves its own `REPO_DIR` from `BASH_SOURCE`, so that path is what makes the run verify **this branch's** installer rather than the main checkout's, and the working directory does not matter. The *never against the real `HOME`* sentence above is unchanged and is now not the only warning — from the worktree the real `HOME` is forbidden and the scratch `HOME` is unreachable, so the exit is what leaves a third option instead of none.
+  The absolute path is the load-bearing part: `install.sh` resolves its own `REPO_DIR` from `BASH_SOURCE`, so that path is what makes the run verify **this branch's** installer rather than the main checkout's, and the working directory does not matter. Expect `-y` to consent to more than the linking: a scratch `HOME` has an empty editor extensions directory and no terminal tools, so the run also downloads every extension in `extensions.txt` (41 of them, measured), clones the zsh plugins and builds the shared tools. All of it lands under the scratch tree and the real `HOME` is untouched — the containment is what makes this harmless, not the cost, which is a few minutes and a few hundred megabytes. The *never against the real `HOME`* sentence above is unchanged and is now not the only warning — from the worktree the real `HOME` is forbidden and the scratch `HOME` is unreachable, so the exit is what leaves a third option instead of none.
 - Mark each todo as completed as you finish it.
 
 ### The re-auth gate — stop, say which credential, and wait

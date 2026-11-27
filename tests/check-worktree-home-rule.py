@@ -15,6 +15,8 @@ SKILLS = ['fix-linear', 'fix-freeform']
 CATALOGUE_START = re.compile(r'isolation guard', re.I)
 INSTALLER_START = re.compile(r"^- \*\*Running the repo's own installer")
 SIBLING_BULLET = re.compile(r'^- \S')
+HEADING = re.compile(r'^#')
+RECIPE = re.compile(r'```bash\n(.*?)```', re.S)
 
 HOME_NAMED = re.compile(r'`?HOME=')
 EVERY_FORM = re.compile(r'in\s+every\s+form', re.I)
@@ -31,12 +33,31 @@ WRAPPER_REJECTED = re.compile(
     r'wrapper\s+script[^.]{0,200}?(?:is\s+still\s+wrong|not\s+the\s+way)', re.I)
 MKTEMP = re.compile(r'mktemp -d')
 
+RECIPE_PINS = (
+    (re.compile(r'\bHOME='), 'the HOME= assignment'),
+    (re.compile(r'\bXDG_CONFIG_HOME='), 'the XDG_CONFIG_HOME= unset'),
+    (re.compile(r'\bGIT_CONFIG_GLOBAL='), 'the GIT_CONFIG_GLOBAL= pin'),
+    (re.compile(r'<WORKTREE>/'), "the worktree-rooted path to the installer"),
+)
+
 RULES = """check-worktree-home-rule.py -- the scratch-HOME seam in the fix skills.
 
-the unit is the SECTION, not the file. an earlier draft searched each SKILL.md
-whole and passed a mutation that deleted the escape from the guard catalogue,
-because the installer step further down still named it. the two sections owe
-different things and a whole-file search cannot tell which one is missing.
+the unit is the SECTION, not the file. two earlier drafts got this wrong in the
+same direction and each was caught by running it. the first searched each
+SKILL.md whole, and passed a mutation that deleted the escape from the guard
+catalogue because the installer step further down still named it. the second
+bounded the catalogue only at its far end, by the installer bullet -- so the
+slice ran from the first /isolation guard/ match to that bullet, measured at
+261 lines across 12 headings in fix-linear and 151 across 4 in fix-freeform,
+and a HOME paragraph relocated anywhere in that quarter of the file still
+passed. the catalogue now ends at the first heading after the LAST guard
+match, which is the section boundary, so relocation out of the section fails
+where plain deletion already did.
+
+the general lesson, since it has now cost two drafts: a section is bounded at
+BOTH ends or it is not a section. an assertion scoped to a slice is only as
+strong as the slice, and a slice that reaches to the next thing you happened
+to be looking for is a file search wearing a section's name.
 
 what the guard catalogue owes, in both fix skills in every profile
 
@@ -69,6 +90,20 @@ what the installer step owes, in both fix skills in every profile
 
   it still carries the technique (mktemp -d). the fix was to name the escape,
   not to retire the bullet.
+
+  it carries a runnable bash recipe, and the recipe itself holds the HOME=
+  assignment, the XDG_CONFIG_HOME= unset, the GIT_CONFIG_GLOBAL= pin and the
+  <WORKTREE>/-rooted path. these are pinned INSIDE the fenced block, not
+  anywhere in the bullet, and that distinction was a defect twice over. MKTEMP
+  was meant to stand for "still carries the technique" and matches the bullet's
+  own prose sentence "pointing HOME at a mktemp -d makes that harmless", so the
+  whole fenced block could be deleted -- the XDG and GIT_CONFIG_GLOBAL pins
+  with it -- and every assertion still passed. ABSOLUTE_PATH likewise matches
+  the sentence "the absolute path is the load-bearing part", so rewriting the
+  recipe's last line to a bare ./install.sh passed the very check whose message
+  says the run would verify the main checkout's installer instead. an assertion
+  pointed at the prose describing a command is not an assertion about the
+  command.
 
   it names both legs of the escape -- ExitWorktree with action "keep", and
   EnterWorktree to come back. keep is the action because the worktree was
@@ -131,7 +166,9 @@ def split_sections(problems, label, lines):
         problems.append(f'{label}: no isolation-guard catalogue ahead of the '
                         f'installer bullet')
         return None, None
-    catalogue = '\n'.join(lines[guard[0]:start])
+    stop = next((i for i in range(guard[-1] + 1, start) if HEADING.match(lines[i])),
+                start)
+    catalogue = '\n'.join(lines[guard[0]:stop])
 
     end = start + 1
     while end < len(lines) and not SIBLING_BULLET.match(lines[end]):
@@ -196,6 +233,15 @@ def main():
                 problems.append(f'{label}: the installer bullet does not say the '
                                 f"worktree's copy is invoked by absolute path, so the "
                                 f"run verifies the main checkout's installer instead")
+            recipe = RECIPE.search(installer)
+            if not recipe:
+                problems.append(f'{label}: the installer bullet carries no bash recipe, '
+                                f'so the runnable form this rule exists to supply is '
+                                f'described and never given')
+            else:
+                for pattern, pin in RECIPE_PINS:
+                    if not pattern.search(recipe.group(1)):
+                        problems.append(f'{label}: the recipe is missing {pin}')
             if not WRAPPER_REJECTED.search(installer):
                 problems.append(f'{label}: the installer bullet does not record the '
                                 f'wrapper script as rejected, and the guard accepts '
