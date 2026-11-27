@@ -1,6 +1,6 @@
 ---
 name: autopilot
-description: The automated tail of fix-linear and fix-freeform — it commits, pushes, opens the MR, watches the pipeline and the review bot, addresses every comment, applies infrastructure plans, merges in the right order across stacked MRs, verifies the change actually deployed after the merge, pauses itself gracefully when the session quota runs low and comes back when it resets, and arms the user's phone notifications as it takes over so it can reach them while they are away. It is on by default in every fix run, so it is usually reached by hand-off rather than invoked. Invoke it directly when the user says autopilot, put it on autopilot, auto mode, one-shot this ticket, take this end to end, handle it autonomously, ship this without checking in, drive it to merge, or runs /autopilot — including mid-run, where /autopilot with flags amends the run already in flight (take over the merge, turn on a diagram, hold a merge that was about to happen).
+description: The automated tail of fix-linear and fix-freeform — it commits, pushes, opens the MR, watches the pipeline and the review bot, addresses every comment, applies infrastructure plans and merges in the right order across stacked MRs when it is allowed to merge, verifies the change actually deployed after the merge, pauses itself gracefully when the session quota runs low and comes back when it resets, and arms the user's phone notifications as it takes over so it can reach them while they are away. It is on by default in every fix run, so it is usually reached by hand-off rather than invoked. Invoke it directly when the user says autopilot, put it on autopilot, auto mode, one-shot this ticket, take this end to end, handle it autonomously, ship this without checking in, drive it to merge, or runs /autopilot — including mid-run, where /autopilot with flags amends the run already in flight (take over the merge, turn on a diagram, hold a merge that was about to happen).
 ---
 
 # Autopilot — The Automated Tail of a Fix Run
@@ -19,7 +19,7 @@ The name is the contract, and it is worth taking literally. An autopilot holds a
 |---|---|---|
 | A ticket id (`PLAT-123`) | — | Implement via `fix-linear`. |
 | Anything else | — | Implement via `fix-freeform`. |
-| `--merge [true\|false]` | `fix_merge` | `false` stops after the review is clean and the merge request is ready, without merging. |
+| `--merge [true\|false]` | `fix_merge` | `false` stops after the review is clean and the merge request is ready, without applying an infrastructure plan and without merging. |
 | `--max-rounds N` | `fix_max_rounds` | Review rounds with the same reviewer before escalating. |
 | `--autopilot [true\|false]` | `fix_autopilot` | `false` arriving here means the user has switched the tail off. See **Amending a run in flight**. |
 | `--branch`, `--quick-description`, `--diagram`, `--review` | `fix_*` | The fix skill's. Forward them; do not restate a default for them here. |
@@ -56,8 +56,8 @@ Three rules govern every amendment:
 
 | Flag | Arriving late | What to do |
 |---|---|---|
-| `--merge true` | any time before the merge | The common case: the user has got their go-ahead. Re-check the Step 9 gates and merge as soon as they pass. If the run has already parked at "ready", resume it — do not wait for anything else. |
-| `--merge false` | before the merge | Hold. Do not arm auto-merge, and if it is already armed, **disarm it** — an armed auto-merge fires on green and will beat this instruction. After the merge has landed, say plainly that it is already merged and do not revert it. |
+| `--merge true` | any time before the merge | The common case: the user has got their go-ahead. Re-check the Step 9 gates and merge as soon as they pass. If the run has already parked at "ready", resume it — do not wait for anything else. **On an infrastructure change, re-enter Step 8 and apply before merging**: a held run never posted the apply comment, so merging straight from here merges a plan that was never applied — the same failure Step 9 refuses to arm auto-merge for. |
+| `--merge false` | before the merge | Hold. Do not arm auto-merge, and if it is already armed, **disarm it** — an armed auto-merge fires on green and will beat this instruction. **On an infrastructure change it also holds the apply** — if the apply comment is not yet posted, do not post it, and if the apply has already run, say plainly what is applied and do not try to unwind it. After the merge has landed, say plainly that it is already merged and do not revert it. |
 | `--max-rounds N` | any time | Applies to rounds from here. A run already past the new cap escalates at the next round rather than retroactively. |
 | `--diagram true` | any time | Generate and attach it now if the code has settled, otherwise at Step 8b as usual. If the merge request is already merged, publish it anyway and put the link in the ticket and the report — a diagram is still worth having after the fact, and `changes-diagram` Step 2 documents the base to use once the branch is gone. |
 | `--diagram false` | any time | Skip the Step 8b attach. Never delete one already attached. |
@@ -201,6 +201,8 @@ Rules, all mechanical:
 ### `--merge false` is the flag to actually honour
 
 `--merge` decides where the run stops, and it is the one flag whose `true` value does something irreversible. `true` means this run merges as soon as it is genuinely safe. `false` means the change wants a human's eyes before it lands: drive it to a green pipeline, a clean review and a ready change request, then **stop and hand them the link**. Do not arm auto-merge, do not merge because the review came back clean, and do not treat a quiet reviewer as consent. A run that merges under `--merge false` has done the one thing the user explicitly reached for a flag to prevent.
+
+**On an infrastructure change the flag holds the apply too, which is Step 8 and is the easiest thing to miss from here.** An apply mutates real resources, so it is the landing rather than a step towards it: `--merge false` means neither the apply nor the merge happens, and the run hands over a reviewed change whose plan is still unapplied. Step 8 carries the argument and the consequences, including that a required apply check stays red on purpose.
 
 On the work profile `fix_merge` is `false` by default, which means the ordinary run there *always* stops at a ready merge request, and `/autopilot --merge` is how the user releases it. Read the flag early and record it next to the run state, not just at parse time — the merge decision is made hours later, in Step 9, by which point it is easy to have forgotten.
 
@@ -579,7 +581,7 @@ Job ids are per-pipeline: after any push, re-resolve the pipeline and its jobs b
 
 ## Step 8: Infrastructure Apply Gate
 
-**Skip this entire step when `iac_bot` is empty.** Otherwise the branch may contain an infrastructure plan that has to be applied from the MR branch *before* the merge, because merging an unapplied plan ships code whose infrastructure was never created.
+**Skip this entire step when `iac_bot` is empty.** Otherwise the branch may contain an infrastructure plan that has to be applied from the MR branch *before* the merge, because merging an unapplied plan ships code whose infrastructure was never created. **That premise is about a merge, so it falls away when there is none**: on `--merge false` nothing is applied here either, and the subsection below says why.
 
 Detect it: fetch the MR's raw notes (not just discussion threads — the bot usually posts plain notes, which a thread-only fetch discards) and look for notes authored by `iac_bot`. None means this gate does not apply; go to Step 8b.
 
@@ -596,11 +598,21 @@ Posting the apply comment requires all of these. Check them in order, and check 
 
 A plan that would **destroy or recreate** anything is a Step 10 escalation whatever the review said. Raise the question there rather than settling it inside your own review.
 
-**`--merge false` does not switch this step off.** The gate is the review, not the merge: on an infrastructure change, landing it means apply *then* merge, so once the review has passed the apply happens and Step 9 then holds the merge for a human. What `--merge false` holds back is the merge.
+**`--merge false` switches this step off. Never post the apply comment on a held run.** An apply is not a step towards landing an infrastructure change — it *is* the landing, and the merge behind it is bookkeeping. For application code the merge is the irreversible step and the deploy follows it; here that order inverts, which is why this step already calls the apply the least reversible thing the run does. A flag whose whole purpose is *do not land this without me* cannot cover only the cheap half of landing it. The asymmetry settles the rest: holding the apply costs a change that is reviewed and ready with its plan unapplied, which the user discharges with one comment, while applying under `--merge false` costs infrastructure nobody agreed to and is not undone by closing the change request afterwards.
+
+**This reverses what this step used to say**, so the old reasoning is recorded rather than deleted: the gate was held to be the review rather than the merge, so the apply went ahead once the review passed and only the merge waited for a human. That was right about ordering and was answering a question nobody asked. The flag is not a claim about where the apply sits in the sequence — it is the user withholding consent to land the change at all, and on an infrastructure change the apply is where landing happens.
+
+**The plan is not withheld, only the apply.** The bot posts the plan on the push and this step never suppresses it, so a held run hands over strictly more than a held code change does: a reviewed diff with the exact set of resources it would create, change and destroy, already rendered where whoever applies it will be looking.
+
+**Expect the forge to call the change not mergeable, and say so rather than leaving it to be found.** Where the bot publishes an apply status and the repository requires it, the one unmet check on a held run is the one this step deliberately refused to satisfy. That is the intended outcome and not a failure to drive the pipeline green — but a run reporting *green, reviewed and ready* over a required check it is holding red has misreported the only thing the user needs to know. Step 9's hand-over line and Step 11's ping both name the unapplied plan for that reason.
+
+On a held run go to **Step 8b** with the plan unapplied, and then to Step 9, which is where the run ends.
 
 In a stack, each member clears its own gate. A predecessor's review says nothing about this change.
 
 ### Running the apply
+
+**Only on `--merge true`.** A held run never reaches this sub-step — it has already gone to Step 8b.
 
 Collect every directory the bot reported a plan for using `iac_plan_marker`. Run the apply by posting the comment the bot expects, once and idempotently. Then wait — via the watcher, not a sleep loop — until **every** planned directory has reported `iac_apply_marker`.
 
@@ -631,6 +643,8 @@ Then go to **Step 9**. On `--merge false` that is where the run ends, so the dia
 ## Step 9: Merge
 
 **Check `--merge` before anything else in this step.** When it is `false`, this step is where the run ends: the merge request stays open and unarmed, and you go straight to Step 11 to report. Do not merge, do not enable auto-merge, and do not ask whether they have changed their mind — the flag was set before the run started precisely so that nobody has to be available now. Say in one line that the merge request is green, reviewed and ready, held unmerged per `--merge false`, and give the link.
+
+**On an infrastructure change that line says the plan is unapplied**, because Step 8 held the apply along with the merge. Name applying as the user's action, and never call the change ready to merge: where the bot publishes a required apply status it is still red, deliberately, and that is the one fact the hand-over exists to carry.
 
 Everything below applies only when `--merge` is `true`.
 
@@ -727,7 +741,7 @@ A reader scanning the branch list must be able to tell these three belong togeth
 
 The principle: a step is armed the instant its precondition is genuinely satisfied, and not one moment before. Waiting longer wastes the user's time; arming earlier breaks the ordering.
 
-**`--merge false` applies to the whole stack, not just its head.** Take every MR to green and reviewed, cross-linked and in order, then leave all of them open and unarmed. A stack is exactly where this is easiest to get wrong: merging the head "to unblock the rest" is still a merge the user asked you not to make, and it is the one that cannot be undone.
+**`--merge false` applies to the whole stack, not just its head.** Take every MR to green and reviewed, cross-linked and in order, then leave all of them open and unarmed. **No member applies**, either: Step 8 is held for the whole stack on the same reasoning it is held for a single change, so the hand-over names every unapplied plan rather than only the head's. A stack is exactly where this is easiest to get wrong: merging the head "to unblock the rest" is still a merge the user asked you not to make, and it is the one that cannot be undone.
 
 ## Step 10b: Verify the Deploy
 
@@ -827,7 +841,7 @@ When the MR merges, when a `--branch default` run has pushed, or when you stop f
    **On a run that has already merged, the base has to be supplied, and only one recipe is sound.** `changes-diagram` Step 2 documents it: the base is the merge commit's parent *and* the working tree has to be moved to the merge commit, because that skill reads the after-side of every diff from disk rather than from a ref. **Never improvise `<sha>~1..<sha>`** — a range satisfies `git diff` and is silently rejected by the `git show` that reads the before-side, so every file renders as added and the page is confidently wrong instead of absent. Append the link exactly as Step 8b does, bare, and let nothing here fail the run.
 3. **Append the decision record.** Take the scratchpad ledger, apply the filter and the budget from **The decision record**, and append it to the end of the change request description inside the collapsed `<details>` fold — one edit, after the diagram link. An empty ledger publishes nothing. **Never post it as a comment**: if the description edit fails, say so in one line and carry the ledger in the report instead.
 4. **Close the checklist.** One last `tick --publish`, against the identity recorded at the first publish so the link the user has open is the link that changes. Every item ends `done` or `skipped` **with a reason** — the renderer refuses a `skipped` item that carries none, and an item left `pending` on a finished run is the run telling the user it dropped something, which is exactly what the page is for. It should print `complete`; anything else names what the run did not finish.
-5. **Ping the user.** Invoke the `ping` skill with the `Skill` tool. This is the **closing** ping — Step 0d already sent the opening one and armed the session, and Step 4b already carried the merge request's link, so this is a report rather than an announcement or the first the user hears of the change request. It is the only message the user is guaranteed to read, so it carries what happened and whether anything is needed — a ping that says "done" wastes it. **It carries Step 10b's verdict in Step 10b's own words**: deployed and verified, deploy failed, waiting on a human, or merged and unverified. "Merged" alone is the one word that reads as finished while leaving out whether the change is actually running. **A `--branch default` run says so in the ping**: the change is on the default branch, unreviewed, and already live. That is what the user chose, and it is also the single fact most worth knowing on a phone.
+5. **Ping the user.** Invoke the `ping` skill with the `Skill` tool. This is the **closing** ping — Step 0d already sent the opening one and armed the session, and Step 4b already carried the merge request's link, so this is a report rather than an announcement or the first the user hears of the change request. It is the only message the user is guaranteed to read, so it carries what happened and whether anything is needed — a ping that says "done" wastes it. **It carries Step 10b's verdict in Step 10b's own words**: deployed and verified, deploy failed, waiting on a human, or merged and unverified. "Merged" alone is the one word that reads as finished while leaving out whether the change is actually running. **A `--branch default` run says so in the ping**: the change is on the default branch, unreviewed, and already live. That is what the user chose, and it is also the single fact most worth knowing on a phone. **A run that held an infrastructure apply says that**, and on such a run it outranks everything else in the message: the plan is reviewed and not applied, applying it is theirs, and the change request looks finished while no infrastructure has moved.
 6. **Name any signal that did not prove what it was meant to.** Where Step 0b's reading of the deploy path did not match what Step 10b actually observed, say so in the report in one line — the path you expected, the path it took, and which check turned out not to answer *is this SHA running*. A signal that looks authoritative and is not is the thing most likely to make the next run report a deploy it never saw, so it is worth naming even on a run that ended confirmed.
 
 ### When to stop and ping instead of continuing

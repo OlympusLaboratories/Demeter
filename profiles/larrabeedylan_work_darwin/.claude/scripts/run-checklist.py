@@ -79,7 +79,7 @@ def template(options):
             items.append(item("review", "Review the diff with the swarm",
                               "review-code", branch))
         items.append(item("threads", "Clear every review thread", "fix-feedback", request))
-        if options.iac:
+        if options.iac and options.merge:
             items.append(item("apply", "Apply the infrastructure plan before the merge",
                               "autopilot", request))
         if options.diagram:
@@ -87,6 +87,10 @@ def template(options):
                               "changes-diagram", request))
         if options.merge:
             items.append(item("merge", "Merge %s" % request, "autopilot", request))
+        elif options.iac:
+            items.append(item("ready",
+                              "Hand over %s with its plan unapplied and unmerged"
+                              % request, "autopilot", request))
         else:
             items.append(item("ready", "Hand over a ready %s without merging" % request,
                               "autopilot", request))
@@ -942,6 +946,11 @@ what it guarantees, and what each one is written against:
   the template is shaped by the resolved flags, so the page can neither list a
   diagram the run will not draw nor omit a merge it will perform
 
+  --iac without --merge carries no apply item at all, because --merge false
+  holds the apply as well as the merge: an item the run is forbidden to
+  discharge would sit pending to the end, report a finished run as incomplete
+  and wedge the Stop gate. the ready item says the plan is unapplied instead
+
   the items are in the order the run discharges them, and the diagram comes
   before the merge: autopilot draws it at Step 8b, because the merge deletes
   the branch and the worktree that changes-diagram derives its base from
@@ -980,8 +989,10 @@ what it guarantees, and what each one is written against:
                         decision fold)
     from session state  arm (armed_at is present)
 
-  reconcile never touches plan, review, verify or close - no signal for those
-  is solid, and deriving one badly is worse than leaving it manual
+  reconcile never touches plan, review, apply, verify or close - no signal for
+  those is solid, and deriving one badly is worse than leaving it manual. apply
+  is also seeded only on a merging run, so on --merge false there is no item to
+  derive
 
   every local signal only ever promotes: it ticks an item done when it can see
   the obligation discharged, and says nothing when it cannot. absence is not
