@@ -53,6 +53,7 @@ function store(projects: string, pollSeconds = 2): Store {
     initialDepth: 1,
     zoomSensitivity: 1,
     hideDeletedWork: false,
+    hideIdleHours: 0,
     workspaceFolders: ['/tmp/repo'],
   });
 }

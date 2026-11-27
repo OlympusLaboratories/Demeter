@@ -76,6 +76,12 @@
           "minimum": 0,
           "description": "Multiplier for scroll-wheel zoom. Lower is gentler; 0 disables wheel zoom and leaves the +/- and Fit controls."
         },
+        "agentWatch.hideIdleHours": {
+          "type": "number",
+          "default": 24,
+          "minimum": 0,
+          "description": "Hide a session with no activity anywhere inside it for this many hours. A session inside the window shows its whole tree, however long ago an individual agent finished. 0 shows everything agentWatch.recentDays loads. The status line reports how many were hidden."
+        },
         "agentWatch.hideDeletedWork": {
           "type": "boolean",
           "default": true,

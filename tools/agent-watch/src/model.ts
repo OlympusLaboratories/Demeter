@@ -44,6 +44,13 @@ export interface AgentNode {
   cwd?: string;
   branch?: string;
   waiting?: string;
+  activityMs?: number;
+}
+
+export function countNodes(node: AgentNode): number {
+  let total = 1;
+  for (const child of node.children) total += countNodes(child);
+  return total;
 }
 
 export interface SubagentInput {
@@ -247,6 +254,7 @@ function subagentNode(
     children: [],
     toolUseId: input.meta.toolUseId,
     spawnDepth: input.meta.spawnDepth,
+    activityMs: input.mtimeMs,
   };
 }
 
@@ -315,6 +323,7 @@ export function buildSessionTree(input: SessionInput): AgentNode {
     children: [],
     cwd: latestCwd(input.lines),
     branch,
+    activityMs: input.mtimeMs,
   };
 
   const owners: Owner[] = [

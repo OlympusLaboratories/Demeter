@@ -117,7 +117,7 @@ let userAdjusted = false;
 let lastShape = '';
 let zoomSensitivity = 1;
 let onlyThisWindow = true;
-let activeOnly = false;
+let activeOnly = true;
 let pendingFocus: { id: string; expanding: boolean } | undefined;
 
 function applyTransform(): void {
@@ -270,13 +270,19 @@ function renderStatus(state: ViewState): void {
 
   if (state.inactiveHidden > 0) {
     const quiet = el('span', 'hidden-count', `${state.inactiveHidden} inactive`);
-    quiet.title = `${state.inactiveHidden} node${state.inactiveHidden === 1 ? '' : 's'} hidden: nothing live or running in them. Turn off "active only" to show them.`;
+    quiet.title = `${state.inactiveHidden} node${plural(state.inactiveHidden)} hidden: nothing live or running in them. Turn off "active only" to show them.`;
     status.append(quiet);
+  }
+
+  if (state.staleHidden > 0) {
+    const idle = el('span', 'hidden-count', `${state.staleHidden} idle`);
+    idle.title = `${state.staleHidden} node${plural(state.staleHidden)} hidden: nothing in them has been active for ${state.hideIdleHours}h. Raise agentWatch.hideIdleHours, or set it to 0, to show them.`;
+    status.append(idle);
   }
 
   if (state.removedCount > 0) {
     const hidden = el('span', 'hidden-count', `${state.removedCount} deleted`);
-    hidden.title = `${state.removedCount} session${state.removedCount === 1 ? '' : 's'} hidden: the git worktree or branch it ran on no longer exists. Turn off agentWatch.hideDeletedWork to show them.`;
+    hidden.title = `${state.removedCount} session${plural(state.removedCount)} hidden: the git worktree or branch it ran on no longer exists. Turn off agentWatch.hideDeletedWork to show them.`;
     status.append(hidden);
   }
 
@@ -290,6 +296,26 @@ function renderStatus(state: ViewState): void {
   );
 }
 
+function plural(count: number): string {
+  return count === 1 ? '' : 's';
+}
+
+function emptyText(state: ViewState): string {
+  if (state.message) return state.message;
+  if (state.loading) return 'Scanning…';
+  if (state.repos.length === 0) {
+    return 'No Claude Code sessions found. Check agentWatch.projectsDir if your transcripts live elsewhere.';
+  }
+  if (state.activeOnly && state.inactiveHidden > 0) {
+    return `Nothing live or running here. ${state.inactiveHidden} node${plural(state.inactiveHidden)} hidden by "active only".`;
+  }
+  if (state.staleHidden > 0) {
+    return `Nothing active here in the last ${state.hideIdleHours}h. ${state.staleHidden} node${plural(state.staleHidden)} hidden as idle.`;
+  }
+  if (state.worktrees.length === 0) return `No sessions in the last ${state.recentDays} days for this repo.`;
+  return 'No sessions in this worktree.';
+}
+
 function renderGraph(state: ViewState): void {
   const svg = document.getElementById('graph') as SVGSVGElement | null;
   const empty = byId('empty');
@@ -298,17 +324,7 @@ function renderGraph(state: ViewState): void {
 
   if (state.graph.nodes.length === 0) {
     empty.classList.remove('hidden');
-    empty.textContent = state.message
-      ? state.message
-      : state.loading
-        ? 'Scanning…'
-        : state.repos.length === 0
-          ? 'No Claude Code sessions found. Check agentWatch.projectsDir if your transcripts live elsewhere.'
-          : state.activeOnly && state.inactiveHidden > 0
-            ? `Nothing live or running here. ${state.inactiveHidden} node${state.inactiveHidden === 1 ? '' : 's'} hidden by "active only".`
-            : state.worktrees.length === 0
-              ? `No sessions in the last ${state.recentDays} days for this repo.`
-              : 'No sessions in this worktree.';
+    empty.textContent = emptyText(state);
     lastLayout = state.graph;
     lastShape = '';
     return;
