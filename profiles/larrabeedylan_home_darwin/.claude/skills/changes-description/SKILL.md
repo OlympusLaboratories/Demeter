@@ -68,10 +68,10 @@ What that reader needs above all is a **story, not an inventory**. A list of tru
 Resolve the base first, one command at a time, and **write the merge-base commit down**: every command after it takes that SHA literally, in place of `<merge base>`.
 
 ```bash
-git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@'
+git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@'
 ```
 
-Nothing printed means no `origin/HEAD`, so fall back:
+Nothing printed means no `origin/HEAD`, so fall back. The `2>/dev/null` is what makes that test true: without it a clone whose `origin/HEAD` was never set prints `fatal: ref refs/remotes/origin/HEAD is not a symbolic ref`, and the exit status says nothing either way because a pipeline takes `sed`'s.
 
 ```bash
 git branch -r | grep -E 'origin/(main|master)$' | head -1 | sed 's@.*origin/@@'
