@@ -9,6 +9,7 @@ on:
       - 'vscode/**'
       - 'shell/**'
       - 'tests/**'
+      - 'profiles/check-transform.py'
       - 'profiles/*/.claude/hooks/**'
       - 'profiles/*/.claude/scripts/**'
       - 'profiles/*/.claude/skills/changes-diagram/**'
@@ -101,3 +102,6 @@ jobs:
 
       - name: Stdin body rule
         run: tests/check-stdin-body-rule.py
+
+      - name: Derive guard over the allowlist
+        run: tests/check-transform-derive.py
