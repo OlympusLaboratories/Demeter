@@ -14,7 +14,8 @@ import urllib.request
 STATES = ("pending", "in-flight", "done", "skipped")
 OPEN_STATES = ("pending", "in-flight")
 ITEM_FIELDS = ("id", "obligation", "skill", "target", "waiting_on", "state", "note",
-               "link")
+               "link", "stage")
+STAGE_FIELDS = ("id", "label", "branch", "change_request", "after")
 RUN_FIELDS = ("title", "repo", "branch", "ticket", "plan_page", "change_request",
               "url", "hash")
 
@@ -41,7 +42,7 @@ STATE_LABEL = {
 
 
 def item(ident, obligation, skill="", target="", waiting_on="", state="pending", note="",
-         link=""):
+         link="", stage=""):
     return {
         "id": ident,
         "obligation": obligation,
@@ -51,22 +52,96 @@ def item(ident, obligation, skill="", target="", waiting_on="", state="pending",
         "state": state,
         "note": note,
         "link": link,
+        "stage": stage,
     }
+
+
+def stage(ident, label, branch="", change_request="", after=""):
+    return {
+        "id": ident,
+        "label": label,
+        "branch": branch,
+        "change_request": change_request,
+        "after": after,
+    }
+
+
+def base_id(ident):
+    return ident.split("@", 1)[0]
+
+
+def request_items(options, branch, suffix, belongs_to):
+    request = "the %s" % (options.request_name or "change request")
+
+    def member(ident, obligation, skill="", target=""):
+        return item(ident + suffix, obligation, skill, target, stage=belongs_to)
+
+    items = [
+        member("implement", "Implement the change", "", branch),
+        member("commit", "Commit with a generated message", "commit-msg", branch),
+        member("describe", "Write the change description", "changes-description", branch),
+        member("open", "Push and open %s" % request, "autopilot", branch),
+        member("link", "Send the user %s's link" % request, "ping", "the user"),
+        member("pipeline", "Drive the pipeline green", "autopilot", request),
+    ]
+    if options.review and not belongs_to:
+        items.append(member("review", "Review the diff with the swarm",
+                            "review-code", branch))
+    items.append(member("threads", "Clear every review thread", "fix-feedback", request))
+    if options.iac and options.merge:
+        items.append(member("apply", "Apply the infrastructure plan before the merge",
+                            "autopilot", request))
+    if options.diagram:
+        items.append(member("diagram", "Attach the call-flow diagram",
+                            "changes-diagram", request))
+    if options.merge:
+        items.append(member("merge", "Merge %s" % request, "autopilot", request))
+    elif options.iac:
+        items.append(member("ready",
+                            "Hand over %s with its plan unapplied and unmerged"
+                            % request, "autopilot", request))
+    else:
+        items.append(member("ready", "Hand over a ready %s without merging" % request,
+                            "autopilot", request))
+    items.append(member("ledger", "Append the decision record to the description",
+                        "autopilot", request))
+    return items
+
+
+def stack_labels(options):
+    return [part.strip() for part in (options.stack or "").split("|") if part.strip()]
+
+
+def slug(text):
+    words = [word for word in re.split(r"[^a-z0-9]+", text.lower()) if word]
+    return "-".join(words[:5])
+
+
+def member_branch(branch, index, label):
+    tail = slug(label)
+    return "%s/%02d%s" % (branch.rstrip("/"), index, "-" + tail if tail else "")
 
 
 def template(options):
     branch = options.branch or "<branch>"
-    request = "the %s" % (options.request_name or "change request")
+    labels = stack_labels(options)
+    if labels and options.branch_mode == "default":
+        raise ValueError("--stack needs a change request per member, "
+                         "which --branch-mode default never opens")
+
     items = [
         item("arm", "Arm the session's notifications", "ping", "this session"),
         item("plan", "Get the plan approved by the user", "AskUserQuestion",
              options.ticket or "the problem statement"),
-        item("implement", "Implement the change", "", branch),
-        item("commit", "Commit with a generated message", "commit-msg", branch),
-        item("describe", "Write the change description", "changes-description", branch),
     ]
+    stages = []
 
     if options.branch_mode == "default":
+        items.append(item("implement", "Implement the change", "", branch))
+        items.append(item("commit", "Commit with a generated message",
+                          "commit-msg", branch))
+        items.append(item("describe", "Write the change description",
+                          "changes-description", branch))
         if options.diagram:
             items.append(item("diagram", "Draw and publish the call-flow diagram",
                               "changes-diagram", branch))
@@ -74,34 +149,25 @@ def template(options):
             items.append(item("review", "Review the diff with the swarm",
                               "review-code", branch))
         items.append(item("push", "Push the default branch", "autopilot", branch))
+        items.append(item("verify", "Verify the change reached production", "autopilot",
+                          "the deploy target"))
+    elif not labels:
+        items.extend(request_items(options, branch, "", ""))
+        items.append(item("verify", "Verify the change reached production", "autopilot",
+                          "the deploy target"))
     else:
-        items.append(item("open", "Push and open %s" % request, "autopilot", branch))
-        items.append(item("link", "Send the user %s's link" % request, "ping", "the user"))
-        items.append(item("pipeline", "Drive the pipeline green", "autopilot", request))
         if options.review:
-            items.append(item("review", "Review the diff with the swarm",
-                              "review-code", branch))
-        items.append(item("threads", "Clear every review thread", "fix-feedback", request))
-        if options.iac and options.merge:
-            items.append(item("apply", "Apply the infrastructure plan before the merge",
-                              "autopilot", request))
-        if options.diagram:
-            items.append(item("diagram", "Attach the call-flow diagram",
-                              "changes-diagram", request))
-        if options.merge:
-            items.append(item("merge", "Merge %s" % request, "autopilot", request))
-        elif options.iac:
-            items.append(item("ready",
-                              "Hand over %s with its plan unapplied and unmerged"
-                              % request, "autopilot", request))
-        else:
-            items.append(item("ready", "Hand over a ready %s without merging" % request,
-                              "autopilot", request))
-        items.append(item("ledger", "Append the decision record to the description",
-                          "autopilot", request))
+            items.append(item("review", "Review every branch in the stack with the swarm",
+                              "review-code", "the whole stack"))
+        for index, label in enumerate(labels, start=1):
+            ident = "%d" % index
+            here = member_branch(branch, index, label)
+            stages.append(stage(ident, label, here, "",
+                                "%d" % (index - 1) if index > 1 else ""))
+            items.extend(request_items(options, here, "@" + ident, ident))
+            items.append(item("verify@" + ident, "Verify the change reached production",
+                              "autopilot", "the deploy target", stage=ident))
 
-    items.append(item("verify", "Verify the change reached production", "autopilot",
-                      "the deploy target"))
     items.append(item("close", "Report what happened and send the closing ping",
                       "ping", "the user"))
 
@@ -116,6 +182,7 @@ def template(options):
             "url": "",
             "hash": "",
         },
+        "stages": stages,
         "items": items,
     }
 
@@ -135,6 +202,38 @@ def canonical(document, path):
         if not isinstance(value, str):
             raise ValueError("%s: run.%s is not a string" % (path, field))
         run[field] = value
+
+    stages_raw = document.get("stages", [])
+    if stages_raw is None:
+        stages_raw = []
+    if not isinstance(stages_raw, list):
+        raise ValueError("%s: stages is not a list" % path)
+
+    stages = []
+    declared = []
+    for index, entry in enumerate(stages_raw):
+        where = "%s: stage %d" % (path, index + 1)
+        if not isinstance(entry, dict):
+            raise ValueError("%s is not an object" % where)
+        clean = {}
+        for field in STAGE_FIELDS:
+            value = entry.get(field, "")
+            if value is None:
+                value = ""
+            if not isinstance(value, str):
+                raise ValueError("%s: %s is not a string" % (where, field))
+            clean[field] = value.strip()
+        if not clean["id"]:
+            raise ValueError("%s has no id" % where)
+        if clean["id"] in declared:
+            raise ValueError("%s repeats the id %s" % (where, clean["id"]))
+        if not clean["label"]:
+            raise ValueError("%s (%s) has no label" % (where, clean["id"]))
+        if clean["after"] and clean["after"] not in declared:
+            raise ValueError("%s (%s) comes after %s, which is not an earlier stage"
+                             % (where, clean["id"], clean["after"]))
+        declared.append(clean["id"])
+        stages.append(clean)
 
     items_raw = document.get("items")
     if not isinstance(items_raw, list) or not items_raw:
@@ -170,9 +269,12 @@ def canonical(document, path):
         if clean["state"] == "in-flight" and not clean["waiting_on"]:
             raise ValueError("%s (%s) is in flight and waiting on nothing"
                              % (where, clean["id"]))
+        if clean["stage"] and clean["stage"] not in declared:
+            raise ValueError("%s (%s) belongs to stage %s, which is not declared"
+                             % (where, clean["id"], clean["stage"]))
         items.append(clean)
 
-    return {"run": run, "items": items}
+    return {"run": run, "stages": stages, "items": items}
 
 
 def standing(items):
@@ -224,10 +326,16 @@ def mark_outstanding(document):
         state.pop("checklist_forked", None)
     else:
         run = document["run"]
+        branches = []
+        for name in ([run.get("branch", "")]
+                     + [entry.get("branch", "") for entry in document["stages"]]):
+            if name and name not in branches:
+                branches.append(name)
         state["checklist_pending"] = {
             "url": run.get("url", ""),
             "hash": run.get("hash", ""),
             "branch": run.get("branch", ""),
+            "branches": branches,
             "at": time.time(),
             "stops": 0,
             "verdict": verdict,
@@ -335,8 +443,15 @@ REQUEST_NUMBER = re.compile(
     r"/([^/]+/[^/]+)/(?:-/)?(?:pull|pulls|merge_requests|pull-requests)/(\d+)")
 
 
-def item_link(entry, run):
-    target = entry.get("link") or run.get(DERIVED_LINK.get(entry["id"], ""), "")
+def item_link(entry, run, stages=None):
+    target = entry.get("link")
+    if not target:
+        field = DERIVED_LINK.get(base_id(entry["id"]), "")
+        owner = (stages or {}).get(entry.get("stage") or "")
+        if field == "change_request" and owner:
+            target = owner.get("change_request", "")
+        elif field:
+            target = run.get(field, "")
     return target if re.match(r"^https?://", target or "") else ""
 
 
@@ -346,6 +461,24 @@ def request_fact(url):
     found = REQUEST_NUMBER.search(url)
     label = "%s#%s" % (found.group(1), found.group(2)) if found else url
     return '<a href="%s">%s</a>' % (escape(url), escape(label))
+
+
+def stage_row(owner, by_stage):
+    facts = []
+    if owner["branch"]:
+        facts.append("branch <code>%s</code>" % escape(owner["branch"]))
+    if owner["change_request"]:
+        facts.append(request_fact(owner["change_request"]))
+    if owner["after"]:
+        earlier = by_stage.get(owner["after"])
+        facts.append("after %s" % escape(earlier["label"] if earlier
+                                         else owner["after"]))
+    else:
+        facts.append("first to merge")
+    return ('<tr class="stagerow"><td class="stagecell" colspan="6">'
+            '<span class="slabel">%s</span>'
+            '<span class="smeta">%s</span></td></tr>'
+            % (escape(owner["label"]), " · ".join(facts)))
 
 
 def render(document, stamp=None):
@@ -373,14 +506,24 @@ def render(document, stamp=None):
     if run["change_request"]:
         facts.append(request_fact(run["change_request"]))
 
+    by_stage = {entry["id"]: entry for entry in document.get("stages", [])}
+    if by_stage:
+        facts.append("%d in the stack" % len(by_stage))
+
     rows = []
+    standing_stage = None
     for index, entry in enumerate(items, start=1):
+        if entry.get("stage", "") != standing_stage:
+            standing_stage = entry.get("stage", "")
+            owner = by_stage.get(standing_stage)
+            if owner:
+                rows.append(stage_row(owner, by_stage))
         waiting = escape(entry["waiting_on"])
         if not waiting:
             waiting = "<em>nothing</em>" if entry["state"] in OPEN_STATES else "—"
         detail = escape(entry["note"]) if entry["note"] else ""
         obligation = escape(entry["obligation"])
-        destination = item_link(entry, run)
+        destination = item_link(entry, run, by_stage)
         if destination:
             obligation = '<a href="%s">%s</a>' % (escape(destination), obligation)
         rows.append(
@@ -510,12 +653,19 @@ PAGE = """<!doctype html>
     td.n::before { content: none; }
     td[data-label="State"]::before { content: none; }
     td.wait { border-top: 1px solid var(--rule); padding-top: 7px; }
+    tr.stagerow { border: 0; border-radius: 0; padding: 0; margin: 18px 0 10px; }
+    td.stagecell { border-bottom: 0; padding: 0; }
+    td.stagecell::before { content: none; }
   }
   tr.s-in-flight .badge { color: var(--flight); }
   tr.s-skipped .badge { color: var(--skip); }
   tr.s-pending .badge { color: var(--muted); }
   tr.s-done td.ob, tr.s-skipped td.ob { color: var(--muted); font-weight: 400; }
   footer { margin-top: 32px; color: var(--muted); font-size: 13px; }
+  td.stagecell { border-bottom: 1px solid var(--rule); padding: 20px 10px 7px; }
+  tr.stagerow:first-child td.stagecell { padding-top: 6px; }
+  .slabel { display: block; font-weight: 680; font-size: 15px; }
+  .smeta { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
   a { color: inherit; text-decoration-color: var(--accent); text-underline-offset: 2px; }
   td.ob a { text-decoration-thickness: 1px; }
   .dock { position: fixed; z-index: 30; display: flex; align-items: center; gap: 8px;
@@ -880,13 +1030,25 @@ def observed(forge):
     return ticks
 
 
-def reconcile(document, forge, local=None):
-    by_id = {entry["id"]: entry for entry in document["items"]}
+def locate(document, stage, ident):
+    shared = None
+    for entry in document["items"]:
+        if base_id(entry["id"]) != ident:
+            continue
+        where = entry.get("stage", "")
+        if where == stage:
+            return entry
+        if not where and shared is None:
+            shared = entry
+    return shared
+
+
+def reconcile(document, forge, local=None, stage=""):
     seen = dict(observed(forge))
     seen.update(local or {})
     changed = []
     for ident, (state, text, only_when) in seen.items():
-        entry = by_id.get(ident)
+        entry = locate(document, stage, ident)
         if entry is None or ident not in OBSERVABLE:
             continue
         if entry["state"] == "skipped":
@@ -900,18 +1062,30 @@ def reconcile(document, forge, local=None):
                 continue
             entry["waiting_on"] = waiting
             entry["note"] = note
-            changed.append("%s~%s" % (ident, state))
+            changed.append("%s~%s" % (entry["id"], state))
             continue
         entry["state"] = state
         entry["waiting_on"] = waiting
         entry["note"] = note
-        changed.append("%s=%s" % (ident, state))
+        changed.append("%s=%s" % (entry["id"], state))
     return changed
 
 
 def cmd_reconcile(args):
     document = read_document(args.items)
-    recorded = (document["run"].get("change_request") or "").strip()
+    member = None
+    if args.stage:
+        for entry in document["stages"]:
+            if entry["id"] == args.stage:
+                member = entry
+                break
+        if member is None:
+            print("no stage %r; the page has %s"
+                  % (args.stage, ", ".join(entry["id"] for entry in document["stages"])
+                     or "none"), file=sys.stderr)
+            return 2
+    owner = member or document["run"]
+    recorded = (owner.get("change_request") or "").strip()
     given = (args.url or "").strip()
     if given and recorded and given.rstrip("/") != recorded.rstrip("/"):
         print("this checklist is for %s, not %s; refusing to write another change "
@@ -939,9 +1113,8 @@ def cmd_reconcile(args):
                 body = handle.read()
         except OSError:
             body = None
-    local = observed_local(repo, document["run"].get("branch", ""), base, body,
-                           session_armed())
-    changed = reconcile(document, forge, local)
+    local = observed_local(repo, owner.get("branch", ""), base, body, session_armed())
+    changed = reconcile(document, forge, local, args.stage)
     document = canonical(document, args.items)
     write(args.items, dump(document) + "\n")
     mark_outstanding(document)
@@ -958,13 +1131,26 @@ def cmd_reconcile(args):
 def apply_run_fields(document, assignments):
     for assignment in assignments:
         if "=" not in assignment:
-            raise ValueError("%r is not <field>=<value>" % assignment)
+            raise ValueError("%r is not <field>=<value> or <stage>:<field>=<value>"
+                             % assignment)
         field, _, value = assignment.partition("=")
-        field = field.strip()
+        field, value = field.strip(), value.strip()
+        if ":" in field:
+            ident, _, field = field.partition(":")
+            ident, field = ident.strip(), field.strip()
+            known = [entry["id"] for entry in document["stages"]]
+            if ident not in known:
+                raise ValueError("no stage %r; the page has %s"
+                                 % (ident, ", ".join(known) or "none"))
+            if field not in STAGE_FIELDS:
+                raise ValueError("no stage field %r; a stage has %s"
+                                 % (field, ", ".join(STAGE_FIELDS)))
+            document["stages"][known.index(ident)][field] = value
+            continue
         if field not in RUN_FIELDS:
             raise ValueError("no run field %r; the page has %s"
                              % (field, ", ".join(RUN_FIELDS)))
-        document["run"][field] = value.strip()
+        document["run"][field] = value
     return document
 
 
@@ -1014,6 +1200,7 @@ def cmd_rules(args):
     print()
     print("states: %s" % ", ".join(STATES))
     print("item fields: %s" % ", ".join(ITEM_FIELDS))
+    print("stage fields: %s" % ", ".join(STAGE_FIELDS))
     print("run fields: %s" % ", ".join(RUN_FIELDS))
     print("publisher: %s --purpose tasks" % PUBLISH_SCRIPT)
     return 0
@@ -1122,6 +1309,36 @@ what it guarantees, and what each one is written against:
   before the merge: autopilot draws it at Step 8b, because the merge deletes
   the branch and the worktree that changes-diagram derives its base from
 
+  a run needing several change requests in order declares a stage per member
+  with --stack, and the page then carries the thing a flat list cannot say:
+  which branch each member is on, which change request it became, and which
+  member it merges after. a stack was previously tracked in a side file no
+  page ever read, so the checklist described one member and said nothing
+  about the others
+
+  only --stack suffixes the item ids, as open@2, and the ordinary template is
+  byte-for-byte what it always was. that is deliberate rather than tidy: the
+  gate's own tests look items up by their bare id, and more to the point a
+  run with one change request should not pay in readability for a shape it is
+  not using
+
+  a stage's items are matched on the BASE id, so the forge signals keep
+  working per member: reconcile --stage 2 writes that member's open,
+  pipeline, threads and merge, refuses a url disagreeing with the change
+  request that member recorded, and reads commit and implement from that
+  member's own branch. one watcher runs per change request, so without the
+  stage every member would write onto the same items
+
+  a stage falls back to the shared items for anything it does not own, which
+  is how arm stays one obligation across a whole stack rather than one per
+  member
+
+  the swarm is one item for the whole stack, never one per member, because
+  running one per member is how a stack spends four figures of agents in five
+  minutes. the merge, the verify and the deploy ARE per member - every merge
+  to the default branch fires its own deploy, so an intermediate failure is a
+  real failure and needs its own item to be visible
+
   "nothing armed" is computed from the items, never asserted: outstanding work
   with no item in flight renders as an alarm, which is what makes autopilot's
   rule checkable rather than aspirational
@@ -1184,6 +1401,11 @@ what it guarantees, and what each one is written against:
   nothing for the gate to hold on and the first page describes a run that no
   longer exists
 
+  it carries every STAGE's branch beside it, because a stack moves between
+  its members by design and holding the turn each time would make the gate
+  something to switch off. a branch this page does not claim still holds,
+  which is the case the gate is for
+
   every write rebuilds the marker from scratch, so the gate's spent-fork
   record lives in checklist_forked BESIDE it rather than in it - a field
   inside the marker is wiped by every publish, tick, reconcile and arm, which
@@ -1212,6 +1434,9 @@ def main():
     seed.add_argument("--request-name", default="",
                       help="this machine's change_request, e.g. pull request")
     seed.add_argument("--branch-mode", choices=("new", "default"), default="new")
+    seed.add_argument("--stack", default="",
+                      help="pipe-separated member labels, in merge order, for a run "
+                           "that needs several change requests")
     seed.add_argument("--review", action="store_true")
     seed.add_argument("--diagram", action="store_true")
     seed.add_argument("--merge", action="store_true")
@@ -1241,7 +1466,8 @@ def main():
     mark.add_argument("tick", nargs="+", metavar="ID=STATE[:TEXT]",
                       help="TEXT is what it waits on for in-flight, else the note")
     mark.add_argument("--run", action="append", default=[], metavar="FIELD=VALUE",
-                      help="set a run field, e.g. --run change_request=<url>")
+                      help="set a run field, e.g. --run change_request=<url>, or a "
+                           "stage's with --run 2:change_request=<url>")
     mark.add_argument("--publish", action="store_true",
                       help="also write the page, as an update against the recorded hash")
     mark.add_argument("--update", default="")
@@ -1253,6 +1479,8 @@ def main():
         "reconcile",
         help="set the forge-observable items from what the forge reports")
     sync.add_argument("items")
+    sync.add_argument("--stage", default="",
+                      help="which stack member these facts belong to")
     sync.add_argument("--url", default="")
     sync.add_argument("--state", default="")
     sync.add_argument("--merged", default="false")

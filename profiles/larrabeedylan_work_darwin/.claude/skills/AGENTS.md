@@ -226,6 +226,26 @@ What the shell does do is lift the **first `data:image/` icon link out of the ar
 
 None of that fixes the calendar. The capture comes from the store giving every per-artifact manifest `"scope": "/"`, so installing one artifact to the home screen registers a web app owning the whole origin and every later artifact URL falls inside it. That is a one-line change in the store and is not in this repo. Worth keeping the two apart: the icon work makes each page *wear its own face*, and the scope fix is what stops another page's face being put on it.
 
+### A stack's order was recorded where nothing could read it
+
+A run needing several change requests in a particular order already recorded that order — in `~/.claude/autopilot/<run>/stack.json`, which nothing publishes and nobody opens. The checklist, the one thing the user does open, described a single change request and said nothing about the rest; and because a checklist is keyed to one branch, the second member tripped the `Stop` fork gate, whose advice was to publish a second page. Three members meant three pages, none of which could state the one fact that makes a stack a stack: what merges after what.
+
+So the document gained an ordered list of **stages** — each with a label, a branch, its change request and which stage it follows — and every item names the stage it belongs to. The page heads each member with that, so the ordering is readable at a glance rather than reconstructed from branch names. `--stack 'load the registry|migrate the call sites'` seeds it, deriving the ordinal branch names autopilot already prescribes.
+
+Six things are load-bearing, and the first is a constraint rather than a choice.
+
+**Only `--stack` suffixes the item ids.** A stacked run has `open@1` and `open@2`; an ordinary run has `open`, byte-for-byte as before. The gate's own tests index items by literal id, so a suffix there is a `KeyError` rather than a soft failure — but the better reason is that a run with one change request should not read like a run with three.
+
+**A stage's items are matched on the base id**, which is what keeps every existing forge signal working per member: `reconcile --stage 2` writes that member's `open`, `pipeline`, `threads` and `merge`, refuses a url disagreeing with the change request *that member* recorded, and reads `commit` and `implement` from that member's own branch. The watcher gained a matching `--stage`, because one watcher runs per change request and without it every member writes onto the same items — the watcher passes no `--url` at all, so it would have been three watchers silently overwriting one set.
+
+**A stage falls back to the shared items for anything it does not own.** That is how `arm` stays one obligation across a whole stack rather than one per member, with no special-casing at the call site.
+
+**The swarm is one item for the whole stack and the deploy is one item per member**, and the asymmetry is the point. Rule 18 exists because a run launched two full panels at once and spent a quarter of a session window in five minutes, so a review item per member would be the same mistake written into the template. Verification pulls the other way: every merge to the default branch fires its own deploy, so an intermediate failure is a real failure and needs an item of its own to be visible at all.
+
+**The session marker carries every stage's branch** beside the run's own, and the fork gate accepts any of them. Without that, a stack moving between its members by design would hold a turn end each time — and a gate that fires on correct behaviour is a gate people switch off. A branch the page does not claim still holds, which is the case the gate was built for.
+
+**A stage is validated as strictly as an item**: a repeated id, a missing label, an item in an undeclared stage, and an `after` naming a stage that is not an *earlier* one are all errors. That last one is doing two jobs — it pins the declared order to the list order, and it makes a dependency cycle unrepresentable rather than merely discouraged.
+
 ### Never yielding is the silent half of never blocking
 
 Rule 1 forbids holding a turn open, and the skill said nothing at all about the opposite — which is strictly worse, because a turn that ends with nothing running is indistinguishable from a turn that ends having handed work off. Observed on a real run: it announced the two review swarms it would start next, then ended the turn with both earlier panels already finished and **nothing in flight**. Had the user not replied it would have idled until morning, behind a transcript that read like work in progress. So a turn may end only when something will cause the next one — a running workflow, a `Monitor`, a scheduled wakeup — and with an empty queue and budget intact the run does the next item **in that turn** rather than announcing it. A queue that is empty because everything left is blocked is said explicitly and paused on, so silence is never ambiguous between working and stopped. The checklist is what makes the condition answerable: it is a query over the *waiting on* column rather than a reading of the transcript.
