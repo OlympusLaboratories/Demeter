@@ -456,6 +456,118 @@ def check_profile(suite, profile, work):
     suite.ok("%s a hostile item link is refused too" % tag,
              'href="javascript:alert(2)"' not in rendered)
 
+    stacked = run(script, "template", "--branch", "dylan/registry",
+                  "--request-name", "pull request", "--review", "--merge",
+                  "--stack", "load the registry|migrate the call sites")
+    suite.exits("%s a stacked template" % tag, 0, stacked)
+    stack_doc = json.loads(stacked.stdout)
+    stack_ids = [entry["id"] for entry in stack_doc["items"]]
+
+    suite.ok("%s a stack declares one stage per member" % tag,
+             [entry["id"] for entry in stack_doc["stages"]] == ["1", "2"],
+             stack_doc["stages"])
+    suite.ok("%s a stage carries its label" % tag,
+             [entry["label"] for entry in stack_doc["stages"]]
+             == ["load the registry", "migrate the call sites"], stack_doc["stages"])
+    suite.ok("%s a stage carries an ordinal branch" % tag,
+             stack_doc["stages"][0]["branch"] == "dylan/registry/01-load-the-registry",
+             stack_doc["stages"][0])
+    suite.ok("%s a stage says which one it follows" % tag,
+             [entry["after"] for entry in stack_doc["stages"]] == ["", "1"],
+             stack_doc["stages"])
+    suite.ok("%s a stacked run still arms first and closes last" % tag,
+             stack_ids[0] == "arm" and stack_ids[-1] == "close", stack_ids)
+    for bare in ("implement", "commit", "open", "merge", "ledger", "verify"):
+        suite.ok("%s %s is per member, never bare, in a stack" % (tag, bare),
+                 bare not in stack_ids
+                 and ("%s@1" % bare) in stack_ids and ("%s@2" % bare) in stack_ids,
+                 stack_ids)
+    suite.ok("%s the swarm is one item for the whole stack" % tag,
+             stack_ids.count("review") == 1 and "review@1" not in stack_ids,
+             stack_ids)
+    suite.ok("%s every member item names its stage" % tag,
+             all(entry["stage"] == entry["id"].split("@")[1]
+                 for entry in stack_doc["items"] if "@" in entry["id"]),
+             stack_doc["items"])
+    suite.ok("%s a shared item belongs to no stage" % tag,
+             all(entry["stage"] == "" for entry in stack_doc["items"]
+                 if "@" not in entry["id"]), stack_doc["items"])
+    suite.ok("%s each member merges after its own threads" % tag,
+             stack_ids.index("threads@1") < stack_ids.index("merge@1")
+             < stack_ids.index("implement@2"), stack_ids)
+
+    suite.exits("%s a stack on the default branch is refused" % tag, 1,
+                run(script, "template", "--branch-mode", "default",
+                    "--stack", "one|two"))
+
+    stack_seed = write(os.path.join(work, "stack.json"), stacked.stdout)
+    marked = run(script, "tick", stack_seed, "merge@2=pending",
+                 "--run", "1:change_request=https://forge.invalid/acme/widgets/pull/1")
+    suite.exits("%s a stage field can be set" % tag, 0, marked)
+    suite.exits("%s an unknown stage is refused" % tag, 1,
+                run(script, "tick", stack_seed, "merge@2=pending",
+                    "--run", "9:change_request=https://forge.invalid/x/y/pull/1"))
+    suite.exits("%s an unknown stage field is refused" % tag, 1,
+                run(script, "tick", stack_seed, "merge@2=pending",
+                    "--run", "1:nonsense=x"))
+
+    stack_page = os.path.join(work, "stack.html")
+    suite.exits("%s render a stack" % tag, 0,
+                run(script, "render", stack_seed, stack_page, "--stamp", "S"))
+    stack_body = open(stack_page, encoding="utf-8").read()
+    suite.ok("%s the page heads each member" % tag,
+             stack_body.count('class="stagerow"') == 2, stack_body.count("stagerow"))
+    suite.ok("%s a member heading names its branch" % tag,
+             "dylan/registry/02-migrate-the-call-sites" in stack_body)
+    suite.ok("%s a member heading names what it follows" % tag,
+             "after load the registry" in stack_body)
+    suite.ok("%s the first member says it merges first" % tag,
+             "first to merge" in stack_body)
+    suite.ok("%s a member item links to its own change request" % tag,
+             '<a href="https://forge.invalid/acme/widgets/pull/1">Merge the pull'
+             ' request</a>' in stack_body, stack_body[-600:])
+    suite.ok("%s a member with no change request links nothing" % tag,
+             stack_body.count(">Merge the pull request</a>") == 1, stack_body[-600:])
+    suite.ok("%s a stacked page is still one checklist block" % tag,
+             intact(stack_body), script_tally(stack_body))
+    stack_back = run(script, "items", stack_page)
+    suite.exits("%s items reads a stacked page" % tag, 0, stack_back)
+    suite.ok("%s a stacked page round-trips" % tag,
+             json.loads(stack_back.stdout)["stages"]
+             == json.loads(open(stack_seed, encoding="utf-8").read())["stages"],
+             stack_back.stdout[:300])
+
+    bad_stages = (
+        ("a repeated stage id",
+         [{"id": "1", "label": "a"}, {"id": "1", "label": "b"}], []),
+        ("a stage with no label", [{"id": "1", "label": ""}], []),
+        ("a stage after an unknown one",
+         [{"id": "1", "label": "a", "after": "9"}], []),
+        ("a stage after a later one",
+         [{"id": "1", "label": "a", "after": "2"}, {"id": "2", "label": "b"}], []),
+        ("a stage field that is not a string", [{"id": "1", "label": 7}], []),
+        ("an item in an undeclared stage", [], [{"id": "x", "obligation": "o",
+                                                 "state": "done", "stage": "9"}]),
+    )
+    for label, stages, extra in bad_stages:
+        payload = json.dumps({
+            "run": {"title": "t"},
+            "stages": stages,
+            "items": extra or [{"id": "a", "obligation": "o", "state": "done"}],
+        })
+        suite.exits("%s %s is rejected" % (tag, label), 1,
+                    run(script, "render",
+                        write(os.path.join(work, "badstage.json"), payload),
+                        os.path.join(work, "badstage.html"), "--stamp", "S"))
+
+    suite.exits("%s stages that is not a list is rejected" % tag, 1,
+                run(script, "render",
+                    write(os.path.join(work, "notalist.json"),
+                          json.dumps({"run": {"title": "t"}, "stages": {},
+                                      "items": [{"id": "a", "obligation": "o",
+                                                 "state": "done"}]})),
+                    os.path.join(work, "notalist.html"), "--stamp", "S"))
+
     rejects = (
         ("an unknown state",
          document([{"id": "a", "obligation": "o", "state": "doneish"}])),

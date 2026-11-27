@@ -6,6 +6,7 @@ REPO="${REPO:-}"
 PR="${PR:-}"
 SLEEP="${SLEEP:-60}"
 CHECKLIST="${CHECKLIST:-}"
+STAGE="${STAGE:-}"
 RUN_CHECKLIST="${RUN_CHECKLIST:-$HOME/.claude/scripts/run-checklist.py}"
 MAX_POLLS="${MAX_POLLS:-0}"
 MAX_ERRORS="${MAX_ERRORS:-3}"
@@ -21,6 +22,9 @@ Usage: watch.sh <owner> <repo> <pr-number>
   CHECKLIST    an items.json; every poll syncs its forge-observable items
                (open, pipeline, threads, merge) from what this poll saw, so the
                published page tracks the change request with nobody ticking it
+  STAGE        which stack member on that page these facts belong to; one
+               watcher runs per change request, so a stacked run needs it or
+               every member writes onto the same items
   RUN_CHECKLIST  path to run-checklist.py (default ~/.claude/scripts/run-checklist.py)
 
 Smoke test before arming a Monitor:
@@ -39,6 +43,16 @@ while [[ $# -gt 0 ]]; do
     --checklist=*)
       CHECKLIST="${1#*=}"
       [[ -n "$CHECKLIST" ]] || { echo "POLL ERROR --checklist needs a path" >&2; exit 2; }
+      shift
+      ;;
+    --stage)
+      [[ $# -ge 2 && -n "${2:-}" ]] || { echo "POLL ERROR --stage needs an id" >&2; exit 2; }
+      STAGE="$2"
+      shift 2
+      ;;
+    --stage=*)
+      STAGE="${1#*=}"
+      [[ -n "$STAGE" ]] || { echo "POLL ERROR --stage needs an id" >&2; exit 2; }
       shift
       ;;
     *) break ;;
@@ -93,6 +107,7 @@ sync_checklist() {
     printf '%s' "$8" | base64 -d > "$body_file" 2>/dev/null || : > "$body_file"
   fi
   if ! out="$("$RUN_CHECKLIST" reconcile "$CHECKLIST" \
+      ${STAGE:+--stage "$STAGE"} \
       --state "$1" --merged "$2" --review "$3" --unresolved "$4" \
       --checks-pending "$5" --checks-failed "$6" --checks-total "$7" \
       ${body_file:+--body-file "$body_file"} \

@@ -1137,13 +1137,30 @@ def checklist_reason(gate):
     return ""
 
 
+def named_few(ids, limit=6):
+    shown = [str(entry) for entry in ids[:limit]]
+    hidden = len(ids) - len(shown)
+    if hidden > 0:
+        shown.append("and %d more" % hidden)
+    return ", ".join(shown)
+
+
+def checklist_branches(gate):
+    known = []
+    for name in list(gate.get("branches") or []) + [gate.get("branch")]:
+        name = str(name or "").strip()
+        if name and name not in known:
+            known.append(name)
+    return known
+
+
 def checklist_fork(gate, state, payload):
-    recorded = str(gate.get("branch") or "").strip()
-    if not recorded:
+    known = checklist_branches(gate)
+    if not known:
         return ""
     cwd = payload.get("cwd") or os.getcwd()
     here = branch_label(cwd)
-    if not here or here == recorded:
+    if not here or here in known:
         return ""
     default = default_branch_label(cwd)
     if here == default or (not default and here in ("main", "master")):
@@ -1178,7 +1195,7 @@ def checklist_gate(payload):
     if forked:
         if not merge_state(path, {"checklist_forked": forked}):
             return None
-        recorded = str(gate.get("branch") or "").strip()
+        recorded = ", ".join(checklist_branches(gate))
         log("Stop held: the run forked to %s from the checklist's %s"
             % (forked, recorded))
         return CHECKLIST_FORK % (where, recorded, forked, forked)
@@ -1194,7 +1211,7 @@ def checklist_gate(payload):
 
     if not merge_state(path, {"checklist_pending": dict(gate, held=time.time())}):
         return None
-    open_items = ", ".join(str(entry) for entry in gate["open"][:6])
+    open_items = named_few(gate["open"])
     log("Stop held: the run checklist is behind the run")
     return CHECKLIST_HOLD % (where, open_items, reason)
 

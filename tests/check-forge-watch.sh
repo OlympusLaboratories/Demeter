@@ -134,6 +134,29 @@ refute "and does not fall through to the watch" "$out" "STATUS"
 out="$(MAX_POLLS=1 SLEEP=0 PATH="$STUB_DIR:$PATH" timeout 10 "$WATCH" --checklist= acme repo 7 2>&1)"
 check "an empty --checklist= is refused" "$out" "POLL ERROR --checklist needs a path"
 
+out="$(MAX_POLLS=1 SLEEP=0 PATH="$STUB_DIR:$PATH" timeout 10 "$WATCH" --stage 2>&1)"
+check "a value-less --stage is refused" "$out" "POLL ERROR --stage needs an id"
+refute "and does not fall through to the watch" "$out" "STATUS"
+
+out="$(MAX_POLLS=1 SLEEP=0 PATH="$STUB_DIR:$PATH" timeout 10 "$WATCH" --stage= acme repo 7 2>&1)"
+check "an empty --stage= is refused" "$out" "POLL ERROR --stage needs an id"
+
+cat >"$STUB_DIR/echo-checklist" <<'ECHOCL'
+#!/usr/bin/env bash
+printf 'saw %s\n' "$*"
+ECHOCL
+chmod +x "$STUB_DIR/echo-checklist"
+
+out="$(STUB_OUT="$PR_OPEN" MAX_POLLS=1 SLEEP=0 \
+  RUN_CHECKLIST="$STUB_DIR/echo-checklist" \
+  PATH="$STUB_DIR:$PATH" timeout 10 "$WATCH" --checklist /dev/null --stage 2 acme repo 7 2>&1)"
+check "--stage reaches the reconcile call" "$out" "--stage 2"
+
+out="$(STUB_OUT="$PR_OPEN" MAX_POLLS=1 SLEEP=0 \
+  RUN_CHECKLIST="$STUB_DIR/echo-checklist" \
+  PATH="$STUB_DIR:$PATH" timeout 10 "$WATCH" --checklist /dev/null acme repo 7 2>&1)"
+refute "no --stage sends no stage at all" "$out" "--stage"
+
 out="$(STUB_OUT="$PR_OPEN" MAX_POLLS=1 SLEEP=0 CHECKLIST="" RUN_CHECKLIST=/nonexistent \
   PATH="$STUB_DIR:$PATH" timeout 10 "$WATCH" acme repo 7 2>&1)"
 refute "no --checklist means no sync is attempted" "$out" "CHECKLIST"

@@ -254,6 +254,25 @@ def check_fork(suite, profile, directory):
              get(sessions)["checklist_pending"]["stops"] == 1,
              get(sessions)["checklist_pending"])
 
+    put(sessions, marker(branches=[BRANCH, FORK]))
+    suite.ok("%s: a stack's own second branch does not block" % tag,
+             hook.checklist_gate(stop(cwd=ELSEWHERE)) is None,
+             get(sessions))
+
+    put(sessions, marker(branches=[BRANCH, FORK]))
+    held = hook.checklist_gate(stop(cwd=AGAIN))
+    suite.ok("%s: a branch outside the stack still blocks" % tag, bool(held), held)
+    suite.ok("%s: the hold names every branch the stack covers" % tag,
+             bool(held) and BRANCH in held and FORK in held, held)
+
+    put(sessions, marker(branch="", branches=[FORK]))
+    suite.ok("%s: branches alone is enough to recognise the run" % tag,
+             hook.checklist_gate(stop(cwd=ELSEWHERE)) is None, get(sessions))
+
+    put(sessions, marker(branch="", branches=[]))
+    suite.ok("%s: no branch anywhere is not evidence of a fork" % tag,
+             hook.checklist_gate(stop(cwd=ELSEWHERE)) is None, get(sessions))
+
     put(sessions, marker())
     forked = hook.checklist_gate(stop(cwd=ELSEWHERE))
     suite.ok("%s: a second branch blocks the Stop" % tag, bool(forked), forked)
@@ -652,6 +671,30 @@ def check_writer(suite, profile, work):
     suite.ok("%s: a complete checklist drops the marker" % tag,
              "checklist_pending" not in get(sessions), get(sessions))
 
+    stacked = os.path.join(work, "stacked.json")
+    seeded = run_checklist(profile, work,
+                           ["template", "--branch", BRANCH, "--merge",
+                            "--stack", "first|second"], env)
+    suite.ok("%s: a stacked template seeds" % tag, seeded.returncode == 0, seeded.stderr)
+    with open(stacked, "w") as handle:
+        handle.write(seeded.stdout)
+    run_checklist(profile, work, ["arm", stacked], env)
+    pending = get(sessions).get("checklist_pending", {})
+    suite.ok("%s: the marker carries every branch in the stack" % tag,
+             pending.get("branches") == [BRANCH, BRANCH + "/01-first",
+                                         BRANCH + "/02-second"], pending)
+    suite.ok("%s: and still carries the run's own branch" % tag,
+             pending.get("branch") == BRANCH, pending)
+
+    flat = os.path.join(work, "flat.json")
+    plain = run_checklist(profile, work, ["template", "--branch", BRANCH], env)
+    with open(flat, "w") as handle:
+        handle.write(plain.stdout)
+    run_checklist(profile, work, ["arm", flat], env)
+    suite.ok("%s: an unstacked run records just its own branch" % tag,
+             get(sessions).get("checklist_pending", {}).get("branches") == [BRANCH],
+             get(sessions).get("checklist_pending"))
+
     bare_arm = dict(env)
     bare_arm.pop("CLAUDE_CODE_SESSION_ID")
     bare_arm["CLAUDE_SESSION_ID"] = ""
@@ -976,6 +1019,41 @@ def check_local_signals(suite, profile, work):
                                           "--default-branch", "main"], env)
     suite.ok("%s: an unreadable repository does not fail the sync" % tag,
              quiet.returncode == 0, quiet.stderr)
+
+    stack = os.path.join(work, "reconcile-stack.json")
+    seeded = run_checklist(profile, work, [
+        "template", "--branch", "b", "--merge", "--stack", "first|second"], env)
+    with open(stack, "w") as handle:
+        handle.write(seeded.stdout)
+    run_checklist(profile, work, [
+        "tick", stack, "plan=done",
+        "--run", "1:change_request=https://forge/pr/1",
+        "--run", "2:change_request=https://forge/pr/2"], env)
+
+    synced = run_checklist(profile, work, [
+        "reconcile", stack, "--stage", "2", "--url", "https://forge/pr/2",
+        "--state", "MERGED", "--merged", "true", "--repo", missing], env)
+    suite.ok("%s: a per-stage sync exits 0" % tag, synced.returncode == 0, synced.stderr)
+    now = states(stack)
+    suite.ok("%s: it writes the member it was given" % tag,
+             now["merge@2"][0] == "done", now["merge@2"])
+    suite.ok("%s: and leaves the other member alone" % tag,
+             now["merge@1"][0] == "pending", now["merge@1"])
+    suite.ok("%s: it names the member in what it changed" % tag,
+             "merge@2=done" in synced.stdout, synced.stdout)
+
+    wrong = run_checklist(profile, work, [
+        "reconcile", stack, "--stage", "2", "--url", "https://forge/pr/1",
+        "--state", "MERGED", "--merged", "true", "--repo", missing], env)
+    suite.ok("%s: a member refuses another member's change request" % tag,
+             wrong.returncode == 2, wrong.stdout + wrong.stderr)
+    suite.ok("%s: and says which two it is refusing to confuse" % tag,
+             "pr/2" in wrong.stderr and "pr/1" in wrong.stderr, wrong.stderr)
+
+    unknown = run_checklist(profile, work, [
+        "reconcile", stack, "--stage", "9", "--repo", missing], env)
+    suite.ok("%s: an unknown member is refused" % tag,
+             unknown.returncode == 2 and "no stage" in unknown.stderr, unknown.stderr)
 
 
 def main():
