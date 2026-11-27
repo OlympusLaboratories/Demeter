@@ -83,9 +83,9 @@ what it checks, and what each one is written against:
   redirect is not
 
   every skill in GUARD_DOC documents the refusal and names the file form as the
-  way round it. those two carry the measurements behind this whole rule, and
-  they are in shell-checks.yml's trigger paths, so a job that read neither
-  while claiming to cover them was worse than not listing them
+  way round it. those two carry the measurements behind this whole rule, so a
+  job that read neither while claiming to cover them was worse than not
+  covering them at all
 
 what it deliberately does not check:
 
@@ -182,7 +182,7 @@ def main():
             checked += 1
             if not GUARD_READS_TEXT.search(md):
                 fail(problems, f'{label}: does not document that the guard reads the '
-                               f'command\'s text, though shell-checks.yml lists it')
+                               f'command\'s text, which is why the file form exists')
             if 'redirect' not in md.lower():
                 fail(problems, f'{label}: documents the refusal without naming the '
                                f'file form that works around it')

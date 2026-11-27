@@ -2,25 +2,6 @@ name: Shell Checks
 
 on:
   pull_request:
-    paths:
-      - 'install.sh'
-      - 'uninstall.sh'
-      - 'lib/**'
-      - 'vscode/**'
-      - 'shell/**'
-      - 'tests/**'
-      - 'profiles/check-transform.py'
-      - 'profiles/*/.claude/hooks/**'
-      - 'profiles/*/.claude/scripts/**'
-      - 'profiles/*/.claude/skills/changes-diagram/**'
-      - 'profiles/*/.claude/skills/review-code/**'
-      - 'profiles/*/.claude/skills/changes-description/**'
-      - 'profiles/*/.claude/skills/fix-feedback/**'
-      - 'profiles/*/.claude/skills/ping/**'
-      - 'profiles/*/.claude/skills/fix-linear/**'
-      - 'profiles/*/.claude/skills/fix-freeform/**'
-      - 'tools/forge-watch/**'
-      - '.github/workflows/shell-checks.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -58,50 +39,5 @@ jobs:
             profiles/*/.claude/scripts/publish-artifact.sh \
             tools/forge-watch/watch.sh
 
-      - name: Link roots are declared
-        run: tests/check-link-roots.sh
-
-      - name: Uninstall round-trip
-        run: tests/uninstall-roundtrip.sh
-
-      - name: Change request link resolution
-        run: tests/check-change-request.py
-
-      - name: Artifact publish seam
-        run: tests/check-publish-artifact.sh
-
-      - name: Run checklist renderer
-        run: tests/check-run-checklist.py
-
-      - name: Plan gate notification
-        run: tests/check-plan-gate.py
-
-      - name: Run checklist gate
-        run: tests/check-checklist-gate.py
-
-      - name: Notification body links
-        run: tests/check-notify-body.py
-
-      - name: Verdict-clearing subcommands
-        run: tests/check-verdict-commands.sh
-
-      - name: Forge adapter help output shape
-        run: tests/check-api-help-shape.py
-
-      - name: forge-watch terminal states
-        run: tests/check-forge-watch.sh
-
-      - name: Diagram page view maths
-        run: tests/check-diagram-template.py
-
-      - name: Diagram py_root derivation
-        run: tests/check-py-root.py
-
-      - name: Workflow skills' prose/script seam
-        run: tests/check-workflow-scripts.py
-
-      - name: Stdin body rule
-        run: tests/check-stdin-body-rule.py
-
-      - name: Derive guard over the allowlist
-        run: tests/check-transform-derive.py
+      - name: tests/
+        run: tests/run-all.sh
