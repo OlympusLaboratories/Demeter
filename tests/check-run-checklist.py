@@ -3,6 +3,7 @@
 import http.server
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -58,6 +59,7 @@ run-checklist.py, checked over every profile copy:
   items <url> serving the store's wrapper     follows the iframe to the raw page
   items <url> that 404s                       exits non-zero
   every item pending                          the page says nothing is armed
+  the page icon                               matches publish-artifact.sh ICON_TASKS
   one item in flight                          the page says what it is waiting on
   every item done or skipped                  the page says complete
   a "</script>" in an item                    is escaped, and still round-trips
@@ -186,6 +188,26 @@ def ids(payload):
     return [entry["id"] for entry in json.loads(payload)["items"]]
 
 
+def tasks_glyph(profile):
+    """The checklist glyph as publish-artifact.sh defines it, or None.
+
+    run-checklist.py carries its own copy because the page declares an icon rather
+    than having one injected, so nothing at run time makes the two agree. Reading
+    the shell variable from Python would couple the two scripts at run time to stop
+    them drifting at rest; asserting they are equal costs nothing and fails here,
+    where the drift is, instead of on a published page nobody re-reads.
+    """
+    path = os.path.join(REPO, "profiles", profile, ".claude", "scripts",
+                        "publish-artifact.sh")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            source = handle.read()
+    except OSError:
+        return None
+    match = re.search(r"^ICON_TASKS='(data:[^']+)'$", source, re.M)
+    return match.group(1) if match else None
+
+
 def check_profile(suite, profile, work):
     script = os.path.join(REPO, "profiles", profile, ".claude", "scripts",
                           "run-checklist.py")
@@ -283,6 +305,9 @@ def check_profile(suite, profile, work):
     suite.ok("%s the page declares its own icon" % tag,
              'rel="icon"' in body and 'href="data:image/svg+xml,' in body,
              "the store's fallback icon would be used instead")
+    suite.ok("%s the page icon matches publish-artifact.sh ICON_TASKS" % tag,
+             tasks_glyph(profile) is not None and tasks_glyph(profile) in body,
+             "the two copies of the checklist glyph have drifted apart")
     suite.ok("%s the refresh control is in the page" % tag,
              'id="refresh"' in body and 'class="dock"' in body)
     suite.ok("%s the refresh control is pinned to the corner" % tag,
