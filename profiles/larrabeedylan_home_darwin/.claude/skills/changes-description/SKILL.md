@@ -65,19 +65,41 @@ What that reader needs above all is a **story, not an inventory**. A list of tru
 > `git diff --no-index /dev/null <path>` rather than staging them — a worktree-isolated
 > session should not touch the index just to build a description.
 
+Resolve the base first, one command at a time, and **write the merge-base commit down**: every command after it takes that SHA literally, in place of `<merge base>`.
+
 ```bash
-DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
-[ -z "$DEFAULT_BRANCH" ] && DEFAULT_BRANCH=$(git branch -r | grep -E 'origin/(main|master)$' | head -1 | sed 's@.*origin/@@')
-[ -z "$DEFAULT_BRANCH" ] && DEFAULT_BRANCH=main
-
-# REF = $ARGUMENTS with --rounds N / --quick already stripped out; may be empty
-BASE="${REF:-$DEFAULT_BRANCH}"
-MERGE_BASE=$(git merge-base HEAD "origin/$BASE" 2>/dev/null || git merge-base HEAD "$BASE" 2>/dev/null || echo "$BASE")
-
-git --no-pager diff --name-status "$MERGE_BASE" -- .   # -> files
-git --no-pager diff "$MERGE_BASE" -- .                 # -> diff
-git rev-parse --show-toplevel                          # -> repoRoot
+git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@'
 ```
+
+Nothing printed means no `origin/HEAD`, so fall back. The `2>/dev/null` is what makes that test true: without it a clone whose `origin/HEAD` was never set prints `fatal: ref refs/remotes/origin/HEAD is not a symbolic ref`, and the exit status says nothing either way because a pipeline takes `sed`'s.
+
+```bash
+git branch -r | grep -E 'origin/(main|master)$' | head -1 | sed 's@.*origin/@@'
+```
+
+Still nothing and the default branch is `main`. The base is the skill's own argument with `--rounds N` / `--quick` stripped out, or the default branch when that is empty:
+
+```bash
+git merge-base HEAD origin/<base>
+```
+
+A failure there means `<base>` is not a remote branch — retry it as `git merge-base HEAD <base>`, and use `<base>` itself if that fails too. Then take the three inputs:
+
+```bash
+git --no-pager diff --name-status <merge base> -- .
+```
+
+```bash
+git --no-pager diff <merge base> -- .
+```
+
+```bash
+git rev-parse --show-toplevel
+```
+
+`--name-status` is `files`, the plain diff is `diff`, and the toplevel is `repoRoot`.
+
+**One command per call, because the worktree isolation guard refuses a multi-line one naming `git`.** The single-line equivalent of the same work is accepted, so the refusal is about the shape rather than the content, and the block this replaced was nine coupled statements. Shell state does not survive between calls either — only the working directory does — so the merge base cannot be carried in a variable and has to be written into each later command as a literal. That was already true of the block this replaced: it set `MERGE_BASE` here and Step 2-INLINE read it two steps later from a shell that had never seen it.
 
 - **Empty diff, but the conversation contains pasted code or diffs:** use that as `diff` and say so in `context`.
 - **Empty diff and nothing in the conversation:** tell the user "No changes found — run `/changes-branch` first or paste the changes you'd like described," and stop.
@@ -108,11 +130,20 @@ If the conversation is thin, say so in `context` rather than padding it. Never i
 
 3. **Measure it. Do not estimate it.** Write the text to the scratchpad and count it. The tiers and the counter below are a port of `measure()` in Step 2's script — if the tiers there move, move them here too:
 
+Take the two sizes first, as their own commands:
+
 ```bash
-DESC=<your session scratchpad>/description.md   # the text exactly as written, nothing else in it
-DIFF_LINES=$(git --no-pager diff "$MERGE_BASE" -- . | wc -l)
-FILES=$(git --no-pager diff --name-status "$MERGE_BASE" -- . | grep -c .)
-python3 - "$DESC" "$DIFF_LINES" "$FILES" <<'PY'
+git --no-pager diff <merge base> -- . | wc -l
+```
+
+```bash
+git --no-pager diff --name-status <merge base> -- . | grep -c .
+```
+
+Then count the text, with those two numbers written in literally where `<diff lines>` and `<files>` stand:
+
+```bash
+python3 - <your session scratchpad>/description.md <diff lines> <files> <<'PY'
 import re, sys
 lines = open(sys.argv[1]).read().split('\n')
 diff_lines, files = int(sys.argv[2]), int(sys.argv[3])
@@ -145,6 +176,8 @@ for i, b in enumerate(bullets):
     if count(b) > 25: print('OVER: bullet %d is %d words, cap 25 — %s' % (i + 1, count(b), b[:60]))
 PY
 ```
+
+**Three commands rather than one, because this step runs inside a worktree on most invocations.** The worktree isolation guard refuses a command naming `git` that it cannot statically verify, and a **multi-line** one is exactly that: the single-line equivalent of the same work is accepted, so the refusal is about the shape and not the content. The whole block as one call was refused, which is how a step whose own instruction is *do not estimate it* came to have no runnable way to measure. Shell state does not survive between calls either — only the working directory does — so the counts cannot be held in variables across the split and have to be written into the third command as digits. The `description.md` path is written out for the same reason.
 
 **Over budget means cut, and then measure again.** The caps are ceilings, not quotas: landing well under one is not a description with something missing. When the text will not fit, the fix is removing undefined terminology and abstraction, never compressing explanations into denser jargon.
 

@@ -14,6 +14,10 @@ on:
       - 'profiles/*/.claude/skills/changes-diagram/**'
       - 'profiles/*/.claude/skills/review-code/**'
       - 'profiles/*/.claude/skills/changes-description/**'
+      - 'profiles/*/.claude/skills/fix-feedback/**'
+      - 'profiles/*/.claude/skills/ping/**'
+      - 'profiles/*/.claude/skills/fix-linear/**'
+      - 'profiles/*/.claude/skills/fix-freeform/**'
       - 'tools/forge-watch/**'
       - '.github/workflows/shell-checks.yml'
 
@@ -94,3 +98,6 @@ jobs:
 
       - name: Workflow skills' prose/script seam
         run: tests/check-workflow-scripts.py
+
+      - name: Stdin body rule
+        run: tests/check-stdin-body-rule.py
