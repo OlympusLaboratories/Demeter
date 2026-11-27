@@ -39,7 +39,7 @@ A run parked on a watcher is consuming nothing. **It does not need to pause at a
 
 Two infrastructure states cannot be pushed through or unwound, and a long apply can outlast a whole quota window on its own. Pausing is allowed; **recording the hazard is not optional.**
 
-- **An apply is running, or a plan is posted and unapplied.** Record every planned directory and which ones have reported their apply marker. `/unpause` must re-read those markers per directory *before* it considers re-posting the apply comment — the apply comment is posted once and idempotently, and a resumed run that re-posts it has triggered a second apply.
+- **An apply is running, or a plan is posted and the run still intends to apply it.** Record every planned directory and which ones have reported their apply marker. `/unpause` must re-read those markers per directory *before* it considers re-posting the apply comment — the apply comment is posted once and idempotently, and a resumed run that re-posts it has triggered a second apply. **A plan left unapplied because `--merge false` held it is not this hazard** — it is the run working as asked, so record it as the state it is rather than letting it bury a real one.
 - **The apply succeeded but the merge has not happened.** Infrastructure now exists that no merged code uses. Say that in the state file and in the ping; it is the state most worth shortening.
 
 ### Pausing during implementation is different
@@ -118,7 +118,7 @@ Record in the file whether the return is armed and the reset timestamp it is wai
 
 Invoke the `ping` skill. Level `progress` when the return is armed, `blocked` when it needs the user.
 
-The body says what the run was doing, how far it got, and whether anything is needed. **If a hazard from Step 1 applies — an unapplied plan, applied infrastructure with no merge, a merge with no verified deploy — that is the thing the ping leads with.** A ping that says "paused, will resume" while infrastructure sits half-applied has actively misled the user.
+The body says what the run was doing, how far it got, and whether anything is needed. **If a hazard from Step 1 applies — an apply the run abandoned part-way, applied infrastructure with no merge, a merge with no verified deploy — that is the thing the ping leads with.** A ping that says "paused, will resume" while infrastructure sits half-applied has actively misled the user.
 
 Then say in chat, in one line, where the state file is and what `/unpause` will do with it.
 

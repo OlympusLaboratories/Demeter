@@ -27,6 +27,9 @@ run-checklist.py, checked over every profile copy:
                                               before the merge, and before the ready
                                               hand-over when there is no merge
   template --merge absent                     a "ready, not merged" item instead
+  template --iac without --merge              no apply item, and the ready item says the
+                                              plan is unapplied - --merge false holds the
+                                              apply as well as the merge
   template --branch-mode default              no change request, no merge, no ledger item
   template --request-name                     this machine's word reaches every item
   tick <id>=<state>                           rewrites the items file in place
@@ -206,6 +209,21 @@ def check_profile(suite, profile, work):
     suite.ok("%s the diagram comes before the ready hand-over" % tag,
              held_ids.index("diagram") < held_ids.index("ready"),
              "got %s" % held_ids)
+
+    unapplied = run(script, "template", "--iac")
+    suite.exits("%s template --iac without --merge" % tag, 0, unapplied)
+    unapplied_ids = ids(unapplied.stdout)
+    suite.ok("%s a held run carries no apply item" % tag,
+             "apply" not in unapplied_ids, "got %s" % unapplied_ids)
+    suite.ok("%s a held run hands over an unapplied plan" % tag,
+             "ready" in unapplied_ids
+             and "plan unapplied and unmerged" in unapplied.stdout,
+             unapplied.stdout)
+
+    applied = run(script, "template", "--iac", "--merge")
+    suite.exits("%s template --iac --merge" % tag, 0, applied)
+    suite.ok("%s a merging run still carries the apply item" % tag,
+             "apply" in ids(applied.stdout), "got %s" % ids(applied.stdout))
 
     bare = run(script, "template")
     suite.exits("%s template with no flags" % tag, 0, bare)

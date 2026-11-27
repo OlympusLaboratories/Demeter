@@ -73,7 +73,7 @@ The plan gate, the implementation, the commit message and the description are ea
 
 ### Autopilot is on unless it is switched off
 
-`fix_autopilot` is `true` on every profile, so **the ordinary run of this skill ends at a merge request, not at a commit message.** Once the implementation and the deliverables are done, Step 6 hands the run to `autopilot`, which owns the push, the merge request, the pipeline watch, the review rounds, the infrastructure apply, and — when `--merge` is true — the merge itself.
+`fix_autopilot` is `true` on every profile, so **the ordinary run of this skill ends at a merge request, not at a commit message.** Once the implementation and the deliverables are done, Step 6 hands the run to `autopilot`, which owns the push, the merge request, the pipeline watch, the review rounds, and — when `--merge` is true — the infrastructure apply and the merge itself. **`--merge false` holds both**: an apply is the landing of an infrastructure change, not a step towards it, so a run told not to merge is told not to apply.
 
 **That does not mean this skill stops talking to the user.** Autopilot automates the *tail*. It does not close the gates in Steps 1 through 5: a vague ticket still gets a question, an ambiguous requirement still gets `AskUserQuestion`, and a plan worth seeing still gets shown. The decisions autopilot makes alone are the ones after the code is written, which is the point at which the user stopped watching.
 

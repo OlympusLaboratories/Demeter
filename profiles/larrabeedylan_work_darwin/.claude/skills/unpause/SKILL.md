@@ -56,7 +56,7 @@ Read the usage cache — `$CLAUDE_USAGE_CACHE_DIR`, else `~/Library/Caches/claud
 - `scoped:<Model>` — a session at 40% with a model-scoped meter at 100% fails every agent while the headline number looks healthy.
 - `spend` — same reasoning.
 
-If headroom is thin, **downgrade rather than refusing**: do the cheap, high-value parts — the forge-state diff, the merge gate, a pending apply confirmation — and leave the expensive swarm restoration for later. Say which parts you are deferring and why. If there is no useful headroom at all, re-pause and ping; do not start work that will die halfway.
+If headroom is thin, **downgrade rather than refusing**: do the cheap, high-value parts — the forge-state diff, the merge gate, a pending apply confirmation where the flag allows one — and leave the expensive swarm restoration for later. Say which parts you are deferring and why. If there is no useful headroom at all, re-pause and ping; do not start work that will die halfway.
 
 ## Step 5: Diff the World Against the File
 
@@ -118,7 +118,7 @@ Resume at the recorded `next_action`, with the Step 5 diff overriding it whereve
 
 Two things a resumed run must not do twice:
 
-- **Re-post an infrastructure apply comment.** It is posted once and idempotently. Re-read the markers per directory first; a directory that already reported its apply is done, and re-posting triggers a second apply.
+- **Re-post an infrastructure apply comment.** It is posted once and idempotently. Re-read the markers per directory first; a directory that already reported its apply is done, and re-posting triggers a second apply. **Re-read `--merge` before any of that.** On `--merge false` the apply is held outright, so there is no comment to re-post and none to post for the first time — idempotency is the wrong guard here, because a run paused before it reached the gate has no marker anywhere and every per-directory check passes. Confirm the flag, then the markers.
 - **Re-publish the diagram or the decision ledger.** The file records whether each already happened. Appending a second collapsed fold to the description is the visible version of this mistake; a second apply is the expensive one.
 - **Mint a second run checklist.** The page is updated in place against the recorded identity, and the description already carries its link. Re-publishing is the same class of mistake as the second fold, with the user watching the wrong page afterwards.
 
@@ -136,5 +136,5 @@ Archive the state file once the run is genuinely back under way — not before, 
 4. **An interleaved wake authorises nothing irreversible** without announcing it.
 5. **Re-read weekly, scoped and spend quota**, not just the window that reset.
 6. **A partial review is never the answer.** Resume cheaply when the diff held still, re-run in full when it moved, and say which happened.
-7. **Never re-post an apply comment or re-publish a published artifact.** The run checklist is read first and then updated in place — a publish to an artifact this conversation has not read is refused anyway, and a fresh session is the normal case here.
+7. **Never post an apply comment the flag forbids, never re-post one, and never re-publish a published artifact.** `--merge false` holds the apply, and a resumed run is the one place that is easy to miss, because no marker exists to contradict it. The run checklist is read first and then updated in place — a publish to an artifact this conversation has not read is refused anyway, and a fresh session is the normal case here.
 8. **Recorded authority stands; recorded evidence does not.** Merge if the flag said so and the re-read gates pass.
