@@ -62,7 +62,11 @@ export interface StubStatusBarItem {
   dispose(): void;
 }
 
-const DEFAULT_EXTERNAL_COMMANDS = ['claude-vscode.editor.open', 'workbench.action.lockEditorGroup'];
+const DEFAULT_EXTERNAL_COMMANDS = [
+  'claude-vscode.editor.open',
+  'workbench.action.lockEditorGroup',
+  'workbench.view.extension.claude-sessions-sidebar',
+];
 
 export const state = {
   config: {} as Record<string, unknown>,

@@ -2,7 +2,7 @@
   "name": "claude-usage",
   "displayName": "Claude Usage",
   "description": "Shows Claude session and weekly quota usage as bars in the status bar.",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "publisher": "dylanlarrabee",
   "license": "MIT",
   "private": true,
@@ -41,6 +41,10 @@
       {
         "command": "claudeUsage.newChat",
         "title": "Claude Usage: New Claude Chat in a Locked Group"
+      },
+      {
+        "command": "claudeUsage.sessionHistory",
+        "title": "Claude Usage: Open Claude Session History"
       }
     ],
     "configuration": {
@@ -111,6 +115,16 @@
           "type": "string",
           "default": "sparkle",
           "description": "Codicon name drawn on the new-chat button, without the $() wrapper. Try sparkle, comment-discussion, add, or robot. Browse the set at https://microsoft.github.io/vscode-codicons/dist/codicon.html."
+        },
+        "claudeUsage.historyButton": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a button to the left of the new-chat button that opens the Claude Code session history, the searchable list of past sessions, without starting a chat. Needs the Claude Code extension."
+        },
+        "claudeUsage.historyIcon": {
+          "type": "string",
+          "default": "list-unordered",
+          "description": "Codicon name drawn on the session-history button, without the $() wrapper. Try list-unordered, archive, clock, or list-tree. Not history, which is the glyph the age chip already draws. Browse the set at https://microsoft.github.io/vscode-codicons/dist/codicon.html."
         },
         "claudeUsage.labelStyle": {
           "type": "string",

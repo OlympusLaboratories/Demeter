@@ -8,11 +8,14 @@ Session ●●○○○○ 33% 1h20m   Weekly ●●●○○○ 53% 5d20h   ⟳
 ```
 
 ```
-✨   Session ●●○○○○ 33% 1h20m   Weekly ●●●○○○ 53% 5d20h   ⟳ now
+☰ ✨   Session ●●○○○○ 33% 1h20m   Weekly ●●●○○○ 53% 5d20h   ⟳ now
 ```
 
-The button on the left opens a new Claude Code chat as a tab in its own locked
-editor group — see [The new-chat button](#the-new-chat-button).
+The two buttons on the left open Claude Code. The sparkle opens a **new** chat as
+a tab in its own locked editor group — see
+[The new-chat button](#the-new-chat-button). The list opens your **past** chats
+without starting one — see
+[The session-history button](#the-session-history-button).
 
 Each meter is a separate status bar item: a label, a bar, the percentage used,
 and how long until that window resets. The 5-hour session window and the 7-day
@@ -172,6 +175,8 @@ except while a shared rate-limit backoff is in effect.
 | `claudeUsage.show` | `["session","weekly"]` | Any of `session`, `weekly`, `scoped`, `spend`. |
 | `claudeUsage.newChatButton` | `true` | Show the new-chat button to the left of the meters. |
 | `claudeUsage.newChatIcon` | `sparkle` | Codicon on that button, without the `$()` wrapper. |
+| `claudeUsage.historyButton` | `true` | Show the session-history button to the left of the new-chat button. |
+| `claudeUsage.historyIcon` | `list-unordered` | Codicon on that button, without the `$()` wrapper. |
 | `claudeUsage.labelStyle` | `long` | `long` gives `Session`/`Weekly`/`Credits`, `short` gives `5h`/`7d`/`$`. |
 | `claudeUsage.age` | `always` | `always`, `whenStale`, or `never` for the age chip. |
 | `claudeUsage.barWidth` | `6` | Cells per bar; `0` drops the bar and keeps the percentage. |
@@ -225,10 +230,62 @@ other obvious ones. Unlike the bars, this is a codicon rather than a text glyph,
 so it comes from VS Code's own bundled font and cannot fall back to a mismatched
 one.
 
+## The session-history button
+
+To the left of the new-chat button sits a second one-glyph button. It opens the
+Claude Code **session list** — the searchable list of your past sessions, with
+its groups and filters — and it starts no chat.
+
+That last part is the whole point. Claude Code's history dropdown lives inside a
+chat, so reaching it means opening a chat you do not want. An empty one registers
+a remote-control session in the Claude app, and that session outlives the
+historical chat you then load into the tab, so it has to be archived by hand
+every time. This button skips the empty chat.
+
+It drives `workbench.view.extension.claude-sessions-sidebar`, the command VS Code
+generates for the view container Claude Code contributes to the activity bar.
+Opening that container renders the session list in its list-only mode: no session
+id is passed and `claude-vscode.newConversation` is never called, so nothing is
+created and there is nothing to clean up afterwards.
+
+**The container needs no icon in your activity bar, and the button does not care
+whether it has one.** VS Code records two different things, and only one of them
+is the hide switch:
+
+- `pinned` is the switch. Unpinning from the activity bar's own context menu sets
+  it, and the icon then shows only while that container is the active one.
+- `visible` reads like the switch and is not. VS Code copies the old value forward
+  on every write to the global key and routes the live value to a workspace-scoped
+  one, so a global `visible: false` can never become `true` and means nothing.
+
+Neither gates the command. Its handler goes to the pane-composite registry,
+un-hides the sidebar, and never consults either field — so the button works on a
+machine where nobody has ever touched the activity bar. Nothing here needs
+setting up per machine, which is why there is no installer step and no keybinding
+to go with it.
+
+One edge is left alone deliberately. Claude Code activates on
+`onStartupFinished`, and until it has, its container has no views and VS Code
+opens the Explorer instead. That window is about as long as a new editor window
+takes to finish starting, and pressing the button again works. Detecting it would
+mean reading `vscode.extensions`, which the test stub does not model at all — and
+a gap there surfaces as a passing suite with an unhandled error beside it, so
+guessing in code would cost more than the edge does.
+
+The button is hidden by `claudeUsage.historyButton: false`, and by
+`claudeUsage.enabled: false` along with everything else. Without the Claude Code
+extension in the window there is nothing to open, and clicking says so.
+
+`claudeUsage.historyIcon` takes any codicon name. `list-unordered` is the default,
+and `history` — the obvious choice — is deliberately not, because the age chip
+already draws that glyph and two identical glyphs in one status bar are worse than
+an imperfect one.
+
 ## Commands
 
 - **Claude Usage: Refresh Now** — also what clicking a meter does.
-- **Claude Usage: New Claude Chat in a Locked Group** — what the button does.
+- **Claude Usage: New Claude Chat in a Locked Group** — what the sparkle does.
+- **Claude Usage: Open Claude Session History** — what the list does.
 - **Claude Usage: Choose Bar Style** — live preview of each bar style.
 - **Claude Usage: Sign In With Browser**
 - **Claude Usage: Sign Out (Forget Browser Login)** — clears only this
@@ -281,4 +338,4 @@ the VS Code status bar renders in the **UI font** (SF Pro on macOS), not a monos
 
 ### Driving another extension's commands
 
-`tools/claude-usage/`'s new-chat button runs the Claude Code extension's `claude-vscode.editor.open`, which is a contributed command and not API — it can be renamed or absent, and `executeCommand` on a missing id rejects with a raw `command 'x' not found`. Probe `vscode.commands.getCommands(true)` first and say something useful instead. Claude Code locks the new group **itself**, but only when that call created a new column *and* `claudeCode.lockEditorGroups` is on, so claude-usage locks unconditionally afterwards and tolerates the failure — `workbench.action.lockEditorGroup` sets the flag rather than toggling it, and its `activeEditorGroupLocked` precondition gates menus and keybindings, not `executeCommand`. The group it locks only ever holds Claude tabs, because Claude Code opens `ViewColumn.Beside` or reuses a column that already has one. Status bar priority is "higher sits further left" on **both** sides, so the button is `priority + 1` while the meters are `priority - index`
+`tools/claude-usage/`'s new-chat button runs the Claude Code extension's `claude-vscode.editor.open`, which is a contributed command and not API — it can be renamed or absent, and `executeCommand` on a missing id rejects with a raw `command 'x' not found`. Probe `vscode.commands.getCommands(true)` first and say something useful instead. Claude Code locks the new group **itself**, but only when that call created a new column *and* `claudeCode.lockEditorGroups` is on, so claude-usage locks unconditionally afterwards and tolerates the failure — `workbench.action.lockEditorGroup` sets the flag rather than toggling it, and its `activeEditorGroupLocked` precondition gates menus and keybindings, not `executeCommand`. The group it locks only ever holds Claude tabs, because Claude Code opens `ViewColumn.Beside` or reuses a column that already has one. Status bar priority is "higher sits further left" on **both** sides, so the new-chat button is `priority + 1`, the session-history button is `priority + 2`, and the meters are `priority - index`. The session-history button runs `workbench.view.extension.claude-sessions-sidebar`, which VS Code generates per contributed view container rather than the extension registering it — so it exists whenever Claude Code is installed, and probing it cannot tell you whether Claude Code has **activated** yet. A container's `pinned: false` does not stop that command: the handler reaches the pane-composite registry and un-hides the sidebar part without consulting it, and the adjacent `visible` field in the global `workbench.activity.pinnedViewlets2` key is write-frozen — VS Code copies the old value forward and routes the live one to a workspace-scoped key — so it must never be read as a signal. A new button must also not reuse a glyph already on the bar: `history` belongs to the age chip, which is why the session-history button defaults to `list-unordered`

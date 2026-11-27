@@ -57,8 +57,15 @@ function newChatButton(): stub.StubStatusBarItem | undefined {
   return stub.visibleItems().find((item) => item.command === 'claudeUsage.newChat');
 }
 
+function historyButton(): stub.StubStatusBarItem | undefined {
+  return stub.visibleItems().find((item) => item.command === 'claudeUsage.sessionHistory');
+}
+
 function chipItem(): stub.StubStatusBarItem | undefined {
-  return stub.visibleItems().find((item) => item.text.startsWith('$(history)') || item.text.startsWith('$(warning)'));
+  return stub
+    .visibleItems()
+    .filter((item) => item.command !== 'claudeUsage.sessionHistory')
+    .find((item) => item.text.startsWith('$(history)') || item.text.startsWith('$(warning)'));
 }
 
 async function settle(): Promise<void> {
@@ -200,7 +207,9 @@ describe('activate', () => {
     activate(context as never);
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    const items = stub.visibleItems().filter((item) => item.command !== 'claudeUsage.newChat');
+    const items = stub
+      .visibleItems()
+      .filter((item) => item.command !== 'claudeUsage.newChat' && item.command !== 'claudeUsage.sessionHistory');
     expect(items).toHaveLength(1);
     expect(items[0]!.text).toContain('Claude usage');
     expect(items[0]!.command).toBe('claudeUsage.signIn');
@@ -342,6 +351,7 @@ describe('activate', () => {
       'claudeUsage.newChat',
       'claudeUsage.pickBarStyle',
       'claudeUsage.refresh',
+      'claudeUsage.sessionHistory',
       'claudeUsage.showDetails',
       'claudeUsage.signIn',
       'claudeUsage.signOut',
@@ -407,6 +417,76 @@ describe('activate', () => {
     await settle();
 
     expect(newChatButton()).toBeUndefined();
+    expect(meterItems()).toHaveLength(2);
+  });
+
+  it('puts the session-history button to the left of the new-chat button', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(jsonResponse(payload()))));
+    activate(context as never);
+    await settle();
+
+    const history = historyButton()!;
+    const newChat = newChatButton()!;
+    expect(history.text).toBe('$(list-unordered)');
+    expect(history.alignment).toBe(stub.StatusBarAlignment.Right);
+    expect(history.priority).toBeGreaterThan(newChat.priority);
+    for (const meter of meterItems()) {
+      expect(history.priority).toBeGreaterThan(meter.priority);
+    }
+  });
+
+  it('does not draw the session-history button with the glyph the age chip uses', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(jsonResponse(payload()))));
+    activate(context as never);
+    await settle();
+
+    expect(historyButton()!.text).not.toBe('$(history)');
+    expect(chipItem()!.command).toBe('claudeUsage.refresh');
+  });
+
+  it('opens the Claude session list without starting a chat', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(jsonResponse(payload()))));
+    activate(context as never);
+    await settle();
+
+    await stub.state.commands.get('claudeUsage.sessionHistory')!();
+
+    expect(stub.state.executedCommands).toEqual(['workbench.view.extension.claude-sessions-sidebar']);
+    expect(stub.state.warningMessages).toEqual([]);
+  });
+
+  it('warns instead of opening a session list when Claude Code is absent', async () => {
+    stub.state.externalCommands = ['claude-vscode.editor.open'];
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(jsonResponse(payload()))));
+    activate(context as never);
+    await settle();
+
+    await stub.state.commands.get('claudeUsage.sessionHistory')!();
+
+    expect(stub.state.executedCommands).toEqual([]);
+    expect(stub.state.warningMessages[0]).toContain('Claude Code extension is not available');
+  });
+
+  it('reports a session list that refuses to open', async () => {
+    stub.state.commandErrors['workbench.view.extension.claude-sessions-sidebar'] = 'no such view container';
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(jsonResponse(payload()))));
+    activate(context as never);
+    await settle();
+
+    await stub.state.commands.get('claudeUsage.sessionHistory')!();
+
+    expect(stub.state.warningMessages[0]).toContain('Could not open the Claude session history');
+    expect(stub.state.logLines.join('\n')).toContain('no such view container');
+  });
+
+  it('can hide the session-history button', async () => {
+    stub.state.config['historyButton'] = false;
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(jsonResponse(payload()))));
+    activate(context as never);
+    await settle();
+
+    expect(historyButton()).toBeUndefined();
+    expect(newChatButton()).toBeDefined();
     expect(meterItems()).toHaveLength(2);
   });
 

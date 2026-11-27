@@ -3,6 +3,7 @@ import { Logger } from './log';
 
 export const OPEN_CHAT_COMMAND = 'claude-vscode.editor.open';
 export const LOCK_GROUP_COMMAND = 'workbench.action.lockEditorGroup';
+export const SESSION_HISTORY_COMMAND = 'workbench.view.extension.claude-sessions-sidebar';
 
 function reason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -36,5 +37,24 @@ export async function openChatInLockedGroup(logger: Logger): Promise<void> {
     await vscode.commands.executeCommand(LOCK_GROUP_COMMAND);
   } catch (error) {
     logger.info(`Could not lock the group the chat opened in: ${reason(error)}`);
+  }
+}
+
+export async function openSessionHistory(logger: Logger): Promise<void> {
+  const available = new Set(await vscode.commands.getCommands(true));
+
+  if (!available.has(SESSION_HISTORY_COMMAND)) {
+    logger.info(`${SESSION_HISTORY_COMMAND} is not registered; this window has no Claude Code extension.`);
+    void vscode.window.showWarningMessage(
+      'The Claude Code extension is not available in this window, so there is no session history to open.',
+    );
+    return;
+  }
+
+  try {
+    await vscode.commands.executeCommand(SESSION_HISTORY_COMMAND);
+  } catch (error) {
+    logger.info(`Opening the Claude session history failed: ${reason(error)}`);
+    void vscode.window.showWarningMessage(`Could not open the Claude session history: ${reason(error)}`);
   }
 }
