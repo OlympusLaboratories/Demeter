@@ -1099,37 +1099,44 @@ GATE_HOLD = (
 
 CHECKLIST_STALE_STOPS = 3
 
+CHECKLIST_BEHIND = "The run checklist at %s still shows %s, and %s."
+
 CHECKLIST_HOLD = (
-    "Do not end this turn yet. The run checklist at %s still shows %s, and %s."
+    "Do not end this turn yet. %s"
     " The page is what the user and the next agent read to see where this run"
     " is, so a page behind the run is the same defect as a run with nothing in"
     " flight. Tick what is actually done with"
     " `~/.claude/scripts/run-checklist.py tick <items.json> <id>=<state> --publish`"
-    " in this turn. If the run is genuinely finished or abandoned, run"
+    " in this turn, once for each page named above. If the run is genuinely"
+    " finished or abandoned, run"
     " `~/.claude/hooks/notify.py --checklist-clear --force` and end the turn"
-    " again — a bare clear refuses while items are open."
-    " `--checklist-status` reports the marker without touching it."
+    " again — a bare clear refuses while items are open, and"
+    " `--page <url|branch>` beside it drops one tracked page and leaves the"
+    " rest armed. `--checklist-status` reports every tracked page without"
+    " touching one."
 )
 
 CHECKLIST_FORK = (
-    "Do not end this turn yet. The run checklist at %s describes branch `%s`, and this"
-    " session is on `%s`. One of two things is true and the page is wrong either way."
-    " If this is the same work on a renamed or escalated branch, re-seed it with"
-    " `run-checklist.py template --branch %s …` and publish that with `--update"
-    " <the recorded hash>`, never a plain publish — a plain one mints a new link and"
-    " freezes the one already in the change request's description. If the new branch"
-    " is a second piece of work, it is a second run and owes a checklist of its own:"
-    " seed a new items file, publish it, and write to both pages from here on. Either"
-    " write clears this hold, and it is spent for this branch either way. Only the"
-    " branch is compared, never the directory, and a session standing on the default"
-    " branch never reaches this message — so neither a worktree you entered or left"
-    " nor the window before this run cut its branch can produce it."
+    "Do not end this turn yet. This session is on `%s`, and no run checklist tracks"
+    " that branch. Tracked: %s. One of two things is true and the pages are wrong"
+    " either way. If this is the same work on a renamed or escalated branch, re-seed"
+    " that page with `run-checklist.py template --branch %s …` and publish it with"
+    " `--update <the recorded hash>`, never a plain publish — a plain one mints a new"
+    " link and freezes the one already in the change request's description. If this"
+    " branch is a second piece of work, it is a second run and owes a checklist of its"
+    " own: seed a new items file, publish it, and write to every page from here on."
+    " Either write clears this hold, and it is spent for this branch either way."
+    " Every tracked page's branch is compared, so a run driving several change"
+    " requests from one session is not a fork and never reaches this message. Only"
+    " the branch is compared, never the directory, and a session standing on the"
+    " default branch never reaches it either — so neither a worktree you entered or"
+    " left nor the window before this run cut its branch can produce it."
 )
 
 
-def checklist_reason(gate):
-    stops = gate.get("stops")
-    if gate.get("verdict") == "stalled":
+def checklist_reason(page):
+    stops = page.get("stops")
+    if page.get("verdict") == "stalled":
         return "nothing is in flight"
     if isinstance(stops, int) and stops >= CHECKLIST_STALE_STOPS:
         return ("it has not been written since %d turns ended"
@@ -1145,17 +1152,79 @@ def named_few(ids, limit=6):
     return ", ".join(shown)
 
 
-def checklist_branches(gate):
+def checklist_pages(gate):
+    if not isinstance(gate, dict):
+        return []
+    if isinstance(gate.get("open"), list):
+        return [(None, gate)]
+    return [(key, page) for key, page in gate.items() if isinstance(page, dict)]
+
+
+def checklist_marker_value(pages, legacy):
+    if legacy:
+        return pages[0][1] if pages else {}
+    return {key: page for key, page in pages}
+
+
+def checklist_page_branches(page):
     known = []
-    for name in list(gate.get("branches") or []) + [gate.get("branch")]:
+    for name in list(page.get("branches") or []) + [page.get("branch")]:
         name = str(name or "").strip()
         if name and name not in known:
             known.append(name)
     return known
 
 
-def checklist_fork(gate, state, payload):
-    known = checklist_branches(gate)
+def checklist_branches(gate):
+    known = []
+    for _, page in checklist_pages(gate):
+        for name in checklist_page_branches(page):
+            if name not in known:
+                known.append(name)
+    return known
+
+
+def checklist_where(page):
+    if page.get("url"):
+        return page["url"]
+    named = checklist_page_branches(page)
+    if named:
+        return "`%s` (never published)" % named[0]
+    return "an unpublished checklist"
+
+
+def checklist_tracked(pages):
+    told = []
+    for _, page in pages:
+        names = checklist_page_branches(page)
+        said = ", ".join("`%s`" % name for name in names) or "no branch"
+        told.append("%s at %s" % (said, checklist_where(page)))
+    return "; ".join(told)
+
+
+def checklist_apply(path, bumped, stamped):
+    state = read_json(path, {}) or {}
+    if not isinstance(state, dict):
+        return False
+    live = checklist_pages(state.get("checklist_pending"))
+    if not live:
+        return False
+    legacy = live[0][0] is None
+    written = []
+    for key, page in live:
+        if key in bumped:
+            page = dict(page, stops=bumped[key])
+        if key in stamped:
+            page = dict(page, held=stamped[key])
+        written.append((key, page))
+    return merge_state(path, {"checklist_pending":
+                              checklist_marker_value(written, legacy)})
+
+
+def checklist_fork(pages, state, payload):
+    known = []
+    for _, page in pages:
+        known += checklist_page_branches(page)
     if not known:
         return ""
     cwd = payload.get("cwd") or os.getcwd()
@@ -1180,40 +1249,64 @@ def checklist_gate(payload):
     state = read_json(path, {}) or {}
     if not isinstance(state, dict):
         return None
-    gate = state.get("checklist_pending")
-    if not isinstance(gate, dict) or not gate.get("open"):
+    found = checklist_pages(state.get("checklist_pending"))
+    legacy = bool(found) and found[0][0] is None
+    if not any(page.get("open") for _, page in found):
         return None
-    if gate_expired(gate):
-        merge_state(path, drop=("checklist_pending", "checklist_forked"))
-        log("dropped a stale run checklist marker")
-        return None
+
+    if any(gate_expired(page) for _, page in found):
+        gone = len([1 for _, page in found if gate_expired(page)])
+        found = [(key, page) for key, page in found if not gate_expired(page)]
+        if found:
+            merge_state(path, {"checklist_pending":
+                               checklist_marker_value(found, legacy)})
+        else:
+            merge_state(path, drop=("checklist_pending", "checklist_forked"))
+        log("dropped %d stale run checklist marker%s"
+            % (gone, "" if gone == 1 else "s"))
+        if not any(page.get("open") for _, page in found):
+            return None
+
     if payload.get("hook_event_name") != "Stop" or payload.get("stop_hook_active"):
         return None
 
-    where = gate.get("url") or "the published page"
-    forked = checklist_fork(gate, state, payload)
+    forked = checklist_fork(found, state, payload)
     if forked:
         if not merge_state(path, {"checklist_forked": forked}):
             return None
-        recorded = ", ".join(checklist_branches(gate))
-        log("Stop held: the run forked to %s from the checklist's %s"
-            % (forked, recorded))
-        return CHECKLIST_FORK % (where, recorded, forked, forked)
+        tracked = []
+        for _, page in found:
+            tracked += checklist_page_branches(page)
+        log("Stop held: the run forked to %s, tracked by none of %s"
+            % (forked, ", ".join(tracked) or "no branch"))
+        return CHECKLIST_FORK % (forked, checklist_tracked(found), forked)
 
-    if gate.get("held"):
-        return None
+    pages = [(key, page) for key, page in found if page.get("open")]
 
-    reason = checklist_reason(gate)
-    if not reason:
-        merge_state(path, {"checklist_pending":
-                           dict(gate, stops=int(gate.get("stops") or 0) + 1)})
-        return None
+    behind, counted = [], []
+    for key, page in pages:
+        if page.get("held"):
+            continue
+        reason = checklist_reason(page)
+        if reason:
+            behind.append((key, page, reason))
+        else:
+            counted.append((key, page))
 
-    if not merge_state(path, {"checklist_pending": dict(gate, held=time.time())}):
+    bumped = dict((key, int(page.get("stops") or 0) + 1) for key, page in counted)
+    stamped = dict((key, time.time()) for key, page, _ in behind)
+    if not bumped and not stamped:
         return None
-    open_items = named_few(gate["open"])
-    log("Stop held: the run checklist is behind the run")
-    return CHECKLIST_HOLD % (where, open_items, reason)
+    if not checklist_apply(path, bumped, stamped):
+        return None
+    if not behind:
+        return None
+    log("Stop held: %d run checklist page%s behind the run"
+        % (len(behind), "" if len(behind) == 1 else "s"))
+    return CHECKLIST_HOLD % " ".join(
+        CHECKLIST_BEHIND % (checklist_where(page),
+                            named_few(checklist_ids(page, "open")), reason)
+        for _, page, reason in behind)
 
 
 def gate_expired(gate):
@@ -1374,9 +1467,8 @@ def handle(payload):
 def checklist_marker(session_id):
     state = read_json(session_path(session_id), {}) or {}
     if not isinstance(state, dict):
-        return {}
-    gate = state.get("checklist_pending")
-    return gate if isinstance(gate, dict) else {}
+        return []
+    return checklist_pages(state.get("checklist_pending"))
 
 
 def checklist_spent_fork(session_id):
@@ -1404,37 +1496,86 @@ def describe_open(ids, tense="present", still=False):
         " still" if still else "", ", ".join(ids))
 
 
+def checklist_named(pages, wanted):
+    if not wanted:
+        return pages, []
+    kept, missed = [], []
+    for key, page in pages:
+        if wanted in (key, page.get("url"), page.get("hash"), page.get("branch")):
+            kept.append((key, page))
+    if not kept:
+        missed = [checklist_where(page) for _, page in pages]
+    return kept, missed
+
+
 def cmd_checklist_clear(args):
-    rest = [arg for arg in args if arg != "--force"]
-    forced = len(rest) != len(args)
+    rest, forced, wanted, skip = [], False, "", False
+    for arg in args:
+        if skip:
+            wanted, skip = arg.strip(), False
+        elif arg == "--force":
+            forced = True
+        elif arg == "--page":
+            skip = True
+        else:
+            rest.append(arg)
     session_id = (rest[0] if rest else "").strip() or session_from_env()
     if not session_id:
         print("no session id resolved: nothing to clear", file=sys.stderr)
         return 0
 
-    gate = checklist_marker(session_id)
-    if not gate:
+    every = checklist_marker(session_id)
+    if not every:
         print("no run checklist marker for this session: nothing to clear")
         return 0
 
-    where = gate.get("url") or "an unpublished checklist"
-    open_ids = checklist_ids(gate, "open")
-    expired = gate_expired(gate)
+    pages, missed = checklist_named(every, wanted)
+    if missed:
+        print("no tracked page matches %r; this session tracks %s"
+              % (wanted, "; ".join(missed)), file=sys.stderr)
+        return 1
+
+    where = "; ".join(checklist_where(page) for _, page in pages)
+    open_ids = []
+    for _, page in pages:
+        open_ids += [ident for ident in checklist_ids(page, "open")
+                     if ident not in open_ids]
+    overages = [gate_expired(page) for _, page in pages]
+    expired = min(overages) if all(overages) else 0
 
     if open_ids and not forced and not expired:
         print("refusing to clear the run checklist marker for %s" % where,
               file=sys.stderr)
         print(describe_open(open_ids, still=True), file=sys.stderr)
+        if len(pages) > 1:
+            for _, page in pages:
+                ids = checklist_ids(page, "open")
+                if ids:
+                    print("  %s: %s" % (checklist_where(page), ", ".join(ids)),
+                          file=sys.stderr)
         print("pass --force if this run is genuinely finished or abandoned,"
               " or tick what is done", file=sys.stderr)
+        if len(every) > 1:
+            print("pass --page <url|branch> to clear one tracked page and leave"
+                  " the rest armed", file=sys.stderr)
         log("refused to clear the run checklist marker for %s: %d open"
             % (session_id[:8], len(open_ids)))
         return 1
 
-    merge_state(session_path(session_id),
-                drop=("checklist_pending", "checklist_forked"))
+    dropping = set(key for key, _ in pages)
+    kept = [(key, page) for key, page in every if key not in dropping]
+    if kept:
+        merge_state(session_path(session_id),
+                    {"checklist_pending": dict(kept)})
+    else:
+        merge_state(session_path(session_id),
+                    drop=("checklist_pending", "checklist_forked"))
     log("run checklist marker cleared for %s" % session_id)
     print("cleared the run checklist marker for %s" % where)
+    if kept:
+        print("%d tracked page%s still armed: %s"
+              % (len(kept), "" if len(kept) == 1 else "s",
+                 "; ".join(checklist_where(page) for _, page in kept)))
     if expired:
         print("it had expired %s ago, so the gate would not have held on it"
               % human_duration(expired - GATE_TTL))
@@ -1451,49 +1592,66 @@ def cmd_checklist_status(args):
         print("not armed: no session id resolved", file=sys.stderr)
         return 1
 
-    gate = checklist_marker(session_id)
-    if not gate:
+    pages = checklist_marker(session_id)
+    if not pages:
         print("not armed: no run checklist marker for this session")
         return 1
 
-    where = gate.get("url") or "an unpublished checklist"
-    expired = gate_expired(gate)
-    if expired:
+    overages = [gate_expired(page) for _, page in pages]
+    expired = min(overages) if all(overages) else 0
+    where = "; ".join(checklist_where(page) for _, page in pages)
+    if expired and len(pages) == 1:
         print("not armed: the marker for %s expired %s ago"
               % (where, human_duration(expired - GATE_TTL)))
+    elif expired:
+        print("not armed: every tracked page expired, the newest %s ago: %s"
+              % (human_duration(expired - GATE_TTL), where))
     else:
         print("armed: %s" % where)
 
-    stops = gate.get("stops")
-    stops = stops if isinstance(stops, int) else 0
-    print("verdict %s, %d turn end%s since the last write, %s"
-          % (gate.get("verdict") or "unknown", stops,
-             "" if stops == 1 else "s",
-             "already held once" if gate.get("held") else "not yet held"))
+    recorded = []
+    for _, page in pages:
+        if len(pages) > 1:
+            overage = gate_expired(page)
+            aged = ("" if not overage else
+                    " — expired %s ago" % human_duration(overage - GATE_TTL))
+            print("")
+            print("%s%s" % (checklist_where(page), aged))
+        stops = page.get("stops")
+        stops = stops if isinstance(stops, int) else 0
+        print("verdict %s, %d turn end%s since the last write, %s"
+              % (page.get("verdict") or "unknown", stops,
+                 "" if stops == 1 else "s",
+                 "already held once" if page.get("held") else "not yet held"))
+        names = checklist_page_branches(page)
+        recorded += names
+        if names:
+            print("branch %s" % ", ".join(names))
+        else:
+            print("no branch recorded, so a fork cannot be detected")
+        open_ids = checklist_ids(page, "open")
+        print(describe_open(open_ids) if open_ids else "nothing is open")
+        in_flight = checklist_ids(page, "in_flight")
+        if in_flight:
+            print("in flight: %s" % ", ".join(in_flight))
 
-    recorded = str(gate.get("branch") or "").strip()
     here = branch_label(os.getcwd())
     default = default_branch_label(os.getcwd())
-    if not recorded:
-        print("no branch recorded, so a fork cannot be detected")
-    elif not here:
-        print("branch %s, and no branch resolves here" % recorded)
-    elif here == recorded:
-        print("branch %s, which is the branch this session is on" % recorded)
+    if len(pages) > 1:
+        print("")
+    if not recorded or not here:
+        print("no fork can be detected from here")
+    elif here in recorded:
+        print("this session is on %s, which a tracked page claims" % here)
     elif here == default or (not default and here in ("main", "master")):
-        print("branch %s, and this session is on the default branch %s, which is"
-              " never a fork" % (recorded, here))
+        print("this session is on the default branch %s, which is never a fork"
+              % here)
     else:
-        print("branch %s, but this session is on %s — the run has forked"
-              % (recorded, here))
+        print("this session is on %s, which no tracked page claims — the run"
+              " has forked" % here)
         if checklist_spent_fork(session_id) == here:
             print("the fork was already held once")
-
-    open_ids = checklist_ids(gate, "open")
-    print(describe_open(open_ids) if open_ids else "nothing is open")
-    in_flight = checklist_ids(gate, "in_flight")
-    if in_flight:
-        print("in flight: %s" % ", ".join(in_flight))
+    print("%d tracked page%s" % (len(pages), "" if len(pages) == 1 else "s"))
     return 1 if expired else 0
 
 
@@ -1746,7 +1904,7 @@ def main():
             " | --repo [<cwd>] | --change-request <session-id>"
             " | --gate-pending <url> [<session-id>]"
             " | --gate-clear [<session-id>]"
-            " | --checklist-clear [--force] [<session-id>]"
+            " | --checklist-clear [--force] [--page <url|branch>] [<session-id>]"
             " | --checklist-status [<session-id>]"
             " | --ping --level <level> --title <title>"
             " [--body <text>|-] [--session <id>]]", file=sys.stderr)
