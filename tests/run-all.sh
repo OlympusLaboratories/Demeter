@@ -33,8 +33,12 @@ RULES
 
   check_link_roots.py is reached from check-link-roots.sh, which passes it
   install.sh as an argument. A file added to tests/ and not declared above is
-  run as a checker, and a helper run with no arguments fails — so forgetting to
-  declare one is loud rather than silent.
+  run as a checker. Forgetting to declare one is usually loud: a new file is not
+  executable, so the precheck names it and says to declare it, and an
+  argv-driven helper like check_link_roots.py exits non-zero when run with no
+  arguments. What neither catches is an executable library defining only
+  functions, which runs, exits 0 and is counted as a checker asserting nothing.
+  So declare a helper when you add one; nothing here can infer it.
 
 What it guarantees
   every discovered checker is executable, else the run fails before any of them
@@ -127,20 +131,19 @@ main() {
   done
 
   local total=$((SECONDS - total_started))
+  local passed=$((${#names[@]} - ${#failed[@]}))
   local i
 
   printf '\n'
   for i in "${!names[@]}"; do
     printf '  %-4s %4ds  %s\n' "${states[$i]}" "${seconds[$i]}" "${names[$i]}"
   done
-  printf '\n  %d of %d passed in %ds\n' \
-    "$(( ${#names[@]} - ${#failed[@]} ))" "${#names[@]}" "$total"
+  printf '\n  %d of %d passed in %ds\n' "$passed" "${#names[@]}" "$total"
 
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     {
       printf '## tests/\n\n'
-      printf '%d of %d checkers passed in %ds.\n\n' \
-        "$(( ${#names[@]} - ${#failed[@]} ))" "${#names[@]}" "$total"
+      printf '%d of %d checkers passed in %ds.\n\n' "$passed" "${#names[@]}" "$total"
       printf '| | checker | time |\n|---|---|---:|\n'
       for i in "${!names[@]}"; do
         if [ "${states[$i]}" = "ok" ]; then
