@@ -43,6 +43,16 @@ run-checklist.py, checked over every profile copy:
   tick <id>=<new state>:<text>                replaces the note
   tick with an id the page lacks              exits non-zero, names the ids it has
   tick with a state that is not one of four   exits non-zero
+  tick implement/commit/describe/open while   exits non-zero, names plan, and leaves
+    plan is still pending                     the items file untouched
+  tick <gated>@<stage> while plan is pending  exits non-zero - a stack's suffixed item
+                                              is gated by the one shared plan item
+  tick pipeline while plan is pending         exits 0 - the refusal is the plan's
+                                              dependents and not an ordering rule
+  tick plan=done <gated>=in-flight            exits 0 in ONE command, the shape the
+                                              fix skills prescribe
+  tick plan=skipped:<reason> <gated>=...      exits 0 - a waiver the user gave is
+                                              recorded on the page, never assumed
   tick --run <field>=<value>                  sets a run field
   tick --run with an unknown field            exits non-zero
   tick --publish                              publishes as an update
@@ -624,13 +634,56 @@ def check_profile(suite, profile, work):
              run(script, "items", broken).returncode != 0)
 
     check_over_http(suite, tag, script, body, full.stdout)
+    check_plan_first(suite, tag, script, work, full.stdout, stacked.stdout)
     check_tick(suite, tag, script, work, full.stdout)
     check_publish(suite, tag, script, work, seed)
+
+
+GATED = ("implement=in-flight:editing", "commit=done", "describe=done", "open=done")
+
+
+def check_plan_first(suite, tag, script, work, seed_text, stack_text):
+    path = write(os.path.join(work, "gate.json"), seed_text)
+    load = lambda: {e["id"]: e for e in json.loads(open(path).read())["items"]}
+
+    for tick in GATED:
+        ident = tick.split("=", 1)[0]
+        refused = run(script, "tick", path, tick)
+        suite.ok("%s tick refuses %s while plan is pending" % (tag, ident),
+                 refused.returncode != 0, refused.stdout)
+        suite.ok("%s refusing %s names the plan item" % (tag, ident),
+                 "plan" in refused.stderr, refused.stderr)
+        suite.ok("%s refusing %s writes nothing" % (tag, ident),
+                 load()[ident]["state"] == "pending", load()[ident]["state"])
+
+    suite.exits("%s an item the plan does not gate still ticks" % tag, 0,
+                run(script, "tick", path, "pipeline=in-flight:CI"))
+
+    suite.exits("%s plan=done and a gated item go in one command" % tag, 0,
+                run(script, "tick", path, "plan=done",
+                    "implement=in-flight:the approved plan"))
+
+    waived = write(os.path.join(work, "waived.json"), seed_text)
+    suite.ok("%s plan=skipped with no reason is refused" % tag,
+             run(script, "tick", waived, "plan=skipped").returncode != 0)
+    suite.exits("%s a recorded waiver clears the gate" % tag, 0,
+                run(script, "tick", waived,
+                    "plan=skipped:the user approved the approach in advance",
+                    "implement=in-flight:editing"))
+
+    stacked = write(os.path.join(work, "gate-stack.json"), stack_text)
+    member = run(script, "tick", stacked, "implement@2=in-flight:editing")
+    suite.ok("%s a stack member is gated by the shared plan item" % tag,
+             member.returncode != 0, member.stdout)
+    suite.exits("%s the shared plan clears every stage" % tag, 0,
+                run(script, "tick", stacked, "plan=done",
+                    "implement@2=in-flight:editing"))
 
 
 def check_tick(suite, tag, script, work, seed_text):
     path = write(os.path.join(work, "tick.json"), seed_text)
     load = lambda: {e["id"]: e for e in json.loads(open(path).read())["items"]}
+    run(script, "tick", path, "plan=done")
 
     suite.exits("%s tick" % tag, 0,
                 run(script, "tick", path, "commit=done",
@@ -849,7 +902,7 @@ def check_publish(suite, tag, script, work, seed):
     os.remove(log)
     recovered = write(os.path.join(work, "recovered.json"), embedded.stdout)
     suite.exits("%s publish from a document recovered off the page" % tag, 0,
-                run(script, "tick", recovered, "commit=done", "--publish",
+                run(script, "tick", recovered, "plan=done", "commit=done", "--publish",
                     "--out", os.path.join(work, "r.html"), "--stamp", "S",
                     env=environment))
     sent = calls()

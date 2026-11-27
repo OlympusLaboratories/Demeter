@@ -1213,7 +1213,8 @@ def check_local_signals(suite, profile, work):
     with open(os.path.join(sessions, SESSION + ".json"), "w") as handle:
         json.dump({"armed_at": 1.0}, handle)
 
-    run_checklist(profile, work, ["tick", items, "implement=in-flight:writing it"], env)
+    run_checklist(profile, work,
+                  ["tick", items, "plan=done", "implement=in-flight:writing it"], env)
     sync()
     now = states(items)
     suite.ok("%s: a missing commit never demotes a true in-flight" % tag,
