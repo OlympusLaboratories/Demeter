@@ -543,7 +543,7 @@ ICONPUB
   fi
 
   want_icon "the published copy carries no icon" 'rel="icon"'
-  want_icon "the published copy carries the plan glyph" 'M23%2025h18'
+  want_icon "the published copy carries the plan glyph" 'M26%2050h12'
 
   checked=$((checked + 1))
   if [[ "$(grep -c 'rel="icon"' "$WORK/icon-copy.html" 2>/dev/null)" != "1" ]]; then
@@ -562,10 +562,10 @@ ICONPUB
   publish_icon "$WORK/iconfrag.html" --purpose diagram
   check "$profile: a fragment with no head still publishes" 0 $?
   want_icon "a fragment got no icon" 'rel="icon"'
-  want_icon "a diagram page got the diagram glyph" '%3Ccircle'
+  want_icon "a diagram page got the diagram glyph" 'M32%2020%2018%2042'
 
   publish_icon "$WORK/iconfull.html" --purpose tasks
-  want_icon "a tasks page got the tasks glyph" 'M22%2034l6%206'
+  want_icon "a tasks page got the tasks glyph" 'M13%2022l5%205'
 
   printf '%s\n' '<head>' \
     '<link rel="icon" href="data:image/svg+xml,%3Csvg%2F%3E">' '</head>' \
