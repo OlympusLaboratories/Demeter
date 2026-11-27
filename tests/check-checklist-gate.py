@@ -19,6 +19,7 @@ PROFILES = (
 
 SESSION = "77777777-8888-9999-aaaa-bbbbbbbbbbbb"
 PAGE = "https://artifacts.example.dev/run123"
+OTHER = "https://artifacts.example.dev/run456"
 
 OVERAGE = 90 * 60
 
@@ -49,8 +50,11 @@ the run checklist gate, checked over every profile copy:
     publish with outstanding items        records checklist_pending in the session state
     tick with outstanding items           rewrites it, resetting the stop count
     the marker                            carries the run's branch
-    a write from a second branch          records it, and drops the spent fork
-    every item done or skipped            drops the marker entirely
+    the marker                            holds one record per page, keyed by it
+    a write from a second branch          records it beside the first
+    a flat marker from the old version    is upgraded, not stranded
+    every item done or skipped            drops that page's record
+    the last page going                   drops the marker and the spent fork
     no session id in the environment      writes nothing, and does not fail
 
   notify.py holds the turn end
@@ -79,6 +83,23 @@ the run checklist gate, checked over every profile copy:
     a subagent, stop_hook_active, non-Stop  never block
     a complete or expired marker          never blocks
     a marker re-seeded on the new branch  stops blocking
+
+  notify.py over a run driving several change requests, a page each
+    a session on any page's branch        never blocks
+    a branch no page tracks               blocks, naming every page and branch
+    the hold                              never claims one page describes it
+    one turn end                          counts against every page
+    both pages stale                      hold once, in one message
+    one stalled page                      holds alone, its sibling counted
+    a watcher writing to the other page   does not reset this one's count
+    so a page nobody writes to            still reaches a stale hold
+    an expired page                       is dropped without its live sibling
+    every page expired                    drops the marker
+    a finished page beside an open one    never blocks on a fork
+    a subagent or stop_hook_active        never blocks
+    --checklist-status                    names every page, counts them, writes nothing
+    a bare clear with any page open       refuses, naming every page
+    --force                               drops every page at once
 
   the escape hatch
     a clear with items still open         refuses, changes nothing, exits non-zero
@@ -144,6 +165,11 @@ def marker(**extra):
     return base
 
 
+def pages(*records):
+    return {(record.get("hash") or record.get("url") or record.get("branch")
+             or "unpublished"): record for record in records}
+
+
 def put(sessions, value, session=SESSION, extra=None):
     path = os.path.join(sessions, session + ".json")
     state = {} if value is None else {"checklist_pending": value}
@@ -152,6 +178,14 @@ def put(sessions, value, session=SESSION, extra=None):
     with open(path, "w") as handle:
         json.dump(state, handle)
     return path
+
+
+def tracked(state, key=None):
+    marker = state.get("checklist_pending") or {}
+    if key is not None:
+        return marker.get(key, {})
+    kept = [value for value in marker.values() if isinstance(value, dict)]
+    return kept[0] if len(kept) == 1 else {}
 
 
 def get(sessions, session=SESSION):
@@ -376,6 +410,130 @@ def check_fork(suite, profile, directory):
              hook.checklist_gate(stop(cwd=ELSEWHERE)) is None)
 
 
+def check_several_pages(suite, profile, directory):
+    hook, sessions = load_hook(profile, directory)
+    tag = profile
+
+    one = marker(url=PAGE, hash="run123", branch=BRANCH)
+    two = marker(url=OTHER, hash="run456", branch=FORK)
+
+    put(sessions, pages(one, two))
+    suite.ok("%s: a session on the first page's branch does not block" % tag,
+             hook.checklist_gate(stop(cwd=WORKTREE)) is None, get(sessions))
+    put(sessions, pages(one, two))
+    suite.ok("%s: nor one on the second page's branch" % tag,
+             hook.checklist_gate(stop(cwd=ELSEWHERE)) is None, get(sessions))
+
+    put(sessions, pages(one, two))
+    held = hook.checklist_gate(stop(cwd=AGAIN))
+    suite.ok("%s: a branch no page tracks still blocks" % tag, bool(held), held)
+    suite.ok("%s: and the hold names every tracked page" % tag,
+             bool(held) and PAGE in held and OTHER in held, held)
+    suite.ok("%s: and every tracked branch" % tag,
+             bool(held) and BRANCH in held and FORK in held, held)
+    suite.ok("%s: and the branch the session is on" % tag,
+             bool(held) and THIRD in held, held)
+    suite.ok("%s: the hold says a multi-page run is not a fork" % tag,
+             bool(held) and "several change requests" in held, held)
+    suite.ok("%s: it does not claim one page describes this session's work" % tag,
+             bool(held) and "describes branch" not in held, held)
+
+    put(sessions, pages(one, two))
+    for turn in range(1, 4):
+        suite.ok("%s: turn end %d counts against both pages" % (tag, turn),
+                 hook.checklist_gate(stop(cwd=WORKTREE)) is None
+                 and tracked(get(sessions), "run123").get("stops") == turn
+                 and tracked(get(sessions), "run456").get("stops") == turn,
+                 get(sessions))
+    stale = hook.checklist_gate(stop(cwd=WORKTREE))
+    suite.ok("%s: both pages go stale together and hold once" % tag,
+             bool(stale), stale)
+    suite.ok("%s: the one hold names both pages" % tag,
+             bool(stale) and PAGE in stale and OTHER in stale, stale)
+    suite.ok("%s: and marks both as held" % tag,
+             tracked(get(sessions), "run123").get("held") is not None
+             and tracked(get(sessions), "run456").get("held") is not None,
+             get(sessions))
+    suite.ok("%s: so the next turn end is not held again" % tag,
+             hook.checklist_gate(stop(cwd=WORKTREE)) is None)
+
+    put(sessions, pages(dict(one, verdict="stalled", in_flight=[]), two))
+    stale = hook.checklist_gate(stop(cwd=WORKTREE))
+    suite.ok("%s: one stalled page holds while its sibling is healthy" % tag,
+             bool(stale) and PAGE in stale and OTHER not in stale, stale)
+    suite.ok("%s: the healthy page is left unheld" % tag,
+             "held" not in tracked(get(sessions), "run456"), get(sessions))
+    suite.ok("%s: and its turn end was counted" % tag,
+             tracked(get(sessions), "run456").get("stops") == 1, get(sessions))
+
+    put(sessions, pages(one, two))
+    hook.checklist_gate(stop(cwd=WORKTREE))
+    hook.checklist_gate(stop(cwd=WORKTREE))
+    watched = dict(tracked(get(sessions), "run456"), stops=0, at=time.time())
+    put(sessions, pages(tracked(get(sessions), "run123"), watched))
+    suite.ok("%s: a watcher writing to the other page does not reset this one" % tag,
+             tracked(get(sessions), "run123").get("stops") == 2, get(sessions))
+    hook.checklist_gate(stop(cwd=WORKTREE))
+    behind = hook.checklist_gate(stop(cwd=WORKTREE))
+    suite.ok("%s: so the page nobody wrote to still reaches a stale hold" % tag,
+             bool(behind) and PAGE in behind, behind)
+    suite.ok("%s: and the page the watcher kept fresh is not named" % tag,
+             bool(behind) and OTHER not in behind, behind)
+
+    put(sessions, pages(one, dict(two, at=time.time() - hook.GATE_TTL - 60)))
+    suite.ok("%s: an expired page does not take a live sibling with it" % tag,
+             hook.checklist_gate(stop(cwd=WORKTREE)) is None, get(sessions))
+    suite.ok("%s: the expired page is dropped on its own" % tag,
+             sorted(get(sessions).get("checklist_pending") or {}) == ["run123"],
+             get(sessions))
+    put(sessions, pages(dict(one, at=time.time() - hook.GATE_TTL - 60),
+                        dict(two, at=time.time() - hook.GATE_TTL - 60)))
+    suite.ok("%s: every page expired drops the marker" % tag,
+             hook.checklist_gate(stop(cwd=WORKTREE)) is None
+             and "checklist_pending" not in get(sessions), get(sessions))
+
+    put(sessions, pages(dict(one, open=[], in_flight=[]), two))
+    suite.ok("%s: a finished page beside an open one never blocks on a fork" % tag,
+             hook.checklist_gate(stop(cwd=ELSEWHERE)) is None, get(sessions))
+
+    put(sessions, pages(one, two))
+    suite.ok("%s: a subagent's Stop never blocks across pages" % tag,
+             hook.checklist_gate(stop(cwd=AGAIN, agent_id="sub-1")) is None)
+    put(sessions, pages(one, two))
+    suite.ok("%s: stop_hook_active never blocks across pages" % tag,
+             hook.checklist_gate(stop(cwd=AGAIN, stop_hook_active=True)) is None)
+
+    put(sessions, pages(one, two))
+    before = frozen(sessions)
+    status, said = captured(lambda: hook.cmd_checklist_status([SESSION]))
+    suite.ok("%s: a status over several pages exits 0" % tag, status == 0, said)
+    suite.ok("%s: it names every page" % tag, PAGE in said and OTHER in said, said)
+    suite.ok("%s: it names every branch" % tag,
+             BRANCH in said and FORK in said, said)
+    suite.ok("%s: it counts the tracked pages" % tag, "2 tracked pages" in said, said)
+    suite.ok("%s: a status over several pages mutates nothing" % tag,
+             frozen(sessions) == before, get(sessions))
+
+    status, said = captured(lambda: hook.cmd_checklist_status([SESSION]))
+    suite.ok("%s: a session on a tracked branch is not reported as forked" % tag,
+             "has forked" not in said, said)
+
+    status, said = captured(lambda: hook.cmd_checklist_clear([SESSION]))
+    suite.ok("%s: a clear with several pages open refuses" % tag, status != 0, said)
+    suite.ok("%s: and names both pages it declined to drop" % tag,
+             PAGE in said and OTHER in said, said)
+    suite.ok("%s: and changed nothing" % tag, frozen(sessions) == before, get(sessions))
+
+    status, said = captured(lambda: hook.cmd_checklist_clear(["--force", SESSION]))
+    suite.ok("%s: --force drops every page at once" % tag,
+             status == 0 and "checklist_pending" not in get(sessions), get(sessions))
+
+    put(sessions, pages(one, dict(two, at=time.time() - hook.GATE_TTL - OVERAGE)))
+    status, said = captured(lambda: hook.cmd_checklist_clear([SESSION]))
+    suite.ok("%s: one expired page does not unlock a bare clear" % tag,
+             status != 0, said)
+
+
 def captured(call):
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -577,7 +735,9 @@ def check_writer(suite, profile, work):
     suite.ok("%s: tick exits 0" % tag, ticked.returncode == 0, ticked.stderr)
     state = get(sessions)
     suite.ok("%s: tick wrote the marker" % tag, "checklist_pending" in state, state)
-    pending = state.get("checklist_pending", {})
+    pending = tracked(state)
+    suite.ok("%s: the marker is keyed by the page" % tag,
+             list((state.get("checklist_pending") or {})) == ["b"], state)
     suite.ok("%s: the marker lists the open items" % tag,
              "arm" in pending.get("open", []) and "implement" in pending.get("open", []),
              pending)
@@ -601,11 +761,22 @@ def check_writer(suite, profile, work):
              "checklist_pending" in get(sessions), get(sessions))
 
     with open(os.path.join(sessions, SESSION + ".json"), "w") as handle:
-        json.dump({"checklist_pending": dict(pending, stops=9, held=1.0)}, handle)
+        json.dump({"checklist_pending": pages(dict(pending, stops=9, held=1.0))},
+                  handle)
     run_checklist(profile, work, ["tick", items, "implement=done"], env)
-    pending = get(sessions).get("checklist_pending", {})
+    pending = tracked(get(sessions))
     suite.ok("%s: a later tick resets the stop count" % tag, pending.get("stops") == 0, pending)
     suite.ok("%s: a later tick clears the hold" % tag, "held" not in pending, pending)
+
+    legacy = os.path.join(sessions, SESSION + ".json")
+    with open(legacy, "w") as handle:
+        json.dump({"checklist_pending": dict(pending, stops=9, held=1.0)}, handle)
+    run_checklist(profile, work, ["tick", items, "implement=done"], env)
+    state = get(sessions)
+    suite.ok("%s: a write upgrades a flat marker left by the previous version" % tag,
+             list((state.get("checklist_pending") or {})) == ["b"], state)
+    suite.ok("%s: without stranding it as a second page" % tag,
+             tracked(state).get("stops") == 0, state)
 
     second = os.path.join(work, "second.json")
     reseeded = run_checklist(profile, work, [
@@ -614,18 +785,17 @@ def check_writer(suite, profile, work):
     with open(second, "w") as handle:
         handle.write(reseeded.stdout)
     with open(os.path.join(sessions, SESSION + ".json"), "w") as handle:
-        json.dump({"checklist_pending": dict(pending, branch="b"),
+        json.dump({"checklist_pending": pages(dict(pending, branch="b")),
                    "checklist_forked": "c"}, handle)
     run_checklist(profile, work, ["tick", second, "plan=done"], env)
     state = get(sessions)
-    suite.ok("%s: a write from the second branch records it" % tag,
-             state.get("checklist_pending", {}).get("branch") == "c", state)
+    suite.ok("%s: a write from the second branch records it beside the first" % tag,
+             sorted(state.get("checklist_pending") or {}) == ["b", "c"], state)
+    suite.ok("%s: and leaves the first page's own items untouched" % tag,
+             tracked(state, "b").get("open") == pending.get("open"), state)
     suite.ok("%s: and a write never wipes the spent fork" % tag,
              state.get("checklist_forked") == "c", state)
 
-    with open(os.path.join(sessions, SESSION + ".json"), "w") as handle:
-        json.dump({"checklist_pending": dict(pending, branch="b"),
-                   "checklist_forked": "c", "armed_at": 7.0}, handle)
     with open(second) as handle:
         done = json.load(handle)
     for entry in done["items"]:
@@ -635,8 +805,19 @@ def check_writer(suite, profile, work):
         json.dump(done, handle)
     run_checklist(profile, work, ["arm", second], env)
     state = get(sessions)
-    suite.ok("%s: a complete checklist drops the spent fork too" % tag,
-             "checklist_forked" not in state, state)
+    suite.ok("%s: a complete page drops its own record" % tag,
+             list((state.get("checklist_pending") or {})) == ["b"], state)
+    suite.ok("%s: and the spend survives while another page is open" % tag,
+             state.get("checklist_forked") == "c", state)
+
+    with open(os.path.join(sessions, SESSION + ".json"), "w") as handle:
+        json.dump({"checklist_pending": pages(dict(pending, branch="c")),
+                   "checklist_forked": "c", "armed_at": 7.0}, handle)
+    run_checklist(profile, work, ["arm", second], env)
+    state = get(sessions)
+    suite.ok("%s: the last page going drops the marker and the spent fork" % tag,
+             "checklist_pending" not in state and "checklist_forked" not in state,
+             state)
     suite.ok("%s: and leaves armed_at alone doing it" % tag,
              state.get("armed_at") == 7.0, state)
 
@@ -679,7 +860,7 @@ def check_writer(suite, profile, work):
     with open(stacked, "w") as handle:
         handle.write(seeded.stdout)
     run_checklist(profile, work, ["arm", stacked], env)
-    pending = get(sessions).get("checklist_pending", {})
+    pending = tracked(get(sessions))
     suite.ok("%s: the marker carries every branch in the stack" % tag,
              pending.get("branches") == [BRANCH, BRANCH + "/01-first",
                                          BRANCH + "/02-second"], pending)
@@ -692,7 +873,7 @@ def check_writer(suite, profile, work):
         handle.write(plain.stdout)
     run_checklist(profile, work, ["arm", flat], env)
     suite.ok("%s: an unstacked run records just its own branch" % tag,
-             get(sessions).get("checklist_pending", {}).get("branches") == [BRANCH],
+             tracked(get(sessions)).get("branches") == [BRANCH],
              get(sessions).get("checklist_pending"))
 
     bare_arm = dict(env)
@@ -1067,6 +1248,7 @@ def main():
         for profile in PROFILES:
             check_hook(suite, profile, directory)
             check_fork(suite, profile, os.path.join(directory, "fork"))
+            check_several_pages(suite, profile, os.path.join(directory, "pages"))
             check_escape_hatch(suite, profile, os.path.join(directory, "hatch"))
             work = os.path.join(directory, profile, "writer")
             os.makedirs(work, exist_ok=True)

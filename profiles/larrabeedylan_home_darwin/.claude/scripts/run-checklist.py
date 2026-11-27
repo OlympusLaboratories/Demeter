@@ -305,6 +305,29 @@ def session_state_path(ident):
     return os.path.join(SESSIONS, safe + ".json")
 
 
+def page_key(run):
+    for field in ("hash", "url", "branch"):
+        value = str(run.get(field) or "").strip()
+        if value:
+            return value
+    return "unpublished"
+
+
+def tracked_pages(marker):
+    if not isinstance(marker, dict):
+        return {}
+    if isinstance(marker.get("open"), list):
+        return {page_key(marker): dict(marker)}
+    return {str(key): dict(value) for key, value in marker.items()
+            if isinstance(value, dict)}
+
+
+def unpublished_twin(page, branch):
+    return (not str(page.get("hash") or "").strip()
+            and not str(page.get("url") or "").strip()
+            and str(page.get("branch") or "") == branch)
+
+
 def mark_outstanding(document):
     ident = session_id()
     if not ident:
@@ -321,20 +344,27 @@ def mark_outstanding(document):
             state = {}
     if not isinstance(state, dict):
         state = {}
+
+    run = document["run"]
+    branch = run.get("branch", "")
+    pages = tracked_pages(state.get("checklist_pending"))
+    key = page_key(run)
+    for other in [name for name in pages if name != key]:
+        if unpublished_twin(pages[other], branch):
+            pages.pop(other)
+
     if verdict == "complete":
-        state.pop("checklist_pending", None)
-        state.pop("checklist_forked", None)
+        pages.pop(key, None)
     else:
-        run = document["run"]
         branches = []
-        for name in ([run.get("branch", "")]
+        for name in ([branch]
                      + [entry.get("branch", "") for entry in document["stages"]]):
             if name and name not in branches:
                 branches.append(name)
-        state["checklist_pending"] = {
+        pages[key] = {
             "url": run.get("url", ""),
             "hash": run.get("hash", ""),
-            "branch": run.get("branch", ""),
+            "branch": branch,
             "branches": branches,
             "at": time.time(),
             "stops": 0,
@@ -342,6 +372,12 @@ def mark_outstanding(document):
             "open": [entry["id"] for entry in items if entry["state"] in OPEN_STATES],
             "in_flight": [entry["id"] for entry in in_flight],
         }
+
+    if pages:
+        state["checklist_pending"] = pages
+    else:
+        state.pop("checklist_pending", None)
+        state.pop("checklist_forked", None)
     try:
         os.makedirs(SESSIONS, exist_ok=True)
         tmp = path + ".tmp"
@@ -1394,21 +1430,36 @@ what it guarantees, and what each one is written against:
   must belong to this checklist
 
   the marker carries the run's branch, so notify.py's Stop gate can see a
-  session that has moved to a second branch. one marker per session means a
-  fork is otherwise invisible: a second branch writes nothing, so there is
-  nothing for the gate to hold on and the first page describes a run that no
-  longer exists
+  session that has moved to a second branch. a branch that publishes nothing
+  writes nothing, so without it the gate has nothing to hold on and the first
+  page describes a run that no longer exists
 
   it carries every STAGE's branch beside it, because a stack moves between
   its members by design and holding the turn each time would make the gate
-  something to switch off. a branch this page does not claim still holds,
+  something to switch off. a branch no tracked page claims still holds,
   which is the case the gate is for
 
-  every write rebuilds the marker from scratch, so the gate's spent-fork
-  record lives in checklist_forked BESIDE it rather than in it - a field
-  inside the marker is wiped by every publish, tick, reconcile and arm, which
-  turns "hold once" into "hold at every turn end". it is dropped only with the
-  marker itself, on a complete checklist
+  the marker holds ONE RECORD PER PAGE, keyed by the page's identity - its
+  hash, else its url, else its branch. a run driving several change requests
+  publishes a page each, and a single slot made whichever page wrote last
+  the session's whole truth: the fork gate then held a correct run, and
+  every other page's staleness became untrackable, since each write resets
+  the stop count and a watcher polling one page kept the slot fresh forever.
+  unioning the branches into one record was the smaller fix and was rejected
+  for that second reason - it buys silence on the false hold by leaving the
+  stale-page gate permanently reset
+
+  a page with no identity yet is replaced rather than duplicated when the
+  same branch's page is published: a publish that found no artifact store
+  still marks the run, keyed by branch, and the url it later earns must not
+  strand that first record with an open list nobody can tick
+
+  every write rebuilds its own page's record from scratch, so the gate's
+  spent-fork record lives in checklist_forked BESIDE the marker rather than
+  inside any record - a field inside one is wiped by every publish, tick,
+  reconcile and arm to that page, which turns "hold once" into "hold at every
+  turn end". it is dropped only with the marker itself, when the last page's
+  items are all done or skipped
 
   arm is the way back from notify.py --checklist-clear --force. it rewrites the
   marker from the items file alone - no render, no publish, no network - through

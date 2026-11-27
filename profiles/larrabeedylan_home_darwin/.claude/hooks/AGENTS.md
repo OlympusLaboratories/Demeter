@@ -119,7 +119,25 @@ Five things are load-bearing, and four of them are about *not* holding.
 
 And **`--checklist-status` reports the branch**, saying whether the session is on it, so a fork is answerable read-only. That is the lesson of the section above, applied without being re-learned: the diagnostic exists before the first run needs it, and it still mutates nothing.
 
-What is deliberately **not** built is a marker per branch. The ticket's own option C — one page with a section per branch — was rejected for breaking URL stability, and tracking two markers in one session would make "nothing in flight" ambiguous across two independent runs. The gate's job here is to make the fork *visible to a human*, who then owns both pages; it is not to own them itself.
+What is deliberately **not** built is option C — one page with a section per branch — which breaks URL stability. A marker per *page* was deferred here rather than rejected, on the grounds that two markers in one session would make "nothing in flight" ambiguous across two independent runs. The section below is what happened when a run had three pages that were not independent, and why that reasoning did not survive it. The gate's job here is to make the fork *visible to a human*, who then owns every page; it is not to own them itself.
+
+### One marker slot, so three correct pages produced a false hold and two untracked ones
+
+a run drove three change requests from one session — two repositories, three published pages, three watchers. Every page was correct and current, the session was on the branch it should have been on, and the `Stop` hook held the turn end anyway: the checklist *it could see* described a different branch. Following the hold's advice would have corrupted a second page's recorded branch; its other diagnosis, *this is second work and owes a checklist of its own*, was answered by a page that already existed. A third thing was true and the gate had no way to say it — three pages, three correct branches, one marker slot.
+
+The mechanism is `mark_outstanding()` rebuilding `state["checklist_pending"]` wholesale on every `publish`, `tick`, `reconcile` and `arm`, writing *its own* page's identity into the one slot. With a watcher armed per change request, each poll's `reconcile --publish` rewrote it, so whichever page polled last decided what the session claimed to be on. `branches`, added for stacks, does not reach this: it lists the stages declared on **one** page.
+
+**The marker now holds one record per page, keyed by the page's identity** — its hash, else its url, else its branch. The fork gate holds only when the session's branch is claimed by **none** of them, and the stale-page gate judges each record on its own.
+
+Four things are load-bearing.
+
+**Keying per page answers the ambiguity rather than inheriting it.** The deferral above was argued against two *independent* runs, where one merged `open`/`in_flight` list cannot say which run is idle. Each page keeps its own `verdict`, `open`, `in_flight`, `stops` and `held`, so every question the gate asks is asked of one page, and a hold names the page it is about.
+
+**The smaller fix would have disabled the detection it was meant to quieten.** The alternative on the table was to union the branches into the single record and leave everything else alone. Measured against the shipped code: one page alone goes stale after three turn ends and holds on the fourth; with a second page's watcher writing between turn ends, `stops` stays pinned at `1` and the first page **never** holds — six turn ends, nothing. Every write resets the count, and a union of branches does not change which record the count lives in. So it buys silence on the false fork hold by keeping the stale-page gate permanently reset, which is the "gate people switch off" failure arriving from the other direction. Re-measured after the change: the unwritten page accrues its own debt and holds on its own, and the watcher's page is not named in the hold.
+
+**A turn end counts against every page, even one that holds.** A first draft returned as soon as it had a hold to give, so a stalled page swallowed its siblings' turn-end count — found by running the new test rather than reading it. The increments and the `held` stamps are now one write, because `stops` is a count of turn ends and a page nobody wrote to did not stop being unwritten because another page was worse.
+
+**The hook never changes the marker's shape; only the writer does.** A session upgraded mid-run still has the old flat marker on disk, so both sides normalize it into a single record, and the hook writes back whichever shape it found. The writer upgrades it on its next write, and replaces rather than duplicates a record that had no identity yet — a publish that found no artifact store still marks the run, keyed by branch, and the url it later earns must not strand that first record with an open list nobody can tick.
 
 ### A page the run has to remember to update is a page that goes stale
 
