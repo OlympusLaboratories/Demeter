@@ -66,6 +66,31 @@ WORK_PAIR_EXEMPT = {
         'BSD date on darwin, GNU date on linux',
 }
 
+DERIVE_GUARDS = (
+    ('TRANSFORM_EXEMPT', TRANSFORM_EXEMPT),
+    ('PRESENCE_EXEMPT', PRESENCE_EXEMPT),
+)
+
+ALL_ALLOWLISTS = (
+    ('WORK_PAIR_EXEMPT', WORK_PAIR_EXEMPT),
+    ('TRANSFORM_EXEMPT', TRANSFORM_EXEMPT),
+    ('PRESENCE_EXEMPT', PRESENCE_EXEMPT),
+)
+
+
+def allowlisted_for_derive(rel):
+    return [(name, table[rel]) for name, table in DERIVE_GUARDS if rel in table]
+
+
+def allowlist_status(work_exempted, home_exempted):
+    diverging = {('WORK_PAIR_EXEMPT', rel) for rel, _kind, _first, _total in work_exempted}
+    for rel, kind, _first, _total in home_exempted:
+        table = 'TRANSFORM_EXEMPT' if kind == 'differs' else 'PRESENCE_EXEMPT'
+        diverging.add((table, rel))
+    declared = [(name, rel) for name, table in ALL_ALLOWLISTS for rel in table]
+    settled = sorted((e for e in declared if e not in diverging), key=lambda e: (e[1], e[0]))
+    return len(diverging), len(declared), settled
+
 
 def transform(text):
     for pattern, replacement in SUBSTITUTIONS:
@@ -190,14 +215,25 @@ def cmd_check(args):
                     home_enforced, home_exempted, reasons, args.quiet)
 
     total = len(work_enforced) + len(home_enforced)
-    exceptions = len(work_exempted) + len(home_exempted)
+    diverging, declared, settled = allowlist_status(work_exempted, home_exempted)
     lines.append(f'{total} file(s) drifted outside the allowlist.' if total
-                 else f'No drift outside the allowlist ({exceptions} allowed exceptions).')
+                 else 'No drift outside the allowlist.')
+    lines.append(f'{diverging} of {declared} allowlist entries still diverging.')
+    if settled:
+        lines.append(
+            '1 entry no longer diverges — re-check whether it is still needed:'
+            if len(settled) == 1 else
+            f'{len(settled)} entries no longer diverge — re-check whether each is '
+            'still needed:')
+        for name, rel in settled:
+            lines.append(f'  {rel}  ({name})')
     if total:
         lines += [
             '',
             'Re-derive a home file with:',
             '  profiles/check-transform.py derive <path-inside-.claude> --apply',
+            'An allowlisted path is refused there, because deriving it would overwrite',
+            'the divergence the entry records; --force overrides that.',
             'If the divergence is deliberate, add it to the allowlist in this script',
             'with a one-line reason.',
         ]
@@ -217,7 +253,33 @@ def cmd_check(args):
     return 0
 
 
+def report_forced_overwrite(target, derived, entries):
+    rel = os.path.relpath(target, REPO)
+    existing = read(target)
+    if existing is None:
+        print(f'--force: {rel} has no home copy; creating one from work_darwin')
+    else:
+        _first, changed = first_difference(existing, derived)
+        print(f'--force: replacing the allowlisted divergence in {rel} '
+              f'({changed} differing lines)')
+    for name, reason in entries:
+        print(f'  discarding {name}: {reason}')
+
+
 def cmd_derive(args):
+    entries = allowlisted_for_derive(args.path)
+    if entries and args.apply and not args.force:
+        print(f'refusing to derive {args.path}: it is allowlisted, which records that '
+              "home_darwin's copy is deliberately not transform(work_darwin).",
+              file=sys.stderr)
+        for name, reason in entries:
+            print(f'  {name}: {reason}', file=sys.stderr)
+        print('Overwriting it would destroy that divergence, and check would then pass '
+              'because it did.', file=sys.stderr)
+        print('Pass --force to overwrite anyway, and drop the allowlist entry if it is '
+              'being retired.', file=sys.stderr)
+        return 1
+
     source = os.path.join(REPO, WORK_DARWIN, args.path)
     target = os.path.join(REPO, HOME_DARWIN, args.path)
     text = read(source)
@@ -226,6 +288,9 @@ def cmd_derive(args):
         return 1
     derived = transform(text)
     if args.apply:
+        if entries:
+            report_forced_overwrite(target, derived, entries)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
         with open(target, 'w', encoding='utf-8') as handle:
             handle.write(derived)
         print(f'wrote {os.path.relpath(target, REPO)}')
@@ -250,6 +315,13 @@ def cmd_rules(args):
     print('exempt between the two work profiles:')
     for rel, reason in WORK_PAIR_EXEMPT.items():
         print(f'  {rel}\n      {reason}')
+    print()
+    print('derive --apply refuses a path in either of these, since the entry records')
+    print('that the home copy is deliberately not transform(work_darwin):')
+    for name, _table in DERIVE_GUARDS:
+        print(f'  {name}')
+    print('--force overrides the refusal and prints what it replaced.')
+    print('WORK_PAIR_EXEMPT is not consulted: derive only ever writes home_darwin.')
     return 0
 
 
@@ -273,6 +345,9 @@ def main():
     derive.add_argument('path', help='path inside .claude, e.g. skills/aidr/SKILL.md')
     derive.add_argument('--apply', action='store_true',
                         help="overwrite home_darwin's copy with the derived text")
+    derive.add_argument('--force', action='store_true',
+                        help='apply to an allowlisted path anyway, destroying the '
+                             'divergence the entry records')
     derive.set_defaults(func=cmd_derive)
 
     rules = sub.add_parser('rules', help='print the substitutions and the allowlist')
