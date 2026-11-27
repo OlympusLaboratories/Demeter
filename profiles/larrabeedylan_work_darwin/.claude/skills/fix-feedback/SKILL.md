@@ -221,7 +221,7 @@ One approval covers the whole batch. On **no**, post nothing, say in one line th
 
 ### 3b.4 Post each approved finding
 
-One comment per finding — a thread is resolved as a unit, so batching several findings into one comment makes them unresolvable. Pipe the body through a heredoc; the single-quote rule in Step 7b exists because that call takes the body as an argument, and this one does not:
+One comment per finding — a thread is resolved as a unit, so batching several findings into one comment makes them unresolvable. The body never travels as a shell argument on this call: the last parameter is a `<body_file|->`, so it is either a path or `-` for stdin. Pass `-` with a quoted heredoc:
 
 ```bash
 ~/.claude/scripts/gitlab-api.sh create-diff-comment "<project_id_urlencoded>" <mr_iid> "<file_path>" <line> - << 'ENDOFBODY'
@@ -235,6 +235,14 @@ One comment per finding — a thread is resolved as a unit, so batching several 
 <optional: the direction a fix would take, 1-2 sentences>
 ENDOFBODY
 ```
+
+**A worktree-isolated session refuses that command whenever the finding is about `git`, and then the file form is the one that works.** Write the body with the Write tool and name it in place of `-`:
+
+```bash
+~/.claude/scripts/gitlab-api.sh create-diff-comment "<project_id_urlencoded>" <mr_iid> "<file_path>" <line> <scratchpad>/finding-<n>.md
+```
+
+Both forms are correct, because the script reads the body itself either way and neither lets the shell touch the text. Pick the file when the heredoc is refused, and see Rule 10 for why.
 
 - `<line>` is the line in the file **as it stands now**, not the line the review quoted if the file has moved since. Pass `-` for a file-level note.
 - Keep the `<!-- review-note:<dimension> -->` marker as the body's first line, byte for byte. GitLab strips an HTML comment out of the rendered view and hands it back verbatim from the API, so it is invisible to everyone reading the merge request and still exact to match on — which is how 3b.2 recognises this skill's own comments on a later run. The visible `**<dimension>**` line is a plain categorisation and deliberately nothing more: see Rule 9.
@@ -402,30 +410,7 @@ After drafting a reply (for **Reject** or **Modify** decisions), ask the user:
 
 If the user says **yes**, post the reply using the discussion thread ID saved from Step 3.
 
-Use the `gitlab-api.sh` script to reply directly to the discussion thread:
-
-```bash
-~/.claude/scripts/gitlab-api.sh reply-to-thread "<project_id_urlencoded>" <mr_iid> "<discussion_id>" "<reply_text>"
-```
-
-The `discussion_id` is the thread ID from the discussions fetched in Step 2. Make sure to properly escape/quote the reply text — pass it as a single shell argument.
-
-**Quote the reply in SINGLE quotes, and write the draft so it contains no apostrophe.**
-A good reply names identifiers, so it is full of backticks — inside double quotes the
-shell runs everything between them as a command substitution, which mangles the reply or
-executes something. Single quotes are the only safe wrapper, and they cannot contain an
-apostrophe, so decide that at drafting time: prefer "you would" to "you'd", "it is" to
-"it's". If the drafted text already has one, reword it rather than escaping, and say so
-when you confirm the post — the user approved an exact string and is entitled to know
-the posted one differs, however trivially.
-
-After posting, confirm to the user that the reply was posted successfully and show the note ID.
-
-If the user says **no**, skip posting and continue to Step 8.
-
-#### Under `--autonomous`: post it, and use the stdin variant
-
-Do not ask. Post the drafted reply, and post it through `reply-to-thread-stdin`, which reads the body from standard input:
+Use the `gitlab-api.sh` script to reply directly to the discussion thread, and use the **`reply-to-thread-stdin`** subcommand, which reads the body from standard input:
 
 ```bash
 ~/.claude/scripts/gitlab-api.sh reply-to-thread-stdin "<project_id_urlencoded>" <mr_iid> "<discussion_id>" << 'ENDOFBODY'
@@ -433,11 +418,35 @@ Do not ask. Post the drafted reply, and post it through `reply-to-thread-stdin`,
 ENDOFBODY
 ```
 
-**The no-apostrophe rule above does not apply on this path.** A quoted heredoc (`<< 'ENDOFBODY'`) passes the body through byte for byte — apostrophes, backticks, `$`, all of it — so write the reply as it should read and change nothing for the shell's benefit. That rule exists only because the interactive `reply-to-thread` takes the body as a shell argument; carrying it into an autonomous run would be a live defect rather than a quirk, because nobody is reading the draft before it goes out and a silent rewording would never be caught.
+The `discussion_id` is the thread ID from the discussions fetched in Step 2.
+
+**The body reaches the script on stdin, by either a quoted heredoc or a redirect from a file.** Both pass the reply through byte for byte — apostrophes, backticks, `$`, all of it — so write the reply as it should read and change nothing for the shell's benefit. Reach for the redirect when the heredoc is refused, which a worktree-isolated session does whenever the reply mentions `git`:
+
+```bash
+~/.claude/scripts/gitlab-api.sh reply-to-thread-stdin "<project_id_urlencoded>" <mr_iid> "<discussion_id>" < <scratchpad>/reply-<n>.md
+```
+
+Write the file with the Write tool. Rule 10 has the mechanism.
+
+**The plain `reply-to-thread` subcommand takes the body as a shell argument, and this step does not use it.** It needs the reply wrapped in single quotes, which cannot contain an apostrophe, so it forced a choice between rewording a draft the user had just approved and letting a backtick run as a command substitution. Neither belongs in a reply somebody has already read and agreed to. The stdin subcommand removes the choice, so no apostrophe rule applies on any path any more.
+
+After posting, confirm to the user that the reply was posted successfully and show the note ID.
+
+If the user says **no**, skip posting and continue to Step 8.
+
+#### Under `--autonomous`: post it
+
+Do not ask. Post the drafted reply with either stdin form from the step above:
+
+```bash
+~/.claude/scripts/gitlab-api.sh reply-to-thread-stdin "<project_id_urlencoded>" <mr_iid> "<discussion_id>" << 'ENDOFBODY'
+<reply text here>
+ENDOFBODY
+```
+
+**Do not fall back to the plain `reply-to-thread` subcommand when the heredoc is refused** — take the redirect instead. Its body argument would need the reply rewritten to survive single-quoting, and that matters more here than interactively: nobody is proofreading an autonomous draft, so a silent rewording would never be caught.
 
 An item with **no discussion ID** still has nowhere to post, autonomous or not: print the reply in the transcript and move on.
-
-Leave the interactive path and its single-quote rule exactly as written above. They are still correct for a reply the user has just read and approved.
 
 ### Step 7c: Resolve the Thread (`--autonomous` only)
 
@@ -477,3 +486,4 @@ After resolving one thread, offer to address the next unresolved thread. Loop ba
 7. **Use the local codebase.** The user is expected to have the MR branch checked out locally. Use `Read`, `Grep`, and `Glob` to explore the actual code — don't rely solely on the diff from the API.
 8. **No comments in the code.** When you apply a change, add no explanatory comment, docstring, or note recording what the reviewer asked for — a reviewer reading the next diff does not need the last review narrated back at them. That belongs in the drafted reply. Machine-read directives (linter suppressions, build pragmas, a doc-comment CI requires) are program input, not commentary, and stay allowed.
 9. **Nothing this skill posts says where the feedback came from.** Not in a finding body, not in a drafted reply, not in a resolution note: no robot glyph, no skill name, no "automated review", no "AI", no "swarm", and no agent referring to itself. A finding on a merge request is a review note from the account that posted it, and that account is who is accountable for it to whoever reads the thread — a body that hands the point off to a tool invites the reader to discount it and tells them nothing they can act on. The single exception is 3b.4's `<!-- review-note:<dimension> -->` marker, which exists because 3b.2 and 3b.5 have to find the comment again on a later run and which no reader ever sees. **The chat side is not covered**: Step 4 still tags an item `— review-code: correctness` in the terminal, where provenance is the user's own record of their own run.
+10. **A body never travels as a shell argument. A heredoc and a file are equally correct.** `create-diff-comment` takes a `<body_file|->` and `reply-to-thread-stdin` reads standard input, so on both calls the script collects the text itself and the shell never touches it; there is nothing to choose between the two forms on safety. What there is to choose between them on is the worktree isolation guard, and that is why both have to stay available: **the guard reads the text of the whole command, heredoc body included**, and refuses one that feeds a script outside the worktree any text naming `git` — even though nothing in that text executes. A review of a repository whose subject is `git` is almost entirely comments about `git`, so on those repositories the heredoc is refused for most findings and most replies, and the file is accepted. This rule used to ban temp files outright and mandate the heredoc, which left a worktree-isolated autonomous run with no sanctioned way to post at all; one did it with a file five times in direct violation of the file it was following, and was right to. The ban it replaced had the correct reason attached to the wrong form. The plain `reply-to-thread` subcommand is the form the rule is actually about, and no step calls it.

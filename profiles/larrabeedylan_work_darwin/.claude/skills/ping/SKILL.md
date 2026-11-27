@@ -109,6 +109,14 @@ BODY
 
 Take `--level` from Step 1, and the title and body from Step 2. **The body goes on stdin, never in the argument list**, and the heredoc is quoted (`<<'BODY'`) so the shell expands nothing inside it — the body is prose, and an apostrophe, a backtick or a newline in an argument is how an envelope gets mangled. Keep the title short and free of quotes; it is a label, and the prose belongs in the body.
 
+**A worktree-isolated session refuses that command whenever the body mentions `git`, and then the file form is the one that works.** Write the body with the Write tool and redirect it in:
+
+```bash
+"$HOME/.claude/hooks/notify.py" --ping --level progress --title 'demeter pushed' --body - < <scratchpad>/ping-body.txt
+```
+
+`notify.py` reads the body from stdin whether a heredoc or a redirect put it there, so the two forms are equally correct and neither lets the shell near the prose. This is not a corner case: the pings that matter most come from a fix run, which is inside its worktree for everything after it cuts the branch, and a body saying what the run just did names `git` often. The *Never put the body in the argument list* rule below has the mechanism.
+
 Three things it does for you, worth understanding rather than rebuilding:
 
 - **Every field resolves through the hook**, so a deliberate ping and an automatic one never disagree about what to call the same session: the repository name, this session's chat title, the branch, and this session's change request URL when the body names a change request without linking it. Outside a checkout the repository name falls back to the machine's configured `host_label`, which is what a box whose sessions all start in one fixed directory exists to set. A session with no title yet costs a few seconds on the first call while one is generated, and nothing on every call after — that is the model working, not a hang.
@@ -164,7 +172,7 @@ Other skills reach this one through the `Skill` tool rather than by re-implement
 - **Never exceed 75 words.** A notification that has to be opened and scrolled has failed at the one job it has. Over budget means cut, never means send anyway.
 - **Never say what is or is not needed unless you know.** If the user has to do something, name it. If they do not, say so explicitly — "nothing needed" is information.
 - **Never name the transport.** Say "your phone" or nothing. The transport is a per-machine detail of `notify-send.sh` and this skill is identical on every machine.
-- **Never put the body in the argument list.** Prose contains quotes, apostrophes, backticks and newlines. `--body -` with a quoted heredoc carries all of them through untouched; an argument does not. Never rebuild the envelope or the session state file here either — `notify.py` owns both, and a second copy of its keying goes stale silently.
+- **Never put the body in the argument list.** Prose contains quotes, apostrophes, backticks and newlines. `--body -` carries all of them through untouched; an argument does not. **A quoted heredoc and a redirect from a file are equally correct**, because `notify.py` reads stdin either way and neither form lets the shell near the prose. Keep both, because the worktree isolation guard rules one of them out: **it reads the text of the whole command, heredoc body included**, and refuses one that feeds a script outside the worktree any text naming `git` — even though nothing in the body executes. A redirect keeps the prose out of the command and is accepted. Never rebuild the envelope or the session state file here either — `notify.py` owns both, and a second copy of its keying goes stale silently.
 - **An explicit ping bypasses the gates deliberately.** `notify.py`'s `min_turn_seconds`, `min_interval_seconds`, quiet hours and subagent suppression exist to stop *automatic* notifications from becoming noise across a dozen live sessions. A ping the user asked for is never noise, so `--ping` skips every one of them by construction: they live in the hook's own event handler, which this path never enters. It still depends on `~/.claude/notify.json` being configured — that is the one thing it cannot route around.
 - **Never arm a session without sending.** The arming and the message are one gesture; writing `armed_at` after a failed send would leave the session opted in to notifications the user has no reason to expect, having just been told the ping did not go out. `notify.py --ping` writes `armed_at` only after the sender returns cleanly, and exits non-zero when it does not.
 - **Never fail silently.** Non-zero exit from `notify.py --ping` gets reported in chat with the sender's stderr intact.

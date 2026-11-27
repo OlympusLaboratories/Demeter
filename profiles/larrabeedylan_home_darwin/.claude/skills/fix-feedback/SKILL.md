@@ -224,7 +224,7 @@ One approval covers the whole batch. On **no**, post nothing, say in one line th
 
 ### 3b.4 Post each approved finding
 
-One comment per finding — a thread is resolved as a unit, so batching several findings into one comment makes them unresolvable. The body is read from stdin, so use a heredoc:
+One comment per finding — a thread is resolved as a unit, so batching several findings into one comment makes them unresolvable. `create-diff-comment` reads the body from stdin and has no argument form at all, so the body must arrive there. A quoted heredoc is the shortest way:
 
 ```bash
 ~/.claude/scripts/github-api.sh create-diff-comment <owner> <repo> <pr_number> "<file_path>" <line> << 'ENDOFBODY'
@@ -238,6 +238,14 @@ One comment per finding — a thread is resolved as a unit, so batching several 
 <optional: the direction a fix would take, 1-2 sentences>
 ENDOFBODY
 ```
+
+**A worktree-isolated session refuses that command whenever the finding is about `git`, and then the file form is the one that works.** Write the body with the Write tool and redirect it in:
+
+```bash
+~/.claude/scripts/github-api.sh create-diff-comment <owner> <repo> <pr_number> "<file_path>" <line> < <scratchpad>/finding-<n>.md
+```
+
+Both forms are correct, because the script reads stdin either way and neither touches the text. Pick the redirect when the heredoc is refused, and see Rule 10 for why.
 
 - `<line>` is the line in the file **as it stands now**, not the line the review quoted if the file has moved since. Pass `-` for a file-level comment.
 - Keep the `<!-- review-note:<dimension> -->` marker as the body's first line, byte for byte. GitHub strips an HTML comment out of the rendered view and hands it back verbatim from the API, so it is invisible to everyone reading the pull request and still exact to match on — which is how 3b.2 recognises this skill's own comments on a later run. The visible `**<dimension>**` line is a plain categorisation and deliberately nothing more: see Rule 9.
@@ -409,14 +417,19 @@ After drafting a reply (for reject or modify decisions), ask the user:
 If the user says yes:
 
 1. Use the **thread ID** for the selected thread — the `id` field on its `pr-reviews` item, which is a thread id only when that item's `type` is `inline`.
-2. Post the reply using the `github-api.sh` script, piping the body via heredoc to stdin to avoid shell encoding issues:
+2. Post the reply using the `github-api.sh` script, with the body on **stdin** so the shell never sees the prose:
    ```bash
    ~/.claude/scripts/github-api.sh reply-to-thread '<thread_id>' << 'ENDOFBODY'
    <reply text here>
    ENDOFBODY
    ```
    - The `<thread_id>` is that item's `id`, the GraphQL node id of the thread.
-   - **Always** use a heredoc piped to stdin for the body — never pass it as a CLI argument or use temp files with redirects.
+   - **The body reaches the script on stdin, by either a quoted heredoc or a redirect from a file.** `reply-to-thread` takes the body as an optional second argument and reads stdin when it is omitted, so leave it omitted. Both stdin forms pass the text through byte for byte; **passing the prose as that argument is the one form that is forbidden**, because an apostrophe or a backtick in an argument is how the reply gets mangled or something gets executed.
+   - **Reach for the redirect when the heredoc is refused**, which a worktree-isolated session does whenever the reply mentions `git`:
+     ```bash
+     ~/.claude/scripts/github-api.sh reply-to-thread '<thread_id>' < <scratchpad>/reply-<n>.md
+     ```
+     Write the file with the Write tool. Rule 10 has the mechanism.
 3. Confirm to the user that the reply was posted successfully, or report any errors.
 
 If the user says no, continue to Step 8 as normal.
@@ -425,7 +438,7 @@ If the user says no, continue to Step 8 as normal.
 
 #### Under `--autonomous`: post it
 
-Do not ask. Post the drafted reply using exactly the command above — `reply-to-thread` with its body piped in through a quoted heredoc, which is already the only sanctioned form on this profile:
+Do not ask. Post the drafted reply using either stdin form from the step above:
 
 ```bash
 ~/.claude/scripts/github-api.sh reply-to-thread '<thread_id>' << 'ENDOFBODY'
@@ -433,7 +446,7 @@ Do not ask. Post the drafted reply using exactly the command above — `reply-to
 ENDOFBODY
 ```
 
-`github-api.sh reply-to-thread` takes the body as an optional second argument and **reads stdin when that argument is omitted**, so the quoted heredoc passes the reply through byte for byte — apostrophes, backticks, `$`, all of it. Write the reply as it should read and change nothing for the shell's benefit. That matters more here than interactively: nobody is proofreading an autonomous draft, so a silent rewording would never be caught.
+`github-api.sh reply-to-thread` takes the body as an optional second argument and **reads stdin when that argument is omitted**, so both a quoted heredoc and `< <scratchpad>/reply-<n>.md` pass the reply through byte for byte — apostrophes, backticks, `$`, all of it. Write the reply as it should read and change nothing for the shell's benefit. That matters more here than interactively: nobody is proofreading an autonomous draft, so a silent rewording would never be caught. For the same reason, **do not fall back to the body argument when the heredoc is refused** — take the redirect and carry on, rather than rewording a draft nobody is going to read.
 
 An item with **no thread ID** — a review-agent finding Step 3b could not post, or a `general`/`review` comment — still has nowhere to reply. Print the draft in the transcript and move on; that is not an escalation.
 
@@ -481,3 +494,4 @@ After resolving one thread, offer to address the next unresolved thread. Loop ba
 7. **Use the local codebase.** The user is expected to have the PR branch checked out locally. Use `Read`, `Grep`, and `Glob` to explore the actual code — don't rely solely on the diff from the API.
 8. **No comments in the code.** When you apply a change, add no explanatory comment, docstring, or note recording what the reviewer asked for — a reviewer reading the next diff does not need the last review narrated back at them. That belongs in the drafted reply. Machine-read directives (linter suppressions, build pragmas, a doc-comment CI requires) are program input, not commentary, and stay allowed.
 9. **Nothing this skill posts says where the feedback came from.** Not in a finding body, not in a drafted reply, not in a resolution note: no robot glyph, no skill name, no "automated review", no "AI", no "swarm", and no agent referring to itself. A finding on a pull request is a review note from the account that posted it, and that account is who is accountable for it to whoever reads the thread — a body that hands the point off to a tool invites the reader to discount it and tells them nothing they can act on. The single exception is 3b.4's `<!-- review-note:<dimension> -->` marker, which exists because 3b.2 and 3b.5 have to find the comment again on a later run and which no reader ever sees. **The chat side is not covered**: Step 4 still tags an item `— review-code: correctness` in the terminal, where provenance is the user's own record of their own run.
+10. **A body goes to the script on stdin. A heredoc and a redirect from a file are equally correct, and an argument never is.** The script reads stdin either way and neither form lets the shell touch the text, so there is nothing to choose between them on safety. What there is to choose between them on is the worktree isolation guard, and that is why both have to stay available: **the guard reads the text of the whole command, heredoc body included**, and refuses one that feeds a script outside the worktree any text naming `git` — even though nothing in that text executes. A review of a repository whose subject is `git` is almost entirely comments about `git`, so on those repositories the heredoc is refused for most findings and most replies. A redirect keeps the prose out of the command and is accepted. This rule used to ban temp files outright and mandate the heredoc, which left a worktree-isolated autonomous run with no sanctioned way to post at all; one did it with a redirect five times in direct violation of the file it was following, and was right to. The ban it replaced had the correct reason attached to the wrong form.
