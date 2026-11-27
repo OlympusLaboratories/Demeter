@@ -57,6 +57,13 @@ the run checklist gate, checked over every profile copy:
     the last page going                   drops the marker and the spent fork
     no session id in the environment      writes nothing, and does not fail
 
+  run-checklist.py keeps a page's identity stable
+    a publish with no store               keys the record by the branch
+    a failed identity rewrite             still records the url it reached
+    a branch change on an identified page keeps the same key
+    a different page's write              leaves both records tracked
+    publishing a page that had none       replaces its record, never adds one
+
   notify.py holds the turn end
     outstanding items, nothing in flight  blocks the first Stop and names the open ids
     the held Stop                         is not blocked a second time
@@ -95,11 +102,16 @@ the run checklist gate, checked over every profile copy:
     so a page nobody writes to            still reaches a stale hold
     an expired page                       is dropped without its live sibling
     every page expired                    drops the marker
-    a finished page beside an open one    never blocks on a fork
+    a session on a finished page's branch never blocks on a fork
+    a finished page                       still blocks a branch nothing tracks
     a subagent or stop_hook_active        never blocks
+    two pages with no url                 are named by their own branches
     --checklist-status                    names every page, counts them, writes nothing
-    a bare clear with any page open       refuses, naming every page
-    --force                               drops every page at once
+    a bare clear with any page open       refuses, naming every page and its ids,
+                                          and offers --page
+    --page --force                        drops that page, leaves the rest armed
+    --page naming nothing tracked         exits non-zero and changes nothing
+    --force alone                         drops every page at once
 
   the escape hatch
     a clear with items still open         refuses, changes nothing, exits non-zero
@@ -493,8 +505,14 @@ def check_several_pages(suite, profile, directory):
              and "checklist_pending" not in get(sessions), get(sessions))
 
     put(sessions, pages(dict(one, open=[], in_flight=[]), two))
-    suite.ok("%s: a finished page beside an open one never blocks on a fork" % tag,
+    suite.ok("%s: a session on a finished page's own branch is not a fork" % tag,
+             hook.checklist_gate(stop(cwd=WORKTREE)) is None, get(sessions))
+    put(sessions, pages(dict(one, open=[], in_flight=[]), two))
+    suite.ok("%s: nor is one on its open sibling's branch" % tag,
              hook.checklist_gate(stop(cwd=ELSEWHERE)) is None, get(sessions))
+    put(sessions, pages(dict(one, open=[], in_flight=[]), two))
+    suite.ok("%s: a finished page still blocks a branch nothing tracks" % tag,
+             hook.checklist_gate(stop(cwd=AGAIN)) is not None, get(sessions))
 
     put(sessions, pages(one, two))
     suite.ok("%s: a subagent's Stop never blocks across pages" % tag,
@@ -522,16 +540,58 @@ def check_several_pages(suite, profile, directory):
     suite.ok("%s: a clear with several pages open refuses" % tag, status != 0, said)
     suite.ok("%s: and names both pages it declined to drop" % tag,
              PAGE in said and OTHER in said, said)
+    suite.ok("%s: and says which page each open id belongs to" % tag,
+             said.count("arm, implement") >= 2, said)
+    suite.ok("%s: and offers the per-page clear" % tag, "--page" in said, said)
     suite.ok("%s: and changed nothing" % tag, frozen(sessions) == before, get(sessions))
 
+    status, said = captured(
+        lambda: hook.cmd_checklist_clear([SESSION, "--page", OTHER, "--force"]))
+    suite.ok("%s: --page --force drops just that page" % tag,
+             status == 0 and sorted(get(sessions)["checklist_pending"]) == ["run123"],
+             get(sessions))
+    suite.ok("%s: and says what is still armed" % tag,
+             "still armed" in said and PAGE in said, said)
+    suite.ok("%s: so the gate still holds on the survivor" % tag,
+             hook.checklist_gate(stop(cwd=AGAIN)) is not None)
+
+    put(sessions, pages(one, two))
+    before = frozen(sessions)
+    status, said = captured(
+        lambda: hook.cmd_checklist_clear([SESSION, "--page", "b/nope", "--force"]))
+    suite.ok("%s: a --page naming no tracked page exits non-zero" % tag,
+             status != 0, said)
+    suite.ok("%s: and names what is tracked instead" % tag,
+             PAGE in said and OTHER in said, said)
+    suite.ok("%s: and changes nothing" % tag,
+             frozen(sessions) == before, get(sessions))
+
+    put(sessions, pages(one, two))
+    status, said = captured(
+        lambda: hook.cmd_checklist_clear([SESSION, "--page", FORK, "--force"]))
+    suite.ok("%s: a --page may name the branch instead of the url" % tag,
+             status == 0 and sorted(get(sessions)["checklist_pending"]) == ["run123"],
+             get(sessions))
+
+    put(sessions, pages(one, two))
     status, said = captured(lambda: hook.cmd_checklist_clear(["--force", SESSION]))
-    suite.ok("%s: --force drops every page at once" % tag,
+    suite.ok("%s: --force with no --page drops every page at once" % tag,
              status == 0 and "checklist_pending" not in get(sessions), get(sessions))
 
     put(sessions, pages(one, dict(two, at=time.time() - hook.GATE_TTL - OVERAGE)))
     status, said = captured(lambda: hook.cmd_checklist_clear([SESSION]))
     suite.ok("%s: one expired page does not unlock a bare clear" % tag,
              status != 0, said)
+
+    blank = marker(url="", hash="", branch=BRANCH, verdict="stalled", in_flight=[])
+    blank2 = marker(url="", hash="", branch=FORK, verdict="stalled", in_flight=[])
+    put(sessions, pages(blank, blank2))
+    held = hook.checklist_gate(stop(cwd=WORKTREE))
+    suite.ok("%s: two pages with no url are still held" % tag, bool(held), held)
+    suite.ok("%s: and each is named by its own branch" % tag,
+             bool(held) and BRANCH in held and FORK in held, held)
+    suite.ok("%s: so neither is called published" % tag,
+             bool(held) and "the published page" not in held, held)
 
 
 def captured(call):
@@ -759,6 +819,9 @@ def check_writer(suite, profile, work):
     run_checklist(profile, work, ["publish", items], unstored)
     suite.ok("%s: a publish with no artifact store still marks the run" % tag,
              "checklist_pending" in get(sessions), get(sessions))
+    suite.ok("%s: and keys it by the branch, there being no identity" % tag,
+             list((get(sessions).get("checklist_pending") or {})) == ["b"],
+             get(sessions))
 
     with open(os.path.join(sessions, SESSION + ".json"), "w") as handle:
         json.dump({"checklist_pending": pages(dict(pending, stops=9, held=1.0))},
@@ -888,6 +951,79 @@ def check_writer(suite, profile, work):
     bare["CLAUDE_SESSION_ID"] = ""
     quiet = run_checklist(profile, work, ["tick", items, "plan=done"], bare)
     suite.ok("%s: no session id still exits 0" % tag, quiet.returncode == 0, quiet.stderr)
+
+    check_page_identity(suite, profile, work, sessions, env)
+
+
+def check_page_identity(suite, profile, work, sessions, env):
+    tag = profile
+
+    stub = os.path.join(work, "publisher.sh")
+    with open(stub, "w") as handle:
+        handle.write("#!/bin/sh\nfor a in \"$@\"; do\n"
+                     "  if [ \"$a\" = --update ] && [ -n \"$HALF_PUBLISH\" ]; then\n"
+                     "    echo 'the update failed' >&2\n    exit 7\n  fi\ndone\n"
+                     "echo https://artifacts.example.dev/abc123\n")
+    os.chmod(stub, 0o755)
+    half = dict(env)
+    half["PUBLISH_ARTIFACT"] = stub
+    half["HALF_PUBLISH"] = "1"
+
+    one = os.path.join(work, "identity.json")
+    seeded = run_checklist(profile, work, [
+        "template", "--title", "T", "--repo", "R", "--branch", "b"], env)
+    with open(one, "w") as handle:
+        handle.write(seeded.stdout)
+    with open(os.path.join(sessions, SESSION + ".json"), "w") as handle:
+        json.dump({}, handle)
+
+    broken = run_checklist(profile, work, ["publish", one], half)
+    suite.ok("%s: a publish whose identity rewrite fails exits non-zero" % tag,
+             broken.returncode != 0, broken.stdout + broken.stderr)
+    with open(one) as handle:
+        after = json.load(handle)
+    suite.ok("%s: but it still records the url it did publish to" % tag,
+             after["run"]["url"] == "https://artifacts.example.dev/abc123",
+             after["run"])
+    suite.ok("%s: so the marker and the items file agree on one key" % tag,
+             list((get(sessions).get("checklist_pending") or {})) == ["abc123"],
+             get(sessions))
+
+    moved = run_checklist(profile, work,
+                          ["tick", one, "--run", "branch=b2", "plan=done"], env)
+    suite.ok("%s: a tick after a branch change exits 0" % tag,
+             moved.returncode == 0, moved.stderr)
+    suite.ok("%s: and the hash keeps the key when the branch moves" % tag,
+             list((get(sessions).get("checklist_pending") or {})) == ["abc123"],
+             get(sessions))
+    suite.ok("%s: the record carries the new branch under the same key" % tag,
+             tracked(get(sessions)).get("branch") == "b2", get(sessions))
+
+    two = os.path.join(work, "identity-two.json")
+    seeded = run_checklist(profile, work, [
+        "template", "--title", "T", "--repo", "R", "--branch", "zz"], env)
+    with open(two, "w") as handle:
+        handle.write(seeded.stdout)
+    run_checklist(profile, work, ["arm", two], env)
+    suite.ok("%s: a write for a genuinely different page leaves both tracked" % tag,
+             sorted(get(sessions).get("checklist_pending") or {}) == ["abc123", "zz"],
+             get(sessions))
+
+    with open(os.path.join(sessions, SESSION + ".json"), "w") as handle:
+        json.dump({}, handle)
+    three = os.path.join(work, "identity-three.json")
+    seeded = run_checklist(profile, work, [
+        "template", "--title", "T", "--repo", "R", "--branch", "b"], env)
+    with open(three, "w") as handle:
+        handle.write(seeded.stdout)
+    run_checklist(profile, work, ["arm", three], env)
+    suite.ok("%s: a page with no identity is keyed by its branch" % tag,
+             list((get(sessions).get("checklist_pending") or {})) == ["b"],
+             get(sessions))
+    run_checklist(profile, work, ["publish", three], half)
+    suite.ok("%s: and publishing it replaces that record rather than adding one" % tag,
+             list((get(sessions).get("checklist_pending") or {})) == ["abc123"],
+             get(sessions))
 
 
 def reconciled(profile, work, items, env, **forge):

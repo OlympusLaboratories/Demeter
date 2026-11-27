@@ -890,14 +890,14 @@ def publish(document, items_path, update, out, stamp):
     if run["url"] != url or run["hash"] != digest:
         run["url"] = url
         run["hash"] = digest
+        if items_path and items_path != "-":
+            write(items_path, dump(document) + "\n")
+            print("recorded the page identity in %s" % items_path)
         status, url = send(document, page, digest, stamp)
         if status != 0:
             print("published, but the page does not carry its own identity: "
                   "url=%s hash=%s page=%s" % (run["url"], digest, page), file=sys.stderr)
             return status
-        if items_path and items_path != "-":
-            write(items_path, dump(document) + "\n")
-            print("recorded the page identity in %s" % items_path)
 
     print("url=%s" % run["url"])
     print("hash=%s" % run["hash"])
@@ -1453,6 +1453,17 @@ what it guarantees, and what each one is written against:
   same branch's page is published: a publish that found no artifact store
   still marks the run, keyed by branch, and the url it later earns must not
   strand that first record with an open list nobody can tick
+
+  a publish records the url it reached in the items file BEFORE rewriting the
+  page to carry its own identity, because that second write is a separate
+  round trip that can fail on its own. the url is already live by then, so
+  losing it costs twice: the marker keys the page by a digest the items file
+  does not have, and the next publish has no hash to --update, so it mints a
+  second page and the link in the change request freezes
+
+  a tracked page can be dropped on its own with notify.py --checklist-clear
+  --page <url|branch> --force, since the marker now holds several and a
+  forced clear would otherwise disarm the gate for every page at once
 
   every write rebuilds its own page's record from scratch, so the gate's
   spent-fork record lives in checklist_forked BESIDE the marker rather than
