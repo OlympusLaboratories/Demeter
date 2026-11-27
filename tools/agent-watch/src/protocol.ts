@@ -41,6 +41,8 @@ export interface ViewState {
   onlyThisWindow: boolean;
   activeOnly: boolean;
   inactiveHidden: number;
+  staleHidden: number;
+  hideIdleHours: number;
   zoomSensitivity: number;
   removedCount: number;
 }

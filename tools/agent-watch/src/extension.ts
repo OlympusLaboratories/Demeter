@@ -15,6 +15,7 @@ function readSettings(): StoreSettings {
     initialDepth: config.get<number>('initialDepth') ?? 1,
     zoomSensitivity: config.get<number>('zoomSensitivity') ?? 1,
     hideDeletedWork: config.get<boolean>('hideDeletedWork') ?? true,
+    hideIdleHours: config.get<number>('hideIdleHours') ?? 24,
     workspaceFolders: workspaceFolders(),
   };
 }

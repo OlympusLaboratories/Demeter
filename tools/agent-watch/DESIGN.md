@@ -537,13 +537,81 @@ wide, and how deep the nesting went.
   every 2s poll off the same loaded trees, so a mutating filter would progressively eat the
   model and never grow back when it was switched off.
 
-  It starts **off** while the this-window filter starts on, which looks inconsistent and is
-  not: the this-window filter hides work this window could not resume anyway, while this one
-  hides work by the clock, and a panel that opened onto an empty canvas on a quiet machine
-  reads as a broken extension. `inactiveHidden` is reported in the status line next to the
-  `hideDeletedWork` count for the same reason the latter is — the UI never silently shrinks —
-  and the empty state names the filter rather than claiming there are no sessions, since the
-  worktree chips underneath it are still showing their live counts.
+  It starts **on**, and the recorded reason it started off is worth keeping because it names
+  the thing that had to be true before the default could flip. That reason was: the
+  this-window filter hides work this window could not resume anyway, while this one hides
+  work by the clock, and a panel that opened onto an empty canvas on a quiet machine reads as
+  a broken extension. The second clause is what stopped being true. `inactiveHidden` is
+  reported in the status line next to the `hideDeletedWork` count for the same reason the
+  latter is — the UI never silently shrinks — and the empty state names the filter rather
+  than claiming there are no sessions, since the worktree chips underneath it are still
+  showing their live counts. So the filtered canvas on a quiet machine does not go blank; it
+  says which filter emptied it and how much it took, which is a quiet machine reporting that
+  it is quiet. Against that, the cost of starting off is paid on **every** open: with a dozen
+  sessions retained per repo the unfiltered view is nearly all finished work, which is the
+  condition stated at the top of this bullet as the filter's whole purpose — so defaulting to
+  off meant defaulting to the problem. Measured across the 81 repos with anything inside
+  `recentDays` on one machine, **68** have something inside the idle window to show and 13
+  open to the named empty state.
+
+  **The default flip does not need `hideIdleHours` to be safe, and the measurement that
+  settled that is recorded here because it was first asserted the other way round.** The
+  worry was a stale tree that reads as active and so survives this filter forever: an agent
+  is `running` while the `tool_use` that spawned it carries no `tool_result`, which is what a
+  session killed mid-`Agent`-call leaves on disk, and `propagateActivity` would lift that to
+  the session. Scanning `~/.claude/projects` for it found **zero** instances — every one of
+  the 8 Gaia sessions inside `recentDays` reads `done`, including one with **72 nodes at 105
+  hours old**. A first pass had claimed 394 such agents across 3 sessions, and that number was
+  an artefact of the probe rather than a property of the data: it looked for the completing
+  `tool_result` only in the **session** transcript, whereas `buildSessionTree` resolves each
+  agent's owner to the agent that *spawned* it and asks that transcript's `completed` set — and
+  `buildWorkflowNode` independently settles every agent to `done`/`error` when the manifest
+  says `completed` or `killed`. Two mechanisms already close the hole, which is why the shape
+  survives in `graphLayout.test.ts` ("does not spring open a branch whose only claim to
+  activity is a stale launch") as a layout concern and not as a status one.
+
+  So the two filters are **near-redundant in the default view** and that is stated rather
+  than hidden: anything idle for a day is `done`, which this filter already drops, so turning
+  `hideIdleHours` on changes the accounting in the status line more often than it changes the
+  canvas. Its value is in the view this filter is switched *off* for — see the
+  `hideIdleHours` bullet below.
+- **`hideIdleHours` prunes at the root and keeps the subtree whole, which is the opposite of
+  how `active only` prunes.** `recentDays` (7) is the *load* window and stays one: it is the
+  right span for going back to find something and the wrong one for what the panel renders,
+  where 79% of what it retains is over a day old (2,689 of 3,414 sessions, measured). The
+  view it is for is the one you get by switching `active only` **off**, which is the
+  deliberate "show me what finished" gesture and which was otherwise a week of finished work
+  — the condition that filter exists to clear, reached by the only control that clears it. So
+  a second window, 24h, hides a session with no activity anywhere inside it — and a session inside the
+  window shows **every** descendant, however long ago that agent finished. The asymmetry is
+  deliberate and is the requirement rather than a simplification: a session you are looking
+  at again is one whose earlier agents are the context you came back for, so a per-node age
+  test would strip a revived run back to the one agent that woke it and leave it looking as
+  though it had never done anything. `active only` asks a subtree question and answers it
+  bottom-up (keep a node if any descendant survived); this asks a root question and answers
+  it top-down (keep everything beneath a root that survived).
+
+  Three consequences fall out of that shape. **Idleness is the rollup, never the session
+  transcript's own mtime** — `newestActivityMs` takes the max over the subtree, so a run whose
+  own transcript went quiet while its agents worked overnight is kept, which is the same
+  reason `propagateActivity` exists for status. **It needs no node copying**, unlike
+  `pruneInactive`, because dropping a whole root never rewrites a surviving one — so the
+  non-mutation constraint on `view()` is satisfied by construction rather than by discipline,
+  and `pruneStale` returns the original subtrees by reference (there is a test pinning that,
+  since a later "tidy-up" to `{...node, children}` would silently add the copy cost to every
+  2s poll for nothing). And **it lives in `view()`, not in `loadSelected()`**, which looks
+  like it contradicts the this-window rule below and does not: `addAgentActivity` does fold
+  subagent mtimes into a session-level `activityMs`, but only for the newest
+  `ACTIVITY_SAMPLE` (5) sessions per project, so sessions 6–12 of the `maxSessionsPerRepo`
+  cap would be judged on the session transcript alone and a run whose agents worked overnight
+  would be wrongly hidden. The question needs the loaded tree; the this-window question does
+  not.
+
+  `0` turns it off, following `zoomSensitivity` where `0` already disables wheel zoom, and
+  `staleHidden` is reported in the status line beside the other two counts — the UI never
+  silently shrinks. It is a **setting** rather than a toggle, unlike the two chips, because it
+  is a retention policy like `recentDays` and `hideDeletedWork` rather than a glance.
+
 - **The this-window filter is applied at discovery, not only on load.** Learning a repo is
   empty by loading it only works for the repo you are *on*; every other chip keeps its
   place until you click it, which is the opposite of hiding it. The filter needs no load

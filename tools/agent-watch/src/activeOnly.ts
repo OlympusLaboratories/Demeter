@@ -1,4 +1,4 @@
-import type { AgentNode, NodeStatus } from './model';
+import { type AgentNode, type NodeStatus, countNodes } from './model';
 
 export interface Pruned {
   roots: AgentNode[];
@@ -11,12 +11,6 @@ export function isActiveStatus(status: NodeStatus | undefined): boolean {
 
 function worthKeeping(node: AgentNode): boolean {
   return isActiveStatus(node.activity ?? node.status);
-}
-
-function countNodes(node: AgentNode): number {
-  let total = 1;
-  for (const child of node.children) total += countNodes(child);
-  return total;
 }
 
 export function pruneInactive(roots: AgentNode[]): Pruned {

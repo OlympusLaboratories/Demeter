@@ -37,6 +37,7 @@ function settings(projects: string): StoreSettings {
     initialDepth: 1,
     zoomSensitivity: 1,
     hideDeletedWork: false,
+    hideIdleHours: 0,
     workspaceFolders: ['/tmp/repo'],
   };
 }
@@ -196,6 +197,7 @@ describe('Store', () => {
     await store.discover();
     await store.loadSelected();
 
+    store.setActiveOnly(false);
     const everything = store.view(false);
     expect(everything.activeOnly).toBe(false);
     expect(everything.inactiveHidden).toBe(0);
@@ -214,6 +216,82 @@ describe('Store', () => {
 
     store.setActiveOnly(false);
     expect(store.view(false).graph.nodes).toHaveLength(3);
+  });
+
+  it('starts with active only on, so a quiet repo opens filtered', async () => {
+    const { projects, transcript } = await fixture();
+    const old = new Date(Date.now() - 3_600_000);
+    await fs.utimes(transcript, old, old);
+
+    const store = new Store({ ...settings(projects), liveWindowSeconds: 60 });
+    await store.discover();
+    await store.loadSelected();
+    const view = store.view(false);
+
+    expect(view.activeOnly).toBe(true);
+    expect(view.graph.nodes).toHaveLength(0);
+    expect(view.inactiveHidden).toBe(1);
+  });
+
+  it('hides a session idle longer than the window and says how much it hid', async () => {
+    const { projects, transcript, subagents } = await fixture();
+    await fs.writeFile(path.join(subagents, 'agent-a1.meta.json'), JSON.stringify({ description: 'worker' }));
+    await fs.writeFile(path.join(subagents, 'agent-a1.jsonl'), '');
+    const old = new Date(Date.now() - 30 * 3_600_000);
+    for (const file of [transcript, path.join(subagents, 'agent-a1.jsonl')]) {
+      await fs.utimes(file, old, old);
+    }
+
+    const store = new Store({ ...settings(projects), hideIdleHours: 24 });
+    store.setActiveOnly(false);
+    await store.discover();
+    await store.loadSelected();
+    const view = store.view(false);
+
+    expect(view.graph.nodes).toHaveLength(0);
+    expect(view.staleHidden).toBe(2);
+    expect(view.hideIdleHours).toBe(24);
+  });
+
+  it('keeps an old session whose agent worked inside the window, and keeps its old agents too', async () => {
+    const { projects, transcript, subagents } = await fixture();
+    for (const id of ['a1', 'a2']) {
+      await fs.writeFile(path.join(subagents, `agent-${id}.meta.json`), JSON.stringify({ description: id }));
+      await fs.writeFile(path.join(subagents, `agent-${id}.jsonl`), '');
+    }
+    const ancient = new Date(Date.now() - 100 * 3_600_000);
+    await fs.utimes(transcript, ancient, ancient);
+    await fs.utimes(path.join(subagents, 'agent-a1.jsonl'), ancient, ancient);
+    const recent = new Date(Date.now() - 3_600_000);
+    await fs.utimes(path.join(subagents, 'agent-a2.jsonl'), recent, recent);
+
+    const store = new Store({ ...settings(projects), hideIdleHours: 24 });
+    store.setActiveOnly(false);
+    await store.discover();
+    await store.loadSelected();
+    const view = store.view(false);
+
+    expect(view.graph.nodes.map((node) => node.id)).toEqual([
+      `session:${SESSION_ID}`,
+      'agent:a1',
+      'agent:a2',
+    ]);
+    expect(view.staleHidden).toBe(0);
+  });
+
+  it('shows everything the load window carries when the idle window is off', async () => {
+    const { projects, transcript } = await fixture();
+    const old = new Date(Date.now() - 100 * 3_600_000);
+    await fs.utimes(transcript, old, old);
+
+    const store = new Store({ ...settings(projects), hideIdleHours: 0 });
+    store.setActiveOnly(false);
+    await store.discover();
+    await store.loadSelected();
+    const view = store.view(false);
+
+    expect(view.graph.nodes).toHaveLength(1);
+    expect(view.staleHidden).toBe(0);
   });
 
   it('empties the graph rather than showing stale work when nothing is active', async () => {
@@ -345,6 +423,7 @@ describe('Store', () => {
     }
 
     const store = new Store({ ...settings(projects), initialDepth: 0, liveWindowSeconds: 60 });
+    store.setActiveOnly(false);
     await store.discover();
     await store.loadSelected();
     expect(store.view(false).graph.nodes).toHaveLength(1);

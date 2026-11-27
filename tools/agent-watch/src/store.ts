@@ -7,6 +7,7 @@ import { TranscriptCache } from './tail';
 import type { NodeDetail, RepoSummary, ViewState, WorktreeSummary } from './protocol';
 import { FirstChildrenWatch } from './firstChildren';
 import { pruneInactive } from './activeOnly';
+import { pruneStale } from './staleness';
 import { isInAnyFolder } from './workspacePaths';
 
 export interface StoreSettings {
@@ -19,6 +20,7 @@ export interface StoreSettings {
   initialDepth: number;
   zoomSensitivity: number;
   hideDeletedWork: boolean;
+  hideIdleHours: number;
   workspaceFolders: string[];
 }
 
@@ -45,7 +47,7 @@ export class Store {
   private workspaceFor?: string;
   private emptyRepos = new Set<string>();
   private onlyThisWindow = true;
-  private activeOnly = false;
+  private activeOnly = true;
 
   constructor(private settings: StoreSettings) {}
 
@@ -199,6 +201,11 @@ export class Store {
     this.selectedWorktree = key;
   }
 
+  private idleCutoffMs(): number | undefined {
+    const hours = this.settings.hideIdleHours;
+    return hours > 0 ? Date.now() - hours * 3_600_000 : undefined;
+  }
+
   private hidingOtherWindows(): boolean {
     return this.onlyThisWindow && this.settings.workspaceFolders.length > 0;
   }
@@ -280,7 +287,9 @@ export class Store {
 
     const active = this.groups.find((group) => group.key === this.selectedWorktree);
     const trees = (active?.sessions ?? []).map((session) => session.tree);
-    const shown = this.activeOnly ? pruneInactive(trees) : { roots: trees, hidden: 0 };
+    const fresh = this.idleCutoffMs();
+    const recent = fresh === undefined ? { roots: trees, hidden: 0 } : pruneStale(trees, fresh);
+    const shown = this.activeOnly ? pruneInactive(recent.roots) : { roots: recent.roots, hidden: 0 };
     const graph = layoutForest(shown.roots, {
       overrides: this.overrides,
       initialDepth: this.settings.initialDepth,
@@ -301,6 +310,8 @@ export class Store {
       onlyThisWindow: this.onlyThisWindow,
       activeOnly: this.activeOnly,
       inactiveHidden: shown.hidden,
+      staleHidden: recent.hidden,
+      hideIdleHours: this.settings.hideIdleHours,
       scopeKey: this.scopeKey(),
       zoomSensitivity: this.settings.zoomSensitivity,
       removedCount: this.removedCount,

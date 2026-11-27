@@ -123,10 +123,15 @@ reports how many nodes it hid, and if nothing in the branch you are on is workin
 canvas says that rather than going blank. The count badges follow the filter too: a node
 whose 90 children have finished reads `▸2` while two of them are still going.
 
-It starts **off**, the opposite of **this repo**, because it is a filter on the clock
-rather than on the workspace — switching it on by default would show an empty canvas every
-time you opened the panel with nothing running, which reads as a broken extension rather
-than as a quiet machine.
+It starts **on**, and it used to start off. The argument against it was that a panel
+opening onto an empty canvas on a quiet machine reads as a broken extension — which was
+true of a canvas that just went blank, and is not true of this one: the empty state names
+the filter that emptied it, the status line carries the count it hid, and the repo and
+branch chips underneath keep showing their live counts, so a quiet machine says it is
+quiet. What changed the balance is that a dozen retained sessions per repo means the
+unfiltered view is almost entirely finished work, with the one thing you opened the panel
+for somewhere inside it. Measured across 81 repos on one machine, 68 have something inside
+the idle window to show.
 
 A repo or branch chip with nothing to show is hidden rather than left to click into an
 empty canvas, and if the one you are on becomes empty the selection moves to a repo that
@@ -176,6 +181,30 @@ and `/tmp` directories out of the repo row. The status line reports the count it
 display filter, and git is the authority, so a repo git cannot answer for is left alone
 rather than emptied.
 
+**Work nobody has touched in a day is hidden too.** `recentDays` keeps a session loadable
+for a week, which is the right window for going back to find something and the wrong one
+for what the panel shows by default. `agentWatch.hideIdleHours` (24) hides a session with
+no activity anywhere inside it for that long, and the status line reports the count.
+
+Idleness is a question about the whole subtree, not about the session transcript: a session
+is kept when **anything** under it was written inside the window, so a run whose own
+transcript went quiet while its agents worked overnight stays. And a session inside the
+window keeps its tree **entire** — every agent, however long ago it finished. That is the
+point rather than an oversight: a session you are looking at again is one whose earlier
+agents are the context you came back for, and hiding them would leave a live run looking
+as though it had never done anything. Set the value to `0` to show everything `recentDays`
+loads.
+
+**In the default view this filter is mostly redundant, and that is fine.** Anything idle for
+a day is `done`, which **active only** already hides, so with both on you usually see the
+same canvas either way — what differs is the status line, which now says whether something
+went because nothing in it was working or because nothing in it was recent.
+
+Where it earns its place is the view you get when you switch **active only** off, which is
+the deliberate "show me what finished" gesture. Without an idle window that view is a
+week's work: 2,689 of 3,414 retained sessions on one machine are over a day old. With one,
+it is yesterday, and `recentDays` is still there for when you want the week back.
+
 Depth runs left to right and siblings stack vertically, because swarms are wide and
 shallow: a real 96-agent run lays out 722px wide by 5936px tall, so breadth scrolls
 instead of overflowing.
@@ -191,6 +220,7 @@ instead of overflowing.
 | `agentWatch.pollSeconds` | `2` | How often watched transcripts are re-stat'd. This poll is the guarantee; native file watching is only an accelerator. |
 | `agentWatch.zoomSensitivity` | `1` | Multiplier for scroll-wheel zoom. Lower is gentler; `0` disables it. |
 | `agentWatch.initialDepth` | `1` | Levels below each session expanded on first render. `0` shows sessions alone. |
+| `agentWatch.hideIdleHours` | `24` | Hide a session with no activity anywhere inside it for this many hours. A session inside the window shows its whole tree, however long ago an individual agent finished. `0` shows everything `recentDays` loads. The status line reports how many were hidden. |
 | `agentWatch.hideDeletedWork` | `true` | Hide sessions whose git worktree or branch no longer exists, and project directories outside any git repository. The status line reports how many were hidden. |
 | `agentWatch.statusBarPriority` | `110` | Higher numbers sit further left within the right-hand group. The default clears claude-usage, which spans 50–101 at its own default priority, so the two tools' items stay grouped rather than interleaved. |
 
