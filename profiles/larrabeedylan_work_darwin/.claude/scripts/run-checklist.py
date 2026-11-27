@@ -13,7 +13,8 @@ import urllib.request
 
 STATES = ("pending", "in-flight", "done", "skipped")
 OPEN_STATES = ("pending", "in-flight")
-ITEM_FIELDS = ("id", "obligation", "skill", "target", "waiting_on", "state", "note")
+ITEM_FIELDS = ("id", "obligation", "skill", "target", "waiting_on", "state", "note",
+               "link")
 RUN_FIELDS = ("title", "repo", "branch", "ticket", "plan_page", "change_request",
               "url", "hash")
 
@@ -39,7 +40,8 @@ STATE_LABEL = {
 }
 
 
-def item(ident, obligation, skill="", target="", waiting_on="", state="pending", note=""):
+def item(ident, obligation, skill="", target="", waiting_on="", state="pending", note="",
+         link=""):
     return {
         "id": ident,
         "obligation": obligation,
@@ -48,6 +50,7 @@ def item(ident, obligation, skill="", target="", waiting_on="", state="pending",
         "waiting_on": waiting_on,
         "state": state,
         "note": note,
+        "link": link,
     }
 
 
@@ -314,6 +317,37 @@ def link_fact(url, label=""):
     return "%s %s" % (escape(label), escape(url)) if label else escape(url)
 
 
+DERIVED_LINK = {
+    "plan": "plan_page",
+    "implement": "plan_page",
+    "open": "change_request",
+    "link": "change_request",
+    "pipeline": "change_request",
+    "threads": "change_request",
+    "apply": "change_request",
+    "diagram": "change_request",
+    "merge": "change_request",
+    "ready": "change_request",
+    "ledger": "change_request",
+}
+
+REQUEST_NUMBER = re.compile(
+    r"/([^/]+/[^/]+)/(?:-/)?(?:pull|pulls|merge_requests|pull-requests)/(\d+)")
+
+
+def item_link(entry, run):
+    target = entry.get("link") or run.get(DERIVED_LINK.get(entry["id"], ""), "")
+    return target if re.match(r"^https?://", target or "") else ""
+
+
+def request_fact(url):
+    if not re.match(r"^https?://", url):
+        return escape(url)
+    found = REQUEST_NUMBER.search(url)
+    label = "%s#%s" % (found.group(1), found.group(2)) if found else url
+    return '<a href="%s">%s</a>' % (escape(url), escape(label))
+
+
 def render(document, stamp=None):
     run = document["run"]
     items = document["items"]
@@ -337,7 +371,7 @@ def render(document, stamp=None):
     if run["plan_page"]:
         facts.append(link_fact(run["plan_page"], "plan"))
     if run["change_request"]:
-        facts.append(link_fact(run["change_request"]))
+        facts.append(request_fact(run["change_request"]))
 
     rows = []
     for index, entry in enumerate(items, start=1):
@@ -345,6 +379,10 @@ def render(document, stamp=None):
         if not waiting:
             waiting = "<em>nothing</em>" if entry["state"] in OPEN_STATES else "—"
         detail = escape(entry["note"]) if entry["note"] else ""
+        obligation = escape(entry["obligation"])
+        destination = item_link(entry, run)
+        if destination:
+            obligation = '<a href="%s">%s</a>' % (escape(destination), obligation)
         rows.append(
             "<tr class=\"s-%s\">"
             "<td class=\"n\">%d</td>"
@@ -357,7 +395,7 @@ def render(document, stamp=None):
                 entry["state"],
                 index,
                 escape(STATE_LABEL[entry["state"]]),
-                escape(entry["obligation"]),
+                obligation,
                 ('<span class="note">%s</span>' % detail) if detail else "",
                 ("<code>%s</code>" % escape(entry["skill"])) if entry["skill"] else "—",
                 escape(entry["target"]) if entry["target"] else "—",
@@ -375,9 +413,26 @@ def render(document, stamp=None):
         "sentence": escape(sentence),
         "tally": escape(tally),
         "stamp": escape(stamp),
+        "at": "%d" % time.time(),
+        "icon": ICON,
         "rows": "\n".join(rows),
         "json": dump(document),
     }
+
+
+ICON = (
+    "data:image/svg+xml,"
+    "%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20"
+    "viewBox%3D%220%200%2064%2064%22%3E"
+    "%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%230b0e11%22%2F%3E"
+    "%3Cg%20transform%3D%22translate(32%2032)%20scale(0.86)%20translate(-32%20-32)%22%3E"
+    "%3Cpath%20d%3D%22M16%2014h26l8%208v28a4%204%200%200%201-4%204H16a4%204%200%200%201-4-4V18"
+    "a4%204%200%200%201%204-4z%22%20fill%3D%22none%22%20stroke%3D%22%235ef2a0%22%20"
+    "stroke-width%3D%224%22%20stroke-linejoin%3D%22round%22%2F%3E"
+    "%3Cpath%20d%3D%22M22%2034l6%206%2014-14%22%20fill%3D%22none%22%20stroke%3D%22%232f8f5f%22%20"
+    "stroke-width%3D%224%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E"
+    "%3C%2Fg%3E%3C%2Fsvg%3E"
+)
 
 
 PAGE = """<!doctype html>
@@ -385,6 +440,8 @@ PAGE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0e11">
+<link rel="icon" type="image/svg+xml" href="%(icon)s">
 <title>%(title)s</title>
 <style>
   :root {
@@ -404,7 +461,8 @@ PAGE = """<!doctype html>
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; background: var(--bg); color: var(--fg); padding: 0 16px 64px;
+    margin: 0; background: var(--bg); color: var(--fg);
+    padding: 0 16px calc(84px + env(safe-area-inset-bottom, 0px));
     font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
   }
   main { max-width: 940px; margin: 0 auto; }
@@ -458,6 +516,26 @@ PAGE = """<!doctype html>
   tr.s-pending .badge { color: var(--muted); }
   tr.s-done td.ob, tr.s-skipped td.ob { color: var(--muted); font-weight: 400; }
   footer { margin-top: 32px; color: var(--muted); font-size: 13px; }
+  a { color: inherit; text-decoration-color: var(--accent); text-underline-offset: 2px; }
+  td.ob a { text-decoration-thickness: 1px; }
+  .dock { position: fixed; z-index: 30; display: flex; align-items: center; gap: 8px;
+          right: calc(14px + env(safe-area-inset-right, 0px));
+          bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+  .dock .ago { background: var(--card); border: 1px solid var(--rule); border-radius: 999px;
+               color: var(--muted); font-size: 12.5px; padding: 6px 11px; white-space: nowrap;
+               box-shadow: 0 1px 3px rgba(0, 0, 0, .14); }
+  .dock .ago:empty { display: none; }
+  .dock button { min-width: 44px; min-height: 44px; border-radius: 999px; cursor: pointer;
+                 background: var(--card); color: var(--fg); border: 1px solid var(--rule);
+                 font: 600 14px/1 inherit; padding: 0 16px;
+                 box-shadow: 0 2px 8px rgba(0, 0, 0, .18); }
+  .dock button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .dock button[aria-busy="true"] { color: var(--muted); }
+  @media (prefers-reduced-motion: no-preference) {
+    .dock button { transition: transform .12s ease; }
+    .dock button:active { transform: scale(.96); }
+  }
+  @media print { .dock { display: none; } }
 </style>
 </head>
 <body>
@@ -472,7 +550,7 @@ PAGE = """<!doctype html>
   <div class="head">%(verdict_label)s</div>
   <p>%(sentence)s</p>
 </div>
-<p class="meta">%(tally)s · updated %(stamp)s</p>
+<p class="meta" id="stamp" data-at="%(at)s">%(tally)s · updated %(stamp)s</p>
 
 <div class="wrap">
 <table>
@@ -483,10 +561,76 @@ PAGE = """<!doctype html>
 </table>
 </div>
 
-<footer>Refresh to see where the run is. This page is rewritten in place at every step boundary.</footer>
+<footer>The run rewrites this page in place at every step boundary. Refresh keeps your place on the page.</footer>
 </main>
+
+<div class="dock">
+  <span class="ago" id="ago" aria-live="polite"></span>
+  <button type="button" id="refresh">Refresh</button>
+</div>
+
 <script type="application/json" id="checklist">
 %(json)s
+</script>
+<script>
+(function () {
+  var main = document.querySelector("main");
+  var button = document.getElementById("refresh");
+  var ago = document.getElementById("ago");
+  if (!main || !button || !ago) { return; }
+
+  function since() {
+    var stamp = document.getElementById("stamp");
+    var at = stamp ? parseFloat(stamp.getAttribute("data-at")) : NaN;
+    if (!isFinite(at)) { return ""; }
+    var seconds = Math.max(0, Date.now() / 1000 - at);
+    if (seconds < 50) { return "just now"; }
+    var minutes = Math.round(seconds / 60);
+    if (minutes < 60) { return minutes + "m ago"; }
+    var hours = Math.round(minutes / 60);
+    if (hours < 36) { return hours + "h ago"; }
+    return Math.round(hours / 24) + "d ago";
+  }
+
+  function paint() { ago.textContent = since(); }
+
+  function swap(text) {
+    var parsed = new DOMParser().parseFromString(text, "text/html");
+    var fresh = parsed.querySelector("main");
+    if (!fresh) { throw new Error("the reply carried no checklist"); }
+    var block = parsed.getElementById("checklist");
+    var here = document.getElementById("checklist");
+    main.innerHTML = fresh.innerHTML;
+    if (block && here) { here.textContent = block.textContent; }
+    if (parsed.title) { document.title = parsed.title; }
+  }
+
+  var busy = false;
+  function refresh() {
+    if (busy) { return; }
+    busy = true;
+    button.setAttribute("aria-busy", "true");
+    ago.textContent = "checking";
+    fetch(location.href, { cache: "no-store", credentials: "same-origin" })
+      .then(function (reply) {
+        if (!reply.ok) { throw new Error("the store answered " + reply.status); }
+        return reply.text();
+      })
+      .then(function (text) {
+        swap(text);
+        busy = false;
+        button.removeAttribute("aria-busy");
+        paint();
+      })
+      .catch(function () {
+        location.reload();
+      });
+  }
+
+  button.addEventListener("click", refresh);
+  paint();
+  setInterval(paint, 20000);
+})();
 </script>
 </body>
 </html>
@@ -926,6 +1070,29 @@ what it guarantees, and what each one is written against:
   http(s); anything else is printed as text, so a javascript: value cannot
   become a clickable link on a page that is published public
 
+  an item links to the artefact it is about, so the page is a way in rather
+  than a status board: plan and implement reach the plan page, and every item
+  naming the change request reaches it. the url is derived from the run
+  fields, so nothing has to remember to set it, and an item's own link field
+  overrides the derived one - which is what a stack needs, where the items
+  do not share one change request. the http(s) rule above governs both
+
+  a numbered change request is shown as owner/repo#number rather than as a
+  bare url, because the raw link wraps over two lines on the phone the page
+  is read on. a url the pattern does not recognise is printed whole
+
+  the page refreshes itself without reloading: the control fetches the page's
+  own url and swaps the body in place, so the scroll position survives by
+  construction rather than by saving it. browser storage is deliberately not
+  used - this page is served cross-origin inside the store's frame, where
+  safari may refuse it outright - and a fetch that throws falls back to a
+  plain reload, which is the case when the page is opened from a file
+
+  the page declares its own icon as a data uri. the store reads the first one
+  out of the html and re-emits it for the wrapper and the manifest, so a page
+  that declares none wears whatever icon the origin last installed. an
+  external icon file cannot be used: the page must stay self-contained
+
   plan_page carries the plan artifact's url through the run, because the items
   file is the only state that already survives both the hand-off to autopilot
   and a pause - the change request's description is written from it, not from
@@ -960,7 +1127,9 @@ what it guarantees, and what each one is written against:
   rule checkable rather than aspirational
 
   every render carries an updated-at stamp, so a refresh proves the page is
-  live rather than a frozen copy
+  live rather than a frozen copy. it carries the same instant as a number
+  too, which the page ages into "7m ago" - the absolute stamp alone does not
+  answer the question a refresh is asking
 
   render then items round-trips byte-for-byte, so re-reading the artifact hands
   the run its obligations as data rather than prose to parse

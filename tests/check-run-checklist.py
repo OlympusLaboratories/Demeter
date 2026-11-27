@@ -158,6 +158,20 @@ def facts_block(rendered):
     return rendered[start:rendered.find("</p>", start)]
 
 
+CHECKLIST_BLOCK = '<script type="application/json" id="checklist">'
+
+
+def intact(rendered):
+    return (rendered.count("</script>") == rendered.count("<script")
+            and rendered.count(CHECKLIST_BLOCK) == 1)
+
+
+def script_tally(rendered):
+    return ("%d <script, %d </script>, %d checklist block(s)"
+            % (rendered.count("<script"), rendered.count("</script>"),
+               rendered.count(CHECKLIST_BLOCK)))
+
+
 def document(items, run_fields=None):
     return json.dumps({"run": run_fields or {"title": "t"}, "items": items})
 
@@ -266,6 +280,22 @@ def check_profile(suite, profile, work):
                  scheme not in body.replace('<html lang="en">', ""),
                  "found %s" % scheme)
 
+    suite.ok("%s the page declares its own icon" % tag,
+             'rel="icon"' in body and 'href="data:image/svg+xml,' in body,
+             "the store's fallback icon would be used instead")
+    suite.ok("%s the refresh control is in the page" % tag,
+             'id="refresh"' in body and 'class="dock"' in body)
+    suite.ok("%s the refresh control is pinned to the corner" % tag,
+             ".dock { position: fixed" in body)
+    suite.ok("%s the refresh control clears the home indicator" % tag,
+             "env(safe-area-inset-bottom" in body)
+    suite.ok("%s the page carries a machine-readable stamp to age" % tag,
+             'id="stamp" data-at="' in body)
+    suite.ok("%s refreshing swaps rather than reloads" % tag,
+             "fetch(location.href" in body and "DOMParser" in body)
+    suite.ok("%s a failed refresh falls back to a reload" % tag,
+             "location.reload()" in body)
+
     armed = json.loads(full.stdout)
     armed["items"][0]["state"] = "in-flight"
     armed["items"][0]["waiting_on"] = "a Monitor on the pipeline"
@@ -302,8 +332,7 @@ def check_profile(suite, profile, work):
                     nasty_page, "--stamp", "S"))
     nasty_body = open(nasty_page, encoding="utf-8").read()
     suite.ok("%s no stray </script> closes the block early" % tag,
-             nasty_body.count("</script>") == 1,
-             "found %d </script>" % nasty_body.count("</script>"))
+             intact(nasty_body), script_tally(nasty_body))
     suite.ok("%s the obligation's markup is escaped" % tag,
              "<b>bold</b>" not in nasty_body)
     nasty_back = run(script, "items", nasty_page)
@@ -332,8 +361,7 @@ def check_profile(suite, profile, work):
                  forged[:40] not in rendered,
                  "the raw payload reached the page")
         suite.ok("%s a %s item's waiting_on cannot add a script tag" % (tag, state),
-                 rendered.count("</script>") == 1,
-                 "found %d </script>" % rendered.count("</script>"))
+                 intact(rendered), script_tally(rendered))
         recovered = run(script, "items", out)
         suite.ok("%s a forged block never becomes the items (%s)" % (tag, state),
                  recovered.returncode != 0
@@ -371,6 +399,62 @@ def check_profile(suite, profile, work):
             if label:
                 suite.ok("%s %s %r carries its label" % (tag, field, target[:20]),
                          shown.count(label) == 1, shown[:160])
+
+    numbered = "https://forge.invalid/acme/widgets/pull/54"
+    doc = {"run": {"title": "t", "change_request": numbered},
+           "items": [{"id": "a", "obligation": "o", "state": "done"}]}
+    out = os.path.join(work, "numbered.html")
+    suite.exits("%s render a numbered change request" % tag, 0,
+                run(script, "render",
+                    write(os.path.join(work, "numbered.json"), json.dumps(doc)),
+                    out, "--stamp", "S"))
+    shown = facts_block(open(out, encoding="utf-8").read())
+    suite.ok("%s a numbered change request is shown short" % tag,
+             "acme/widgets#54" in shown and shown.count(numbered) == 1, shown[:160])
+
+    plan_url = "https://plans.invalid/abc"
+    request_url = "https://forge.invalid/acme/widgets/pull/7"
+    other_url = "https://plans.invalid/zzz"
+    linked = {"run": {"title": "t", "plan_page": plan_url,
+                      "change_request": request_url},
+              "items": [{"id": "implement", "obligation": "Implement the change",
+                         "state": "pending"},
+                        {"id": "merge", "obligation": "Merge it", "state": "pending"},
+                        {"id": "arm", "obligation": "Arm it", "state": "pending"},
+                        {"id": "close", "obligation": "Close it", "state": "pending",
+                         "link": other_url}]}
+    out = os.path.join(work, "linked.html")
+    suite.exits("%s render a run with both pages recorded" % tag, 0,
+                run(script, "render",
+                    write(os.path.join(work, "linked.json"), json.dumps(linked)),
+                    out, "--stamp", "S"))
+    rendered = open(out, encoding="utf-8").read()
+    rows = rendered[rendered.find("<tbody>"):]
+    suite.ok("%s the implement item links to the plan" % tag,
+             '<a href="%s">Implement the change</a>' % plan_url in rows, rows[:400])
+    suite.ok("%s a request item links to the change request" % tag,
+             '<a href="%s">Merge it</a>' % request_url in rows, rows[:400])
+    suite.ok("%s an item with no artefact is not a link" % tag,
+             '<a href="%s">Arm it</a>' % plan_url not in rows
+             and '<a href="%s">Arm it</a>' % request_url not in rows, rows[:400])
+    suite.ok("%s an item's own link wins over the derived one" % tag,
+             '<a href="%s">Close it</a>' % other_url in rows, rows[:400])
+    suite.ok("%s an item link stays out of the facts" % tag,
+             facts_block(rendered).count(plan_url) == 1, facts_block(rendered)[:160])
+
+    linked["run"]["plan_page"] = "javascript:alert(1)"
+    linked["items"][3]["link"] = "javascript:alert(2)"
+    out = os.path.join(work, "linked-hostile.html")
+    suite.exits("%s render a run with hostile page urls" % tag, 0,
+                run(script, "render",
+                    write(os.path.join(work, "linked-hostile.json"),
+                          json.dumps(linked)),
+                    out, "--stamp", "S"))
+    rendered = open(out, encoding="utf-8").read()
+    suite.ok("%s a hostile plan page never becomes an item link" % tag,
+             'href="javascript:alert(1)"' not in rendered)
+    suite.ok("%s a hostile item link is refused too" % tag,
+             'href="javascript:alert(2)"' not in rendered)
 
     rejects = (
         ("an unknown state",

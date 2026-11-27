@@ -47,6 +47,18 @@ publish-artifact.sh, checked over every profile copy:
   every call site in this file                stubs NOTIFY_HOOK, so none reaches the
                                               real hook and no session state is written
 
+  --purpose, page declares no icon            that kind's glyph is injected into a COPY,
+                                              the copy is what reaches the publisher, and
+                                              the caller's own file is left byte-identical
+  --purpose, page declares an icon            no copy at all, and the page's own icon
+                                              survives - the injection never overrides one
+  --purpose plan / diagram / tasks            three different glyphs
+  --purpose, page has a doctype               the icon goes after <head>, never above the
+                                              doctype, which would mean quirks mode
+  --purpose, page is a bare fragment          the icon still lands, at the top
+  no --purpose                                no copy and no icon, which is what keeps the
+                                              verbatim argument-forwarding check honest
+
 exit 3 is the "no self-hosted store here" answer and must never be confused with a
 failure: the callers fall through to the Artifact tool on 3, and report on anything else.
 
@@ -486,6 +498,107 @@ REMOTEFAIL
 
   run_remote "$WORK/purpose/skill-env.sh" "$page" --purpose nonsense
   check "$profile: --purpose nonsense" 1 $?
+
+  mkdir -p "$WORK/binicon"
+  cat >"$WORK/binicon/publish-artifact" <<'ICONPUB'
+#!/usr/bin/env bash
+printf '%s\n' "$1" >"$ICON_PATH"
+cp "$1" "$ICON_COPY"
+echo "https://example.invalid/icon"
+ICONPUB
+  chmod +x "$WORK/binicon/publish-artifact"
+
+  publish_icon() {
+    ICON_PATH="$WORK/icon-path.txt" ICON_COPY="$WORK/icon-copy.html" \
+    GATE_CALLS="$WORK/gate-calls.txt" NOTIFY_HOOK="$WORK/fake-notify.py" \
+    PATH="$WORK/binicon:$PATH" SKILL_ENV="$WORK/purpose/skill-env.sh" \
+      "$script" "$@" >/dev/null 2>&1
+  }
+
+  want_icon() {
+    local label="$1" pattern="$2"
+    checked=$((checked + 1))
+    if ! grep -q "$pattern" "$WORK/icon-copy.html" 2>/dev/null; then
+      printf '  fail — %s: %s\n' "$profile" "$label"
+      failures=$((failures + 1))
+    fi
+  }
+
+  printf '%s\n' '<!doctype html>' '<html lang="en">' '<head>' '<title>t</title>' \
+    '</head>' '<body>hi</body>' '</html>' >"$WORK/iconfull.html"
+  cp "$WORK/iconfull.html" "$WORK/iconfull.pristine"
+  publish_icon "$WORK/iconfull.html" --purpose plan
+  check "$profile: a plan page with no icon still publishes" 0 $?
+
+  checked=$((checked + 1))
+  if ! cmp -s "$WORK/iconfull.html" "$WORK/iconfull.pristine"; then
+    printf '  fail — %s: the icon was written into the caller own file\n' "$profile"
+    failures=$((failures + 1))
+  fi
+
+  checked=$((checked + 1))
+  if [[ "$(cat "$WORK/icon-path.txt" 2>/dev/null)" == "$WORK/iconfull.html" ]]; then
+    printf '  fail — %s: an icon-less plan page was published without a copy\n' "$profile"
+    failures=$((failures + 1))
+  fi
+
+  want_icon "the published copy carries no icon" 'rel="icon"'
+  want_icon "the published copy carries the plan glyph" 'M23%2025h18'
+
+  checked=$((checked + 1))
+  if [[ "$(grep -c 'rel="icon"' "$WORK/icon-copy.html" 2>/dev/null)" != "1" ]]; then
+    printf '  fail — %s: the copy does not carry exactly one icon\n' "$profile"
+    failures=$((failures + 1))
+  fi
+
+  checked=$((checked + 1))
+  if [[ "$(head -1 "$WORK/icon-copy.html" 2>/dev/null)" != '<!doctype html>' ]]; then
+    printf '  fail — %s: the icon displaced the doctype\n      got: %s\n' \
+      "$profile" "$(head -1 "$WORK/icon-copy.html" 2>/dev/null)"
+    failures=$((failures + 1))
+  fi
+
+  printf '%s\n' '<title>t</title>' >"$WORK/iconfrag.html"
+  publish_icon "$WORK/iconfrag.html" --purpose diagram
+  check "$profile: a fragment with no head still publishes" 0 $?
+  want_icon "a fragment got no icon" 'rel="icon"'
+  want_icon "a diagram page got the diagram glyph" '%3Ccircle'
+
+  publish_icon "$WORK/iconfull.html" --purpose tasks
+  want_icon "a tasks page got the tasks glyph" 'M22%2034l6%206'
+
+  printf '%s\n' '<head>' \
+    '<link rel="icon" href="data:image/svg+xml,%3Csvg%2F%3E">' '</head>' \
+    >"$WORK/iconown.html"
+  publish_icon "$WORK/iconown.html" --purpose plan
+  check "$profile: a page that declares an icon still publishes" 0 $?
+
+  checked=$((checked + 1))
+  if [[ "$(cat "$WORK/icon-path.txt" 2>/dev/null)" != "$WORK/iconown.html" ]]; then
+    printf '  fail — %s: a page with its own icon was needlessly copied\n' "$profile"
+    failures=$((failures + 1))
+  fi
+
+  checked=$((checked + 1))
+  if [[ "$(grep -c 'rel="icon"' "$WORK/icon-copy.html" 2>/dev/null)" != "1" ]]; then
+    printf '  fail — %s: an icon the page declared was overridden\n' "$profile"
+    failures=$((failures + 1))
+  fi
+
+  publish_icon "$WORK/iconfull.html"
+  checked=$((checked + 1))
+  if [[ "$(cat "$WORK/icon-path.txt" 2>/dev/null)" != "$WORK/iconfull.html" ]]; then
+    printf '  fail — %s: a publish with no --purpose was copied\n' "$profile"
+    failures=$((failures + 1))
+  fi
+
+  checked=$((checked + 1))
+  if grep -q 'rel="icon"' "$WORK/icon-copy.html" 2>/dev/null; then
+    printf '  fail — %s: a publish with no --purpose gained an icon\n' "$profile"
+    failures=$((failures + 1))
+  fi
+
+  rm -f "$WORK/gate-calls.txt"
 
   for shell in zsh bash; do
     command -v "$shell" >/dev/null 2>&1 || continue
