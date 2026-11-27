@@ -565,16 +565,14 @@ def render(document, stamp=None):
 
 ICON = (
     "data:image/svg+xml,"
-    "%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20"
-    "viewBox%3D%220%200%2064%2064%22%3E"
-    "%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%230b0e11%22%2F%3E"
-    "%3Cg%20transform%3D%22translate(32%2032)%20scale(0.86)%20translate(-32%20-32)%22%3E"
-    "%3Cpath%20d%3D%22M16%2014h26l8%208v28a4%204%200%200%201-4%204H16a4%204%200%200%201-4-4V18"
-    "a4%204%200%200%201%204-4z%22%20fill%3D%22none%22%20stroke%3D%22%235ef2a0%22%20"
-    "stroke-width%3D%224%22%20stroke-linejoin%3D%22round%22%2F%3E"
-    "%3Cpath%20d%3D%22M22%2034l6%206%2014-14%22%20fill%3D%22none%22%20stroke%3D%22%232f8f5f%22%20"
-    "stroke-width%3D%224%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E"
-    "%3C%2Fg%3E%3C%2Fsvg%3E"
+    "%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064"
+    "%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22"
+    "%230b0e11%22%2F%3E%3Cg%20transform%3D%22translate(32%2032)%20scale(0.86)%20"
+    "translate(-32%20-32)%22%3E%3Cpath%20d%3D%22M13%2022l5%205%209-10M13%2042l5%205%209-10"
+    "%22%20fill%3D%22none%22%20stroke%3D%22%235ef2a0%22%20stroke-width%3D%224.5%22%20"
+    "stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3Cpath%20d%3D%22M35"
+    "%2022h17M35%2042h17%22%20stroke%3D%22%232f8f5f%22%20stroke-width%3D%224.5%22%20"
+    "stroke-linecap%3D%22round%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E"
 )
 
 
