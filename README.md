@@ -14,6 +14,7 @@ Demeter/
 ├── lib/                # shell libraries sourced by the installer and its siblings
 │   └── paths.sh        # git_excludes_path + demeter_link_roots
 ├── tests/              # mechanical checks over the installer and its siblings
+│   ├── run-all.sh             # runs every checker here — the one command CI calls
 │   ├── check-link-roots.sh    # every link destination is under a declared root
 │   └── uninstall-roundtrip.sh # plant a link under every root, sweep, assert none survive
 ├── tools/              # first-party projects, shared by every profile
