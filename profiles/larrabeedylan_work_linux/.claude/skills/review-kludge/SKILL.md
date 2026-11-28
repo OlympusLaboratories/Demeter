@@ -257,6 +257,7 @@ function materialize(entry) {
     : Array.from(new Set(refs.flatMap((r) => r.locations || [])))
   const areaLabel = entry.area
     || (refs.length > 1 ? Array.from(new Set(refs.map((r) => r.area))).join(' + ') : base.area)
+    || 'cross-cutting'
   const out = {
     title: entry.title || base.title,
     area: areaLabel,
