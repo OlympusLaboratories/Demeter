@@ -103,7 +103,7 @@ const areas = (args && args.areas) || []
 
 if (!areas.length) {
   log('review-kludge: no feature areas provided — nothing to review')
-  return { proposals: [], patterns: [], areas: [], raw: 0, skeptics: 0, underVoted: 0 }
+  return { proposals: [], patterns: [], areas: [], raw: 0, consolidatedCount: 0, orphans: 0, unmaterialized: 0, synthesisFailed: false, skeptics: 0, underVoted: 0 }
 }
 
 const LENSES = [
@@ -124,19 +124,24 @@ const EMPHASES = [
   { key: 'behavior', text: 'Behavior preservation. Hunt the proposals that cannot be done without changing what callers observe and do not say so. A refactor whose risk is understated is worse than one that is honestly risky.' },
 ]
 
+const CATEGORY_ENUM = ['duplication', 'inconsistent-pattern', 'over-complex', 'dead-code', 'leaky-abstraction', 'ai-slop', 'layering', 'config-sprawl', 'other']
+const IMPACT_ENUM = ['critical', 'high', 'medium', 'low']
+const RISK_ENUM = ['low', 'medium', 'high']
+const EFFORT_ENUM = ['small', 'medium', 'large']
+
 const PROPOSAL_ITEM = {
   type: 'object',
   properties: {
     title: { type: 'string' },
     area: { type: 'string' },
-    category: { type: 'string', enum: ['duplication', 'inconsistent-pattern', 'over-complex', 'dead-code', 'leaky-abstraction', 'ai-slop', 'layering', 'config-sprawl', 'other'] },
+    category: { type: 'string', enum: CATEGORY_ENUM },
     locations: { type: 'array', items: { type: 'string' } },
     problem: { type: 'string' },
     ideal_pattern: { type: 'string' },
     refactor: { type: 'string' },
-    impact: { type: 'string', enum: ['critical', 'high', 'medium', 'low'] },
-    risk: { type: 'string', enum: ['low', 'medium', 'high'] },
-    effort: { type: 'string', enum: ['small', 'medium', 'large'] },
+    impact: { type: 'string', enum: IMPACT_ENUM },
+    risk: { type: 'string', enum: RISK_ENUM },
+    effort: { type: 'string', enum: EFFORT_ENUM },
   },
   required: ['title', 'area', 'category', 'locations', 'problem', 'ideal_pattern', 'refactor', 'impact', 'risk', 'effort'],
   additionalProperties: false,
@@ -165,9 +170,29 @@ const SYNTHESIS_SCHEMA = {
         additionalProperties: false,
       },
     },
-    proposals: { type: 'array', items: PROPOSAL_ITEM },
+    consolidated: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          ref_ids: { type: 'array', items: { type: 'string' } },
+          title: { type: 'string' },
+          area: { type: 'string' },
+          category: { type: 'string', enum: CATEGORY_ENUM },
+          locations: { type: 'array', items: { type: 'string' } },
+          problem: { type: 'string' },
+          ideal_pattern: { type: 'string' },
+          refactor: { type: 'string' },
+          impact: { type: 'string', enum: IMPACT_ENUM },
+          risk: { type: 'string', enum: RISK_ENUM },
+          effort: { type: 'string', enum: EFFORT_ENUM },
+        },
+        required: ['ref_ids'],
+        additionalProperties: false,
+      },
+    },
   },
-  required: ['patterns', 'proposals'],
+  required: ['patterns', 'consolidated'],
   additionalProperties: false,
 }
 
@@ -208,17 +233,56 @@ const rawProposals = perArea.filter(Boolean).flatMap((x) =>
 
 if (!rawProposals.length) {
   log('review-kludge: no kludge surfaced across the reviewed areas')
-  return { proposals: [], patterns: [], areas: areas.map((a) => a.name), raw: 0, skeptics: 0, underVoted: 0 }
+  return { proposals: [], patterns: [], areas: areas.map((a) => a.name), raw: 0, consolidatedCount: 0, orphans: 0, unmaterialized: 0, synthesisFailed: false, skeptics: 0, underVoted: 0 }
 }
 
+const rawIndexed = rawProposals.map((p, i) => ({ ...p, raw_id: `R${String(i + 1).padStart(3, '0')}` }))
+const byRaw = new Map(rawIndexed.map((p) => [p.raw_id, p]))
+
 // Stage 2 (barrier — needs ALL areas): distill emergent patterns + cross-cutting refactors, dedupe.
+log(`review-kludge: synthesizing ${rawIndexed.length} observations from ${areas.length} areas — Patterns is one long turn with no intermediate output`)
+
 const synthesis = await agent(
-  `You are the architecture synthesizer for a refactoring swarm. Below are kludge observations gathered independently from every feature area of: ${args.scopeDescription}.\n\nDo two things:\n1. Describe the IDEAL PATTERNS that have emerged across these features — the conventions the codebase is converging toward — and note where current code diverges from them.\n2. Produce a consolidated proposal list: merge duplicate/overlapping proposals from different areas into one, and ADD cross-cutting refactors that no single-area reviewer could see (e.g. three areas each reinventing the same helper). Keep every proposal's fields intact and honest about impact/risk/effort.\n\nDo not invent problems to pad the list. Prefer converging on patterns that already exist in the codebase over introducing novel architecture.\n\nObservations (JSON):\n${JSON.stringify(rawProposals)}`,
+  `You are the architecture synthesizer for a refactoring swarm. Below are ${rawIndexed.length} kludge observations gathered independently from every feature area of: ${args.scopeDescription}. Each carries a raw_id.\n\nDo two things:\n\n1. patterns — describe the IDEAL PATTERNS that have emerged across these features: the conventions the codebase is converging toward, and where current code diverges from them. Aim for 5-10 patterns.\n\n2. consolidated — the consolidated proposal list, expressed by REFERENCE so you never retype a proposal body. Every entry is an object with ref_ids plus only the fields you want to change:\n   - PASSTHROUGH (the common case): {"ref_ids": ["R007"]} and nothing else. The proposal is carried through verbatim. Do not restate its fields.\n   - MERGE (two or more areas raised the same thing): {"ref_ids": ["R007","R041","R088"], "title": "...", "problem": "...", "ideal_pattern": "...", "refactor": "...", "impact": "...", "risk": "...", "effort": "...", "area": "cross-cutting"}. Supply only the fields that need rewriting for the merged scope; locations are unioned automatically if you omit them.\n   - NEW cross-cutting proposal that no single-area reviewer could see: {"ref_ids": [], ...all fields...}.\n\nEVERY raw_id must appear in exactly one entry's ref_ids. Any id you omit will be appended as a passthrough anyway, so omitting one buys you nothing — reference it.\n\nDo not invent problems to pad the list. Prefer converging on patterns that already exist in the codebase over introducing novel architecture.\n\nObservations (JSON):\n${JSON.stringify(rawIndexed)}`,
   { label: 'synthesize-patterns', phase: 'Patterns', schema: SYNTHESIS_SCHEMA }
 )
 
-const consolidated = (synthesis && synthesis.proposals && synthesis.proposals.length) ? synthesis.proposals : rawProposals
 const patterns = (synthesis && synthesis.patterns) || []
+
+function materialize(entry) {
+  const refs = (entry.ref_ids || []).map((id) => byRaw.get(id)).filter(Boolean)
+  const base = refs[0] || {}
+  const locations = (entry.locations && entry.locations.length)
+    ? entry.locations
+    : Array.from(new Set(refs.flatMap((r) => r.locations || [])))
+  const areaLabel = entry.area
+    || (refs.length > 1 ? Array.from(new Set(refs.map((r) => r.area))).join(' + ') : base.area)
+    || 'cross-cutting'
+  const out = {
+    title: entry.title || base.title,
+    area: areaLabel,
+    category: entry.category || base.category || 'other',
+    locations: locations.length ? locations : ['(no location given)'],
+    problem: entry.problem || base.problem,
+    ideal_pattern: entry.ideal_pattern || base.ideal_pattern || '(not stated)',
+    refactor: entry.refactor || base.refactor,
+    impact: entry.impact || base.impact || 'medium',
+    risk: entry.risk || base.risk || 'medium',
+    effort: entry.effort || base.effort || 'medium',
+    merged_from: refs.map((r) => r.raw_id),
+  }
+  return (out.title && out.problem && out.refactor) ? out : null
+}
+
+const entries = (synthesis && synthesis.consolidated) || []
+const materialized = entries.map(materialize).filter(Boolean)
+const unmaterialized = entries.length - materialized.length
+const covered = new Set(materialized.flatMap((p) => p.merged_from))
+const orphans = rawIndexed.filter((p) => !covered.has(p.raw_id)).map((p) => ({ ...p, merged_from: [p.raw_id] }))
+const synthesisFailed = !materialized.length
+const consolidated = synthesisFailed
+  ? rawIndexed.map((p) => ({ ...p, merged_from: [p.raw_id] }))
+  : materialized.concat(orphans)
 
 const withIds = consolidated.map((p, i) => ({ ...p, id: `P${String(i + 1).padStart(2, '0')}` }))
 
@@ -235,7 +299,7 @@ const proposalText = withIds.map((p) => [
 const ballots = await parallel(Array.from({ length: VOTES }, (_unused, i) => () => {
   const emphasis = EMPHASES[i % EMPHASES.length]
   return agent(
-    `You are skeptic #${i + 1} of ${VOTES} on a refactor-critique panel, and you hold the WHOLE consolidated proposal list at once. Vote keep/drop on EVERY proposal below. Default to keep=false unless a proposal clearly earns its place.\n\nYour emphasis — apply it on top of the shared bar, do not substitute it for the bar:\n${emphasis.text}\n\nShared bar. Inspect the real code with Read/Grep before judging; these proposals were written by other agents and may be wrong about the code. Set keep=false if ANY of these hold: it does not actually reduce complexity; it changes observable behavior without the proposal acknowledging it; it is over-engineering / premature abstraction / speculative generality; the churn and risk outweigh the benefit; or it contradicts a pattern the codebase already follows. Set keep=true only if it is a real simplification, behavior-preserving (or with risk honestly scoped), and worth doing.\n\nBecause you hold every proposal at once, you can see what a reviewer judging one in isolation cannot: two proposals that contradict each other, that would collide in the same file, or that are the same refactor described twice. When that is why you drop one, name the other proposal's id in your reason.\n\nReturn exactly one vote for each of the ${withIds.length} ids below — no omissions, no duplicates, and no ids that are not listed.\n\n${proposalText}\n\nScope: ${args.scopeDescription}`,
+    `You are skeptic #${i + 1} of ${VOTES} on a refactor-critique panel, and you hold the WHOLE consolidated proposal list at once. Vote keep/drop on EVERY proposal below. Default to keep=false unless a proposal clearly earns its place.\n\nYour emphasis — apply it on top of the shared bar, do not substitute it for the bar:\n${emphasis.text}\n\nShared bar. Inspect the real code with Read/Grep before judging; these proposals were written by other agents and may be wrong about the code. Set keep=false if ANY of these hold: it does not actually reduce complexity; it changes observable behavior without the proposal acknowledging it; it is over-engineering / premature abstraction / speculative generality; the churn and risk outweigh the benefit; or it contradicts a pattern the codebase already follows. Set keep=true only if it is a real simplification, behavior-preserving (or with risk honestly scoped), and worth doing.\n\nBecause you hold every proposal at once, you can see what a reviewer judging one in isolation cannot: two proposals that contradict each other, that would collide in the same file, or that are the same refactor described twice. When that is why you drop one, name the other proposal's id in your reason.\n\nThere are ${withIds.length} proposals, so you have a hard output budget: keep every reason under 25 words, and spend your reading time on the proposals you are least sure about. Return exactly one vote for each of the ${withIds.length} ids below — no omissions, no duplicates, and no ids that are not listed. Completing the ballot matters more than elaborating any single reason.\n\n${proposalText}\n\nScope: ${args.scopeDescription}`,
     { label: `critique:${emphasis.key}`, phase: 'Critique', schema: CRITIQUE_SCHEMA }
   )
 }))
@@ -269,9 +333,20 @@ const EFF = { small: 0, medium: 1, large: 2 }
 const survivors = judged.filter((p) => p.kept)
   .sort((a, b) => (IMP[a.impact] - IMP[b.impact]) || (RISK[a.risk] - RISK[b.risk]) || (EFF[a.effort] - EFF[b.effort]))
 
-log(`review-kludge: ${areas.length} areas, ${rawProposals.length} raw -> ${withIds.length} consolidated -> ${survivors.length} survived a ${panel.length}-skeptic panel${underVoted ? `; ${underVoted} proposal(s) drew fewer than ${panel.length} votes` : ''}`)
+log(`review-kludge: ${areas.length} areas, ${rawProposals.length} raw -> ${withIds.length} consolidated -> ${survivors.length} survived a ${panel.length}-skeptic panel${orphans.length && !synthesisFailed ? `; ${orphans.length} raw proposal(s) the synthesizer omitted were carried through` : ''}${unmaterialized ? `; ${unmaterialized} consolidated entr(ies) lacked a title, problem or refactor and were dropped` : ''}${underVoted ? `; ${underVoted} proposal(s) drew fewer than ${panel.length} votes` : ''}${synthesisFailed ? `; SYNTHESIS FAILED — the raw list was used un-merged and ${patterns.length} pattern(s) came back` : ''}`)
 
-return { proposals: survivors, patterns, areas: areas.map((a) => a.name), raw: rawProposals.length, skeptics: panel.length, underVoted }
+return {
+  proposals: survivors,
+  patterns,
+  areas: areas.map((a) => a.name),
+  raw: rawProposals.length,
+  consolidatedCount: withIds.length,
+  orphans: synthesisFailed ? 0 : orphans.length,
+  unmaterialized,
+  synthesisFailed,
+  skeptics: panel.length,
+  underVoted,
+}
 ````
 
 ## Step 3b: Surface the Run ID for `wfwatch`
@@ -288,6 +363,8 @@ The **Workflow** tool runs the swarm in the background and its tool result inclu
 
 Use the **actual** `runId` string from the Workflow tool result verbatim (do not fabricate or abbreviate it — `wfwatch` resolves the run's journal by exact ID).
 
+**Say that the Patterns phase is one long turn with no intermediate output**, because otherwise a working synthesis is indistinguishable from a hang and the only way to find out is to poll `journal.jsonl` by hand. The script logs the observation count as it enters the phase, so the journal carries one event between `started Patterns` and the next phase — but a single `agent()` call cannot report progress from inside, so there is nothing further to emit until it returns. Minutes of silence there is the expected shape, not a stall.
+
 **Then end your turn — never block the session on the swarm.** The `Workflow` tool has already returned: the run continues in the background and a task notification re-invokes you when it finishes. So print the block above, say the sweep is running, and yield, which leaves the user free to keep submitting prompts for the whole run. Do not hold the turn open to wait for it — no `TaskOutput` on the workflow's task, no `Monitor`, no `ScheduleWakeup`, no reading the journal or running `wfwatch` yourself on a loop, no sleep, and no filler tool calls to pass the time. None of that makes the result arrive sooner, and all of it costs the user their session for the length of a full swarm. If they send other prompts meanwhile, answer them normally and stay responsive. The completion notification is the **only** thing that resumes this skill; when it arrives, continue with Step 4.
 
 ## Step 3c: Fallback when the Workflow tool isn't available
@@ -297,6 +374,8 @@ If the preflight found no `Workflow` tool, run the **same** Analyze → Patterns
 **Phase 1 — Analyze (parallel):** launch one background `Agent` per feature area (subagent_type `general-purpose`, a cheap model like `sonnet` for the fan-out). Give each the Step-3 analysis prompt for its area (the `LENSES`, the "prefer a pattern already in THIS codebase", the "don't pad / return empty if clean" rules) and ask it to return a JSON array of proposal objects with the `PROPOSAL_ITEM` fields plus concrete `file:line` locations. Collect each result on its completion notification.
 
 **Phase 2 — Patterns (you do it):** you have every area's findings, so synthesize yourself — describe the emergent patterns and produce **one consolidated list**, merging duplicate/overlapping proposals that multiple areas raised (e.g. the same helper reinvented in three places) and keeping each proposal's fields intact. Write the consolidated list to a scratch JSON file (ids `P01…`) so the critique agents can read it without you re-pasting it N times.
+
+**Consolidate by reference here too, exactly as the script does** — tag the raw proposals `R001…` in the scratch file first, then express the consolidated list as `ref_ids` plus only the fields a merge rewrites, and build the full bodies from the references afterwards. Re-emitting every proposal body is what blows the output cap in the script, and your own output has the same ceiling: this phase is the one place in the fallback where the whole list passes through a single turn.
 
 **Phase 3 — Critique (parallel):** launch **`VOTES` skeptic agents** (5 for scale 3, else 3) — the same panel the script runs. Each reads the whole consolidated file and votes keep/drop **on every proposal**, returning a JSON array of `{id, keep, reason}`. Give them the Step-3 skeptic prompt (default keep=false; kill over-engineering/premature-abstraction/behavior-changing/churn; verify claims against real code with Read/Grep — the proposals were written by other agents and may be wrong), including the contradiction check: a proposal dropped because another one conflicts with it, collides in the same file, or duplicates it must name that other id. Give each skeptic one of the script's five emphases (dead-code grep rigor, effort-vs-payoff, layering/correctness, whole-codebase convention, behavior preservation) so they aren't redundant. Tally each proposal over the ballots that actually name it: **majority keeps**. Count the proposals that drew fewer votes than there were skeptics and report that in Step 4 — a batched skeptic can skip a proposal, and a proposal dropped for want of a vote must not read as one the panel rejected. Rank survivors by impact → risk → effort, exactly as the script does.
 
@@ -322,6 +401,14 @@ Then list the surviving **refactor proposals**, ranked highest-impact/lowest-ris
 Close with a one-line summary: areas reviewed, raw proposals raised, how many survived adversarial critique (the churn-for-churn and over-engineering the panel filtered out is a feature — say so). If nothing survived, say so plainly and note the areas reviewed — clean code is a valid result.
 
 **If `underVoted` came back above zero, name it in that line.** Those proposals were dropped because part of the panel never voted on them, which is a skeptic running out of attention rather than a verdict on the proposal — and it is the one way this pipeline can report a thin result that looks like a clean codebase.
+
+**If `synthesisFailed` came back true, lead with it and never present the run as clean.** Say plainly, before the proposals: the consolidation produced nothing, so the proposals below are the **raw, un-merged, un-deduplicated** list, in which the same refactor may appear several times under different ids. A degraded run is a partial result to re-run, and the one thing it must never look like is a verdict on the codebase. Recommend re-running, at a narrower scope or a lower `scale` if the area count was large.
+
+**Read `patterns` before saying anything about the emergent architecture, because the flag does not cover it.** `synthesisFailed` reports only that the consolidated list came back empty, and the stage emits `patterns` *first* — so a truncated answer routinely carries real patterns beside a failed consolidation. An empty `patterns` means the emergent-architecture section is missing because the stage produced none, which is not the same as the code having no patterns; a non-empty one means present them exactly as a healthy run would and say the consolidation alone failed. The `log()` line already reports the count for this reason, and a report claiming no patterns over a run that returned eight has thrown away the headline deliverable it was trying to protect.
+
+**If `unmaterialized` came back above zero, name it.** Those are consolidated entries the synthesizer emitted without a title, a problem or a refactor, so there was nothing to build a proposal from. An entry carrying `ref_ids` is recovered by the orphan backfill, but a referenceless one is lost outright — so a non-zero count on a run with few orphans means the synthesizer was emitting half-formed cross-cutting proposals, and the ones it lost are not in the list below.
+
+**If `orphans` came back above zero, name the count in the summary line.** Those are raw proposals the synthesizer did not reference, carried through as passthroughs rather than dropped. A handful is ordinary — the synthesizer lost track of a few ids — and over-inclusion is safe because the panel filters. A number close to `raw` means the synthesis barely consolidated anything, which is worth saying even though `synthesisFailed` is false.
 
 Do not refactor anything in this step — this skill reviews and proposes, it does not edit.
 
