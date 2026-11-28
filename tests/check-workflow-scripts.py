@@ -56,6 +56,14 @@ what it checks, and what each one is written against:
   it was for). a regex over prose cannot tell a prohibition from a
   recommendation, so that check is gone rather than widened
 
+  the inline-only skills' fenced script parses under node as well, wrapped the
+  same way. the node check used to cover only the two extracted workflow.js
+  files, so a syntax error in an inline script shipped silently and failed at
+  launch with the swarm already announced - which is the same failure the
+  missing-file check exists against, reached by the other route. the fence is
+  read by matching its own backtick count, and an unclosed fence is a failure
+  rather than an empty string that parses
+
   the skills that have NOT been migrated keep their inline fence and have no
   workflow.js, and that is asserted too. a half-migration is the defect:
   workflow-resume names all four Workflow skills and sends every resume at
@@ -96,6 +104,18 @@ def node_available():
         return True
     except (OSError, subprocess.CalledProcessError):
         return False
+
+
+def inline_script(md):
+    opening = FENCE.search(md)
+    if not opening:
+        return None
+    ticks = opening.group(0)[:-2]
+    start = opening.end() + 1
+    closing = re.compile(r'^' + re.escape(ticks) + r'$', re.M).search(md, start)
+    if not closing:
+        return None
+    return md[start:closing.start()]
 
 
 def check_syntax(path, text):
@@ -187,10 +207,22 @@ def main():
                 fail(problems, f'{label}: has a workflow.js but is still listed in '
                                f'INLINE_ONLY; move it to SKILLS so its seam is checked')
             with open(md_path, encoding='utf-8') as handle:
-                if not FENCE.search(handle.read()):
-                    fail(problems, f'{label}: no js fence in SKILL.md and no workflow.js '
-                                   f'either, so workflow-resume names a path that does '
-                                   f'not exist for it')
+                md = handle.read()
+            if not FENCE.search(md):
+                fail(problems, f'{label}: no js fence in SKILL.md and no workflow.js '
+                               f'either, so workflow-resume names a path that does '
+                               f'not exist for it')
+                continue
+            js = inline_script(md)
+            if js is None:
+                fail(problems, f'{label}: the js fence in SKILL.md is never closed, so no '
+                               f'script can be read out of it')
+                continue
+            if have_node:
+                ok, stderr = check_syntax(md_path, js)
+                if not ok:
+                    fail(problems, f'{label}: the inline script in SKILL.md does not '
+                                   f'parse:\n{stderr}')
 
     if not have_node:
         print('note: node is absent, so the syntax check was skipped')
