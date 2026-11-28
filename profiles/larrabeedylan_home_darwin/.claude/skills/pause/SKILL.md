@@ -56,7 +56,7 @@ Order matters: stop what spends tokens before writing the file, because writing 
    - the base and head SHA the swarm was launched against, and the owning skill's script hash. A swarm's cache is keyed on each agent's whole prompt, and the diff is embedded in that prompt — so if the branch moved, the cache is void and `/unpause` needs to know that without discovering it by spending a fleet.
    - **Do not record `cleanPrefix`.** It stops at the first gap in launch order, so a 26-agent run missing agent 3 reports `2` while 23 results sit cached. `/unpause` recomputes it.
 3. **Stop free-standing subagents** and record their exact prompts — subagents are stateless, so a prompt is the only way back. **Workflow agents are excluded from this**: their prompts are reproduced from the script plus the journal, and writing 26 of them means writing the diff 26 times at the moment you have least budget.
-4. **Flush the decision ledger into the state file as text.** The ledger lives in the session scratchpad, which is session-scoped and reaped by the OS — a path to it is worthless after a reboot or from a fresh session. Inline the content.
+4. **Flush the decision ledger into the state file as text.** The ledger lives in the session scratchpad, which is session-scoped and reaped by the OS — a path to it is worthless after a reboot or from a fresh session. Inline the content. **A resumed run with an empty ledger and a published fold is the case this prevents**: a refresh replaces the fold rather than appending beside it, so the text being lost here is the difference between a record a reviewer can read and one the resume would have had to leave alone.
 5. **Flush the run checklist the same way**, and for the same reason: its items file is in the scratchpad too. Inline the items, and record the page's **url and its update hash** beside them. The hash is what lets the resumed run write to the page the user is already holding; without it there is no way back to that link, and the resume publishes a second one. Mark the item the pause interrupted `in-flight`, with the pause itself as what it is waiting on, and write the page one last time before the final state write — a checklist left reading as mid-flight is how a paused run looks like a hung one.
 
 ## Step 3: Write the State File
@@ -89,7 +89,7 @@ Create `~/.claude/pause-state/` if it does not exist.
 - Per CI job: retry count and the classification given. Without it a resumed run blind-retries a failure it already retried, which is the most damaging thing an unattended run can do.
 
 **Work already published** — so `/unpause` does not do it twice:
-- `diagram_attached`, `ledger_published`, and the description's pre-append state. Without these, resume appends a second collapsed fold to the description.
+- `diagram_attached`, `ledger_published`, and the description's pre-append state. Both links are written once and must not be duplicated. The decision fold is the one case a resume cannot get wrong on its own, because a refresh **replaces** the existing fold rather than appending beside it — record `ledger_published` so the resumed run knows the record is already visible to a reviewer, not to stop it writing twice.
 - The run checklist: its items, its url, its update hash, and whether the description already carries the link. All four, because they fail differently — losing the items loses what the run owed, and losing the hash loses the only route back to the page the user has open.
 
 **Swarms, subagents, watchers** — as gathered in Step 2.
