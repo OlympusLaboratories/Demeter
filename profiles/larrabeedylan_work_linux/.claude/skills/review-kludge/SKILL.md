@@ -103,7 +103,7 @@ const areas = (args && args.areas) || []
 
 if (!areas.length) {
   log('review-kludge: no feature areas provided — nothing to review')
-  return { proposals: [], patterns: [], areas: [], raw: 0, consolidatedCount: 0, orphans: 0, synthesisFailed: false, skeptics: 0, underVoted: 0 }
+  return { proposals: [], patterns: [], areas: [], raw: 0, consolidatedCount: 0, orphans: 0, unmaterialized: 0, synthesisFailed: false, skeptics: 0, underVoted: 0 }
 }
 
 const LENSES = [
@@ -233,7 +233,7 @@ const rawProposals = perArea.filter(Boolean).flatMap((x) =>
 
 if (!rawProposals.length) {
   log('review-kludge: no kludge surfaced across the reviewed areas')
-  return { proposals: [], patterns: [], areas: areas.map((a) => a.name), raw: 0, consolidatedCount: 0, orphans: 0, synthesisFailed: false, skeptics: 0, underVoted: 0 }
+  return { proposals: [], patterns: [], areas: areas.map((a) => a.name), raw: 0, consolidatedCount: 0, orphans: 0, unmaterialized: 0, synthesisFailed: false, skeptics: 0, underVoted: 0 }
 }
 
 const rawIndexed = rawProposals.map((p, i) => ({ ...p, raw_id: `R${String(i + 1).padStart(3, '0')}` }))
@@ -262,7 +262,7 @@ function materialize(entry) {
     title: entry.title || base.title,
     area: areaLabel,
     category: entry.category || base.category || 'other',
-    locations,
+    locations: locations.length ? locations : ['(no location given)'],
     problem: entry.problem || base.problem,
     ideal_pattern: entry.ideal_pattern || base.ideal_pattern || '(not stated)',
     refactor: entry.refactor || base.refactor,
@@ -276,6 +276,7 @@ function materialize(entry) {
 
 const entries = (synthesis && synthesis.consolidated) || []
 const materialized = entries.map(materialize).filter(Boolean)
+const unmaterialized = entries.length - materialized.length
 const covered = new Set(materialized.flatMap((p) => p.merged_from))
 const orphans = rawIndexed.filter((p) => !covered.has(p.raw_id)).map((p) => ({ ...p, merged_from: [p.raw_id] }))
 const synthesisFailed = !materialized.length
@@ -332,7 +333,7 @@ const EFF = { small: 0, medium: 1, large: 2 }
 const survivors = judged.filter((p) => p.kept)
   .sort((a, b) => (IMP[a.impact] - IMP[b.impact]) || (RISK[a.risk] - RISK[b.risk]) || (EFF[a.effort] - EFF[b.effort]))
 
-log(`review-kludge: ${areas.length} areas, ${rawProposals.length} raw -> ${withIds.length} consolidated -> ${survivors.length} survived a ${panel.length}-skeptic panel${orphans.length && !synthesisFailed ? `; ${orphans.length} raw proposal(s) the synthesizer omitted were carried through` : ''}${underVoted ? `; ${underVoted} proposal(s) drew fewer than ${panel.length} votes` : ''}${synthesisFailed ? `; SYNTHESIS FAILED — the raw list was used un-merged and ${patterns.length} pattern(s) came back` : ''}`)
+log(`review-kludge: ${areas.length} areas, ${rawProposals.length} raw -> ${withIds.length} consolidated -> ${survivors.length} survived a ${panel.length}-skeptic panel${orphans.length && !synthesisFailed ? `; ${orphans.length} raw proposal(s) the synthesizer omitted were carried through` : ''}${unmaterialized ? `; ${unmaterialized} consolidated entr(ies) lacked a title, problem or refactor and were dropped` : ''}${underVoted ? `; ${underVoted} proposal(s) drew fewer than ${panel.length} votes` : ''}${synthesisFailed ? `; SYNTHESIS FAILED — the raw list was used un-merged and ${patterns.length} pattern(s) came back` : ''}`)
 
 return {
   proposals: survivors,
@@ -341,6 +342,7 @@ return {
   raw: rawProposals.length,
   consolidatedCount: withIds.length,
   orphans: synthesisFailed ? 0 : orphans.length,
+  unmaterialized,
   synthesisFailed,
   skeptics: panel.length,
   underVoted,
@@ -400,7 +402,11 @@ Close with a one-line summary: areas reviewed, raw proposals raised, how many su
 
 **If `underVoted` came back above zero, name it in that line.** Those proposals were dropped because part of the panel never voted on them, which is a skeptic running out of attention rather than a verdict on the proposal — and it is the one way this pipeline can report a thin result that looks like a clean codebase.
 
-**If `synthesisFailed` came back true, lead with it and never present the run as clean.** Say plainly, before the proposals: the synthesis stage produced nothing, so there are **no emergent patterns** — the headline deliverable is missing, not absent because the code has no patterns — and the proposals below are the **raw, un-merged, un-deduplicated** list, in which the same refactor may appear several times under different ids. A degraded run is a partial result to re-run, and the one thing it must never look like is a verdict on the codebase. Recommend re-running, at a narrower scope or a lower `scale` if the area count was large.
+**If `synthesisFailed` came back true, lead with it and never present the run as clean.** Say plainly, before the proposals: the consolidation produced nothing, so the proposals below are the **raw, un-merged, un-deduplicated** list, in which the same refactor may appear several times under different ids. A degraded run is a partial result to re-run, and the one thing it must never look like is a verdict on the codebase. Recommend re-running, at a narrower scope or a lower `scale` if the area count was large.
+
+**Read `patterns` before saying anything about the emergent architecture, because the flag does not cover it.** `synthesisFailed` reports only that the consolidated list came back empty, and the stage emits `patterns` *first* — so a truncated answer routinely carries real patterns beside a failed consolidation. An empty `patterns` means the emergent-architecture section is missing because the stage produced none, which is not the same as the code having no patterns; a non-empty one means present them exactly as a healthy run would and say the consolidation alone failed. The `log()` line already reports the count for this reason, and a report claiming no patterns over a run that returned eight has thrown away the headline deliverable it was trying to protect.
+
+**If `unmaterialized` came back above zero, name it.** Those are consolidated entries the synthesizer emitted without a title, a problem or a refactor, so there was nothing to build a proposal from. An entry carrying `ref_ids` is recovered by the orphan backfill, but a referenceless one is lost outright — so a non-zero count on a run with few orphans means the synthesizer was emitting half-formed cross-cutting proposals, and the ones it lost are not in the list below.
 
 **If `orphans` came back above zero, name the count in the summary line.** Those are raw proposals the synthesizer did not reference, carried through as passthroughs rather than dropped. A handful is ordinary — the synthesizer lost track of a few ids — and over-inclusion is safe because the panel filters. A number close to `raw` means the synthesis barely consolidated anything, which is worth saying even though `synthesisFailed` is false.
 
