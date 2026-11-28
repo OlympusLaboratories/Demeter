@@ -99,7 +99,7 @@ git rev-parse --show-toplevel
 
 `--name-status` is `files`, the plain diff is `diff`, and the toplevel is `repoRoot`.
 
-**One command per call, because the worktree isolation guard refuses a multi-line one naming `git`.** The single-line equivalent of the same work is accepted, so the refusal is about the shape rather than the content, and the block this replaced was nine coupled statements. Shell state does not survive between calls either — only the working directory does — so the merge base cannot be carried in a variable and has to be written into each later command as a literal. That was already true of the block this replaced: it set `MERGE_BASE` here and Step 2-INLINE read it two steps later from a shell that had never seen it.
+**One command per call, because the worktree isolation guard refuses a block it cannot statically unroll.** The single-line equivalent of the same work is accepted, so the refusal is about the shape rather than the content, and the block this replaced was nine coupled statements. Naming `git` is not what triggers it — Step 2-INLINE's counter names no `git` and is refused on size alone — so checking your own command for the word and finding none settles nothing. Shell state does not survive between calls either — only the working directory does — so the merge base cannot be carried in a variable and has to be written into each later command as a literal. That was already true of the block this replaced: it set `MERGE_BASE` here and Step 2-INLINE read it two steps later from a shell that had never seen it.
 
 - **Empty diff, but the conversation contains pasted code or diffs:** use that as `diff` and say so in `context`.
 - **Empty diff and nothing in the conversation:** tell the user "No changes found — run `/changes-branch` first or paste the changes you'd like described," and stop.
@@ -128,7 +128,7 @@ If the conversation is thin, say so in `context` rather than padding it. Never i
 
 2. **Write the description against the `HOUSE` block in [`workflow.js`](workflow.js).** `## Summary`, then `## Changes`, then `## Testing` and `## Rollout` only where they clear the bar stated there. Run the Rollout trigger list against the diff rather than consulting your instinct — a new config key, a changed helm value, a changed schedule or timeout a running deployment must pick up, a migration, a feature flag, a destructive operation this change makes possible, or a required ordering against another merge.
 
-3. **Measure it. Do not estimate it.** Write the text to the scratchpad and count it. The tiers and the counter below are a port of `measure()` in Step 2's script — if the tiers there move, move them here too:
+3. **Measure it. Do not estimate it.** Write the text to the scratchpad, then run the counter over it. The counter is [`measure.py`](measure.py), beside this file — a port of `measure()` in [`workflow.js`](workflow.js), so if the tiers there move, move them in `measure.py` too:
 
 Take the two sizes first, as their own commands:
 
@@ -143,41 +143,14 @@ git --no-pager diff --name-status <merge base> -- . | grep -c .
 Then count the text, with those two numbers written in literally where `<diff lines>` and `<files>` stand:
 
 ```bash
-python3 - <your session scratchpad>/description.md <diff lines> <files> <<'PY'
-import re, sys
-lines = open(sys.argv[1]).read().split('\n')
-diff_lines, files = int(sys.argv[2]), int(sys.argv[3])
-size = 'large' if diff_lines > 1200 or files > 12 else 'medium' if diff_lines > 300 or files > 4 else 'small'
-total, summary_cap, bullet_cap, changes_cap = {
-    'small': (170, 60, 4, 100), 'medium': (250, 80, 6, 150), 'large': (320, 80, 8, 200),
-}[size]
-count = lambda s: len([t for t in s.split() if not re.fullmatch(r'[—–*+\-:;,.]+', t)])
-has = lambda n: any(l.strip().lower() == '## ' + n for l in lines)
-def section(name):
-    i = next((i for i, l in enumerate(lines) if l.strip().lower() == '## ' + name), -1)
-    if i < 0: return []
-    rest = lines[i + 1:]
-    return rest[:next((j for j, l in enumerate(rest) if l.strip().startswith('## ')), len(rest))]
-bullets = []
-for l in section('changes'):
-    if re.match(r'^\s*[-*]\s+', l): bullets.append(re.sub(r'^\s*[-*]\s+', '', l).strip())
-    elif l.strip() and bullets: bullets[-1] += ' ' + l.strip()
-summary = ' '.join(section('summary')).strip()
-sentences = [s.strip() for s in re.split(r'[.!?]+(?:\s+|$)', summary) if s.strip()]
-cap = total + (25 if has('testing') else 0) + (30 if has('rollout') else 0)
-body = count('\n'.join(l for l in lines if not l.startswith('##')))
-print('%s change · %d diff lines · %d files' % (size, diff_lines, files))
-print('total    %d / %d' % (body, cap))
-print('summary  %d / %d words, %d / 3 sentences' % (count(summary), summary_cap, len(sentences)))
-print('changes  %d / %d bullets, %d / %d words' % (len(bullets), bullet_cap, sum(map(count, bullets)), changes_cap))
-for i, s in enumerate(sentences):
-    if count(s) > 30: print('OVER: summary sentence %d is %d words, cap 30' % (i + 1, count(s)))
-for i, b in enumerate(bullets):
-    if count(b) > 25: print('OVER: bullet %d is %d words, cap 25 — %s' % (i + 1, count(b), b[:60]))
-PY
+python3 ~/.claude/skills/changes-description/measure.py <your session scratchpad>/description.md <diff lines> <files>
 ```
 
-**Three commands rather than one, because this step runs inside a worktree on most invocations.** The worktree isolation guard refuses a command naming `git` that it cannot statically verify, and a **multi-line** one is exactly that: the single-line equivalent of the same work is accepted, so the refusal is about the shape and not the content. The whole block as one call was refused, which is how a step whose own instruction is *do not estimate it* came to have no runnable way to measure. Shell state does not survive between calls either — only the working directory does — so the counts cannot be held in variables across the split and have to be written into the third command as digits. The `description.md` path is written out for the same reason.
+**Separate commands, and the counter in a file, because this step runs inside a worktree on most invocations.** The isolation guard refuses a command whose body it cannot statically unroll, and **size is what tips it** — not the word `git`, and not any one syntax. Measured from inside a worktree: the two `git` one-liners above are accepted, a five-line heredoc feeding `python3` positional arguments is accepted, and the ~30-line counter in that same heredoc shape is refused with *too complex to verify that it stays inside the worktree*. So splitting the block into three commands fixed the two `git` calls and left the third — the only one that measures anything — refused, which is how a step whose own instruction is *do not estimate it* came to have no runnable way to measure. A file invoked as a plain command has no body to unroll, and needs no transcribing before it runs.
+
+**Write that path with `~`, never `"$HOME"`.** Also measured: `python3 ~/.claude/scripts/…` is accepted and `python3 "$HOME/.claude/scripts/…"` is refused, because a computed program operand leaves the guard unable to say which operand is the program. Step 2's rule for `workflow.js` is the opposite and does not transfer — the **Workflow** tool needs the expanded literal because it does not expand `~`, whereas the shell does.
+
+Shell state does not survive between calls either — only the working directory does — so the counts cannot be held in variables across the split and have to be written into the counter's arguments as digits. The `description.md` path is written out for the same reason.
 
 **Over budget means cut, and then measure again.** The caps are ceilings, not quotas: landing well under one is not a description with something missing. When the text will not fit, the fix is removing undefined terminology and abstraction, never compressing explanations into denser jargon.
 
