@@ -558,7 +558,9 @@ Arm the monitor first and launch the swarm second, then yield once for both. Nei
 
 The swarm's completion notification wakes you exactly as the monitor's does. When it is the swarm that woke you, its confirmed findings are a new source of review feedback — go to Step 6 and let them enter the loop where a bot's threads do.
 
-**The swarm runs once per run, not once per round.** It reviews the diff as first pushed, and re-running it after every round would spend a fleet re-reviewing code it has already passed. One re-run is justified when a round changed the shape of the change rather than patching it — a redesign, not a fix. More than one is not.
+**The swarm runs once per run, not once per round.** It reviews the diff as first pushed, and re-running it after every round would spend a fleet re-reviewing code it has already passed.
+
+**Where a round changed the shape of the change rather than patching it — a redesign, not a fix — a second pass is worth *offering*, and never launching.** Say in one line that the shape changed and that a re-run is available, then carry on with the round; the user answers or they do not. The flag authorised **one** swarm, and a second costs the same ~4M subagent tokens and quarter of a session window the first did, so the budget decision is theirs and not one of the calls the standing instruction hands you. The global `CLAUDE.md` carves budget out of *trust your judgment for everything after the code is written* for exactly this reason. This sentence used to read "one re-run is justified when…", and a run cited it to spend a second swarm nobody had asked for — the condition was real and the authority was never here.
 
 **Never report a change request as ready while a review you commissioned is still running.** The user reads "green, mergeable, no reviewer configured" as "this is waiting on me" — and on a repository with no reviewer of its own they are right to read it that way. So they merge it, and the review's findings land afterwards with nowhere to go.
 
