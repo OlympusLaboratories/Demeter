@@ -4,17 +4,13 @@ import re
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PROFILES = [
-    'larrabeedylan_home_darwin',
-    'larrabeedylan_work_darwin',
-    'larrabeedylan_work_linux',
-]
 
 GLOBAL_START = re.compile(r'^## Spawn subagents freely\s*$')
 STEP_5B_START = re.compile(r'^## Step 5b\b')
 RERUN_BULLET = re.compile(r'^- Re-run at a higher ')
 HEADING = re.compile(r'^#')
 TOP_BULLET = re.compile(r'^- \S')
+FENCE = re.compile(r'^\s*```')
 
 MUST_BE_OFFERED = re.compile(r'must\s+be\s+offered', re.I)
 SHOULD_BE_OFFERED = re.compile(r'should\s+(?:still\s+)?be\s+offered', re.I)
@@ -32,7 +28,7 @@ CLAUSES_NAMED = (
 )
 
 ONCE_PER_RUN = re.compile(r'once\s+per\s+run,\s+not\s+once\s+per\s+round', re.I)
-OLD_GRANT = re.compile(r'^[^"“]*\bOne re-run is justified when a round changed', re.M)
+OLD_GRANT = re.compile(r'\bone\s+re-run\s+is\s+justified\s+when\s+a\s+round\s+changed', re.I)
 OFFERING = re.compile(r'\*offering\*', re.I)
 NEVER_LAUNCH = re.compile(r'never\s+launch(?:ing|\s+it)', re.I)
 FLAG_BOUGHT_ONE = re.compile(r'authorised\s+\*\*one\*\*\s+swarm', re.I)
@@ -56,6 +52,32 @@ judgment -- roughly 4M more subagent tokens, a quarter of a session window,
 unasked. it cited autopilot Step 5b's "one re-run is justified when a round
 changed the shape of the change rather than patching it". the condition was
 real. the authority was never there.
+
+the forbidden sentence, and why there is no quote exemption
+
+  the one NEGATIVE assertion here is that autopilot Step 5b must not contain
+  the old grant sentence. Step 5b now CITES its former wording as the thing
+  that was misread, so a first draft tried to forbid the sentence in prose and
+  permit it in quotation marks, with a leading ^[^"]* guard.
+
+  that guard was both broken and unnecessary, and the review swarm found it by
+  running it. broken, because it tested "a quote appears earlier on this line"
+  rather than "the sentence is inside quotation marks" -- and Step 5b's own
+  paragraph already carries a straight-quoted citation, so appending the
+  forbidden sentence to that same paragraph satisfied the guard and the
+  checker printed ok. measured end-to-end: the grant restored in all three
+  profiles, exit 0. unnecessary, because the citation is TRUNCATED at
+  "justified when...", so it never contained "a round changed" and never
+  matched the pattern with or without a guard.
+
+  so the sentence is forbidden wherever it appears, case-insensitively, and
+  the citation survives on its own merits. the general lesson, since it cost a
+  draft: a guard written for a case that was never in danger is not free -- it
+  exempts the case that IS.
+
+  keep the citation truncated. spelling the old wording out in full inside
+  Step 5b will fail this check, which is the right answer: a section quoting
+  the grant verbatim is one restoration away from granting it.
 
 what the global section owes, in every profile
 
@@ -95,10 +117,6 @@ what autopilot Step 5b owes, in every profile
   carries its own limit instead of depending on the global file being read at
   the moment of the decision. that dependency is the ticket's own gap 3.
 
-  the old sentence is gone from prose. the check allows it inside quotation
-  marks, because the section now cites its former wording as the thing that
-  was misread, and forbidding the quote would forbid recording the failure.
-
 what review-code Step 6 owes, in every profile
 
   it names who authorises, and says to stop at the offer. this bullet was
@@ -110,14 +128,52 @@ what review-code Step 6 owes, in every profile
   whether to mention the re-run at all, and who decides it -- and the second
   is not a replacement for the first.
 
+the slices, bounded at both ends
+
+  every assertion here is scoped to a section, and an assertion scoped to a
+  slice is only as strong as the slice. two things follow, both of them
+  defects the review swarm found latent rather than live.
+
+  a terminator is never allowed to be MISSING. slice_at used to fall back to
+  end-of-file when nothing matched, so losing the bullet after review-code
+  Step 6's re-run bullet would have silently widened that slice to the rest of
+  the file, where its two positive assertions could be satisfied by unrelated
+  prose. an unterminated slice is now an error.
+
+  a terminator is not looked for inside a fenced block. HEADING is /^#/,
+  which a shell comment in a ``` fence matches, so a fenced example containing
+  one would have ended the slice early and quietly dropped every assertion
+  past it -- including the forbidden-sentence check.
+
+the profile list is derived, not written down
+
+  the reviewer asked for this and was right: a hardcoded list of three
+  profiles needs a human to remember it when a fourth arrives. it is derived
+  from capability rather than from names -- a real directory under profiles/
+  carrying .claude/CLAUDE.md -- which is how larrabeedylan_home_pi excludes
+  itself without a denylist, since it ships no user-level CLAUDE.md and
+  reaches these skills through a symlink.
+
+  a denylist was the reviewer's own suggestion and is the worse half of it: it
+  fails on a CORRECT repo the next time a profile legitimately ships no
+  CLAUDE.md, and a check that fires on correct runs is one people learn to
+  read past. deriving from the file's presence fails the other way, so the
+  discovered count goes in the ok line and zero profiles is an error -- that
+  being the state in which every assertion below would pass vacuously.
+
 what it deliberately does not check
 
   that any run actually asked. nothing reachable from a test observes a swarm
   launch, which is the same reason the re-auth gate shipped without an
   interlock. this pins what the prose instructs.
 
-  the Pi profile. its skills/ is a symlink into home_darwin and it ships no
-  user-level CLAUDE.md, so there is nothing of its own to check.
+  that a REWORDED grant is caught. the positive assertions are token
+  searches, so prose keeping every token while reversing its sense passes, and
+  review-code Step 6 gets no negative assertion at all because the property
+  there -- "does not read as a recommendation to act" -- has no mechanical
+  form. this bound is real and is written down rather than papered over: the
+  verbatim-sentence check is the guard with teeth, and the rest raise the cost
+  of drifting back by accident rather than making it impossible.
 
 why a separate checker at all
 
@@ -130,6 +186,30 @@ why a separate checker at all
 """
 
 
+def discover_profiles():
+    root = os.path.join(REPO, 'profiles')
+    found = []
+    for name in sorted(os.listdir(root)):
+        path = os.path.join(root, name)
+        if os.path.islink(path) or not os.path.isdir(path):
+            continue
+        if os.path.isfile(os.path.join(path, '.claude', 'CLAUDE.md')):
+            found.append(name)
+    return found
+
+
+def fenced_mask(lines):
+    mask = []
+    inside = False
+    for line in lines:
+        if FENCE.match(line):
+            mask.append(True)
+            inside = not inside
+            continue
+        mask.append(inside)
+    return mask
+
+
 def read_lines(problems, label, path):
     if not os.path.isfile(path):
         problems.append(f'{label}: no file at {path}')
@@ -138,14 +218,22 @@ def read_lines(problems, label, path):
         return handle.read().split('\n')
 
 
-def slice_at(lines, start_re, end_re):
+def slice_at(problems, label, what, lines, start_re, end_res):
     starts = [i for i, line in enumerate(lines) if start_re.match(line)]
     if len(starts) != 1:
-        return None, len(starts)
+        problems.append(f'{label}: {len(starts)} {what}; expected exactly 1')
+        return None
     start = starts[0]
-    end = next((i for i in range(start + 1, len(lines)) if end_re.match(lines[i])),
-               len(lines))
-    return '\n'.join(lines[start:end]), 1
+    mask = fenced_mask(lines)
+    for i in range(start + 1, len(lines)):
+        if mask[i]:
+            continue
+        if any(end.match(lines[i]) for end in end_res):
+            return '\n'.join(lines[start:i])
+    problems.append(f'{label}: the {what} slice reaches end of file with no '
+                    f'terminator, so its assertions could be satisfied by '
+                    f'unrelated prose further down')
+    return None
 
 
 def check_global(problems, profile):
@@ -155,10 +243,9 @@ def check_global(problems, profile):
     if lines is None:
         return False
 
-    section, found = slice_at(lines, GLOBAL_START, HEADING)
+    section = slice_at(problems, label, '"Spawn subagents freely" heading(s)',
+                       lines, GLOBAL_START, (HEADING,))
     if section is None:
-        problems.append(f'{label}: {found} "Spawn subagents freely" heading(s); '
-                        f'expected 1')
         return False
 
     if not MUST_BE_OFFERED.search(section):
@@ -196,18 +283,19 @@ def check_autopilot(problems, profile):
     if lines is None:
         return False
 
-    section, found = slice_at(lines, STEP_5B_START, HEADING)
+    section = slice_at(problems, label, '"Step 5b" heading(s)',
+                       lines, STEP_5B_START, (HEADING,))
     if section is None:
-        problems.append(f'{label}: {found} "Step 5b" heading(s); expected 1')
         return False
 
     if not ONCE_PER_RUN.search(section):
         problems.append(f'{label}: Step 5b no longer carries the once-per-run bound; '
                         f'the fix narrowed who decides the exception, not the bound')
     if OLD_GRANT.search(section):
-        problems.append(f'{label}: Step 5b still states the re-run as justified in its '
-                        f'own prose; that sentence was cited to spend an unasked swarm '
-                        f'(quoting the old wording as a record is allowed)')
+        problems.append(f'{label}: Step 5b contains the old grant sentence "one '
+                        f're-run is justified when a round changed…", which was cited '
+                        f'to spend an unasked swarm; keep the citation truncated at '
+                        f'"justified when…" so it names the wording without carrying it')
     if not OFFERING.search(section) or not NEVER_LAUNCH.search(section):
         problems.append(f'{label}: Step 5b does not license an offer and forbid the '
                         f'launch; the failing run offered nothing and launched anyway')
@@ -229,9 +317,9 @@ def check_review_code(problems, profile):
     if lines is None:
         return False
 
-    bullet, found = slice_at(lines, RERUN_BULLET, TOP_BULLET)
+    bullet = slice_at(problems, label, '"Re-run at a higher" bullet(s)',
+                      lines, RERUN_BULLET, (TOP_BULLET, HEADING))
     if bullet is None:
-        problems.append(f'{label}: {found} "Re-run at a higher" bullet(s); expected 1')
         return False
 
     if not USERS_TO_AUTHORISE.search(bullet) or not OFFER_AND_STOP.search(bullet):
@@ -249,10 +337,17 @@ def main():
         print(RULES, end='')
         return 0
 
+    profiles = discover_profiles()
+    if not profiles:
+        print('1 problem(s):')
+        print('  no profile under profiles/ carries .claude/CLAUDE.md, so every '
+              'assertion below would pass vacuously')
+        return 1
+
     problems = []
     checked = 0
 
-    for profile in PROFILES:
+    for profile in profiles:
         for check in (check_global, check_autopilot, check_review_code):
             if check(problems, profile):
                 checked += 1
@@ -263,7 +358,8 @@ def main():
             print(f'  {problem}')
         return 1
 
-    print(f'ok: {checked} section(s) across {len(PROFILES)} profiles')
+    print(f'ok: {checked} section(s) across {len(profiles)} discovered '
+          f'profile(s): {", ".join(profiles)}')
     return 0
 
 
