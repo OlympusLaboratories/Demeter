@@ -18,6 +18,9 @@ forge-watch's terminal-state classification
   a closed one is terminal and syncs the checklist on its way out
   checks settling is reported, never terminal, while the request is still open
   the same conclusion on a new head is reported again
+  so is a re-run that settles the same way on an unchanged head
+  the README's Monitor filter carries TERMINAL and CHECKS, and every
+      alternative in it is a prefix watch.sh still emits
   a failed poll emits POLL ERROR carrying stderr, and MAX_ERRORS in a row exits 1
 
 Why this test exists. OLY-35 was a watcher that could not recognise the state it
@@ -69,6 +72,10 @@ if [[ -n "${STUB_OUT2:-}" && -n "${STUB_COUNT:-}" ]]; then
   [[ -f "$STUB_COUNT" ]] && n="$(cat "$STUB_COUNT")"
   n=$((n + 1))
   printf '%s' "$n" > "$STUB_COUNT"
+  if [[ $n -ge 3 && -n "${STUB_OUT3:-}" ]]; then
+    printf '%s\n' "$STUB_OUT3"
+    exit 0
+  fi
   if [[ $n -ge 2 ]]; then
     printf '%s\n' "$STUB_OUT2"
     exit 0
@@ -93,6 +100,13 @@ run() {
 run_twice() {
   rm -f "$STUB_DIR/count"
   STUB_OUT="$1" STUB_OUT2="$2" STUB_COUNT="$STUB_DIR/count" MAX_POLLS=2 SLEEP=0 \
+    PATH="$STUB_DIR:$PATH" "$WATCH" acme repo 7 2>&1
+}
+
+run_thrice() {
+  rm -f "$STUB_DIR/count"
+  STUB_OUT="$1" STUB_OUT2="$2" STUB_OUT3="$3" STUB_COUNT="$STUB_DIR/count" \
+    MAX_POLLS=3 SLEEP=0 \
     PATH="$STUB_DIR:$PATH" "$WATCH" acme repo 7 2>&1
 }
 
@@ -159,6 +173,20 @@ check "a new head is reported" "$out" "head=def5678"
 [[ "$(grep -c 'CHECK build FAILURE' <<<"$out")" == "2" ]] \
   && { printf '  ok   — the same conclusion on a new head is reported again\n'; PASS=$((PASS + 1)); } \
   || { printf '  fail — the same conclusion on a new head is reported again\n'
+       printf '         got:    %s\n' "$(tr '\n' '|' <<<"$out")"; FAIL=$((FAIL + 1)); }
+
+out="$(run_thrice "$PR_OPEN"$'\nCHECK\037build\037COMPLETED\037FAILURE' \
+                  "$PR_OPEN"$'\nCHECK\037build\037IN_PROGRESS\037' \
+                  "$PR_OPEN"$'\nCHECK\037build\037COMPLETED\037FAILURE')"
+check "a re-run on the same head is seen starting" "$out" "WAITING 1 of 1 check(s) still running"
+[[ "$(grep -c 'CHECK build FAILURE' <<<"$out")" == "2" ]] \
+  && { printf '  ok   — a re-run settling the same way on the same head is reported again\n'
+       PASS=$((PASS + 1)); } \
+  || { printf '  fail — a re-run settling the same way on the same head is reported again\n'
+       printf '         got:    %s\n' "$(tr '\n' '|' <<<"$out")"; FAIL=$((FAIL + 1)); }
+[[ "$(grep -c 'CHECKS finished with failures' <<<"$out")" == "2" ]] \
+  && { printf '  ok   — and so is the settle summary\n'; PASS=$((PASS + 1)); } \
+  || { printf '  fail — and so is the settle summary\n'
        printf '         got:    %s\n' "$(tr '\n' '|' <<<"$out")"; FAIL=$((FAIL + 1)); }
 
 out="$(run "$PR_OPEN"$'\nCHECK\037build\037IN_PROGRESS\037')"
@@ -238,6 +266,38 @@ check "a failing sync does not kill the watch" "$out" "poll budget reached after
 [[ "$(grep -c 'CHECKLIST ERROR' <<<"$out")" == "1" ]] \
   && { printf '  ok   — a repeated sync error is said once\n'; PASS=$((PASS + 1)); } \
   || { printf '  fail — a repeated sync error is said once\n'; FAIL=$((FAIL + 1)); }
+
+README="$REPO/tools/forge-watch/README.md"
+FILTER="$(grep -o 'grep -E --line-buffered "[^"]*"' "$README" | head -1 \
+  | sed 's/.*--line-buffered "//; s/"$//')"
+if [[ -z "$FILTER" ]]; then
+  printf '  fail — the README still documents a Monitor filter\n'
+  FAIL=$((FAIL + 1))
+else
+  printf '  ok   — the README documents a Monitor filter\n'
+  PASS=$((PASS + 1))
+  EMITS="$(grep -oE 'say(_once)? "[A-Z]+' "$WATCH" | sed 's/.*"//' | sort -u)"
+  for want in TERMINAL CHECKS; do
+    if grep -qE "(^|\|)${want}" <<<"$FILTER"; then
+      printf '  ok   — the filter carries %s\n' "$want"
+      PASS=$((PASS + 1))
+    else
+      printf '  fail — the filter does not carry %s, so the run is never woken by it\n' "$want"
+      printf '         filter: %s\n' "$FILTER"
+      FAIL=$((FAIL + 1))
+    fi
+  done
+  for alt in $(tr '|' '\n' <<<"$FILTER" | grep -oE '^[A-Z]+'); do
+    if grep -qx -- "$alt" <<<"$EMITS"; then
+      printf '  ok   — the filter alternative %s is a prefix watch.sh emits\n' "$alt"
+      PASS=$((PASS + 1))
+    else
+      printf '  fail — the filter matches %s, which watch.sh no longer emits\n' "$alt"
+      printf '         emitted: %s\n' "$(tr '\n' ' ' <<<"$EMITS")"
+      FAIL=$((FAIL + 1))
+    fi
+  done
+fi
 
 echo
 if [[ $FAIL -gt 0 ]]; then

@@ -86,6 +86,8 @@ run-checklist.py, checked over every profile copy:
   that, beside a live Monitor                 stays armed, and reports the stale one
   in flight on an unfindable handle           stays armed - absence is not evidence
   in flight on a Monitor                      stays armed - nothing can observe one
+  one finished handle among several           stays armed - the item still waits
+  a handle only mentioned in the prose        stays armed - "workflow <id>" is the form
   every item done or skipped                  the page says complete
   a "</script>" in an item                    is escaped, and still round-trips
   an obligation carrying HTML                 is escaped in the table
@@ -727,6 +729,17 @@ def check_finished_handle(suite, tag, script, work):
     body = verdict("monitor", [flight("pipeline", "a Monitor on the pipeline"),
                                pending("merge")])
     suite.ok("%s a Monitor is unobservable, so it stays armed" % tag,
+             "Armed" in body and "which has finished" not in body, body[:400])
+
+    body = verdict("both", [flight("review", "workflow %s and workflow %s"
+                                   % (DEAD_HANDLE, LIVE_HANDLE)),
+                            pending("merge")])
+    suite.ok("%s one finished handle among several is not a dead item" % tag,
+             "Armed" in body and "which has finished" not in body, body[:400])
+
+    body = verdict("prose", [flight("review", "reworking findings from "
+                                    + DEAD_HANDLE), pending("merge")])
+    suite.ok("%s a handle merely mentioned is not what the item awaits" % tag,
              "Armed" in body and "which has finished" not in body, body[:400])
 
 

@@ -44,7 +44,8 @@ PROJECTS = os.environ.get(
     "CLAUDE_PROJECTS",
     os.path.join(os.path.expanduser("~"), ".claude", "projects"),
 )
-WORKFLOW_HANDLE = re.compile(r"\bwf_[A-Za-z0-9][A-Za-z0-9-]*")
+WORKFLOW_HANDLE = re.compile(r"\bworkflow\s+(wf_[A-Za-z0-9][A-Za-z0-9-]*)",
+                             re.IGNORECASE)
 
 STATE_LABEL = {
     "pending": "pending",
@@ -296,11 +297,25 @@ def canonical(document, path):
 
 
 def finished_workflow(waiting_on):
-    for handle in WORKFLOW_HANDLE.findall(waiting_on or ""):
-        if next(glob.iglob(os.path.join(PROJECTS, "*", "*", "workflows",
-                                        handle + ".json")), None):
-            return handle
-    return ""
+    handles = WORKFLOW_HANDLE.findall(waiting_on or "")
+    if not handles:
+        return ""
+    for handle in handles:
+        if not next(glob.iglob(os.path.join(PROJECTS, "*", "*", "workflows",
+                                            handle + ".json")), None):
+            return ""
+    return ", ".join(handles)
+
+
+def dead_items(items):
+    found = []
+    for entry in items:
+        if entry["state"] != "in-flight":
+            continue
+        handle = finished_workflow(entry["waiting_on"])
+        if handle:
+            found.append((entry, handle))
+    return found
 
 
 def finished_clause(dead):
@@ -312,15 +327,10 @@ def standing(items):
     outstanding = [entry for entry in items if entry["state"] in OPEN_STATES]
     if not outstanding:
         return "complete", "Every item is done or skipped.", []
-    live, dead = [], []
-    for entry in items:
-        if entry["state"] != "in-flight":
-            continue
-        handle = finished_workflow(entry["waiting_on"])
-        if handle:
-            dead.append((entry, handle))
-        else:
-            live.append(entry)
+    dead = dead_items(items)
+    gone = {id(entry) for entry, _ in dead}
+    live = [entry for entry in items
+            if entry["state"] == "in-flight" and id(entry) not in gone]
     if live:
         sentence = "Waiting on %s." % "; ".join(
             "%s — %s" % (entry["obligation"], entry["waiting_on"]) for entry in live
@@ -409,19 +419,29 @@ def mark_outstanding(document):
                      + [entry.get("branch", "") for entry in document["stages"]]):
             if name and name not in branches:
                 branches.append(name)
+        open_ids = [entry["id"] for entry in items
+                    if entry["state"] in OPEN_STATES]
+        flight_on = dict((entry["id"], entry["waiting_on"]) for entry in items
+                         if entry["state"] == "in-flight")
+        before = pages.get(key) or {}
+        settled = (before.get("open") == open_ids
+                   and before.get("in_flight_on") == flight_on
+                   and before.get("verdict") == verdict)
+        stops = before.get("stops") if settled else 0
         pages[key] = {
             "url": run.get("url", ""),
             "hash": run.get("hash", ""),
             "branch": branch,
             "branches": branches,
             "at": time.time(),
-            "stops": 0,
+            "stops": stops if isinstance(stops, int) else 0,
             "verdict": verdict,
-            "open": [entry["id"] for entry in items if entry["state"] in OPEN_STATES],
+            "open": open_ids,
             "in_flight": [entry["id"] for entry in in_flight],
-            "in_flight_on": dict((entry["id"], entry["waiting_on"])
-                                 for entry in in_flight),
+            "in_flight_on": flight_on,
         }
+        if settled and before.get("held") is not None:
+            pages[key]["held"] = before["held"]
 
     if pages:
         state["checklist_pending"] = pages
@@ -1508,16 +1528,33 @@ what it guarantees, and what each one is written against:
   with no item in flight renders as an alarm, which is what makes autopilot's
   rule checkable rather than aspirational
 
-  an in-flight item whose waiting_on names a workflow that has finished does
-  not count as armed. the workflow's state file is written once, when it ends,
-  so the file existing is positive evidence that the thing is dead - absent is
-  unknown and changes nothing, which is why a waiting_on naming a Monitor is
-  left alone rather than guessed at. the item is NOT promoted: a finished
-  workflow does not mean its findings were worked, so the obligation stays
-  in-flight and only stops counting. the verdict goes stalled only when EVERY
-  in-flight item is dead, because a stale review beside a live pipeline
-  monitor is a healthy run and a gate that fires on those is a gate people
-  switch off. the dead handle is named in the sentence either way
+  an in-flight item waiting on a workflow that has finished does not count as
+  armed. the workflow's state file is written once, when it ends, so the file
+  existing is positive evidence the thing is dead - absent is unknown and
+  changes nothing, which is why a waiting_on naming a Monitor is left alone
+  rather than guessed at. the item is NOT promoted: a finished workflow does
+  not mean its findings were worked, so the obligation stays in-flight and
+  only stops counting toward "armed"
+
+  only "workflow <id>" counts as the thing an item awaits, and EVERY handle in
+  that waiting_on must have a state file. waiting_on is prose a human writes,
+  so a line that merely mentions a finished run ("reworking the findings from
+  wf_x") is not an item waiting on it, and an item still waiting on one live
+  workflow is not dead because a sibling handle ended. both directions were
+  false holds on correct runs
+
+  the verdict answers "will anything wake this run", so a dead item beside a
+  live one is still armed - a live sibling genuinely wakes the run. whether an
+  obligation was DROPPED is a different question, and in_flight_on carries
+  every in-flight item's waiting_on, dead ones included, so the Stop hook
+  re-judges them itself and holds on any handle it can prove has finished.
+  conflating the two is what let a dead swarm hide behind the pipeline item
+  autopilot ticks beside it
+
+  a write that changes nothing keeps the stop count and the spent hold. the
+  watcher reconciles every 60s, so counting a no-op poll as a write made the
+  three-turn-end staleness path unreachable for the rest of a run - and
+  resetting the hold on one would re-arm it every poll instead
 
   every render carries an updated-at stamp, so a refresh proves the page is
   live rather than a frozen copy. it carries the same instant as a number

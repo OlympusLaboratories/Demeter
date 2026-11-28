@@ -93,6 +93,8 @@ JQ='.data.repository.pullRequest as $pr
 
 declare -A SAID=()
 HEAD_KEY=""
+SETTLED=""
+ROUND=0
 polls=0
 errors=0
 
@@ -170,7 +172,16 @@ poll() {
     return 1
   fi
 
-  HEAD_KEY="$head"
+  local restarted=0
+  while IFS=$'\037' read -r kind _ phase _; do
+    [[ "$kind" == "CHECK" ]] || continue
+    still_running "$phase" && restarted=1
+  done <<<"$raw"
+  if [[ "$SETTLED" == "$head" && $restarted -eq 1 ]]; then
+    ROUND=$((ROUND + 1))
+    SETTLED=""
+  fi
+  HEAD_KEY="$head#$ROUND"
 
   say_once "STATUS state=$state merged=$merged review=$decision head=$head"
   [[ "$decision" != "NONE" ]] && say_once "REVIEW decision=$decision"
@@ -214,6 +225,7 @@ poll() {
   else
     say_once "CHECKS all $checks check(s) complete and green"
   fi
+  SETTLED="$head"
   return 2
 }
 

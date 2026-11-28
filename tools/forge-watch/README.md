@@ -71,10 +71,25 @@ Exiting bought nothing, which is the part worth understanding: the `Monitor` too
 the process then ends. Reporting and exiting were never the same action.
 
 That made the dedup map outlive a commit for the first time, and `say_once` had to change
-with it. Its key is now the head SHA plus the text, so a check that failed, was fixed and
-failed again on the new commit is reported again instead of being swallowed as "already
-said". Keyed on the text alone, the watch would have stayed alive and gone quiet — which is
-the one failure this tool exists to prevent, arriving by the opposite route.
+with it. Its key is now the head SHA plus a generation plus the text, so a check that
+failed, was fixed and failed again on the new commit is reported again instead of being
+swallowed as "already said". Keyed on the text alone, the watch would have stayed alive and
+gone quiet — which is the one failure this tool exists to prevent, arriving by the opposite
+route.
+
+The generation is why the head alone is not enough. A job can be **re-run on an unchanged
+commit** — a retried flake, or a re-requested review — and if it settles the same way, every
+line about it is already in the map. So the watch tracks the head it last reported settled
+for, and when that head has a pending check again it starts a new generation: a backward
+transition is the only honest signal that new information is coming. It is also monotonic,
+where keying on a fingerprint of the check set would return to a value already said and go
+quiet a second time.
+
+One consequence belongs to whoever reads the checklist rather than this tool. A watch that
+lives until the merge calls `run-checklist.py reconcile` every poll, and a poll that changes
+nothing must not count as a write — otherwise the checklist's three-turn-end staleness gate
+can never accumulate for the rest of the run. `mark_outstanding()` owns that, and preserves
+the stop count and the spent hold together when nothing changed.
 
 ## Why it uses only `gh`
 

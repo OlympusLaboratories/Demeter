@@ -18,7 +18,8 @@ STATE = os.path.join(CLAUDE, "notify-state")
 AWAY_PATH = os.path.join(STATE, "away.json")
 SESSIONS = os.path.join(STATE, "sessions")
 PROJECTS = os.environ.get("CLAUDE_PROJECTS", os.path.join(CLAUDE, "projects"))
-WORKFLOW_HANDLE = re.compile(r"\bwf_[A-Za-z0-9][A-Za-z0-9-]*")
+WORKFLOW_HANDLE = re.compile(r"\bworkflow\s+(wf_[A-Za-z0-9][A-Za-z0-9-]*)",
+                             re.IGNORECASE)
 LOG_PATH = os.path.join(STATE, "notify.log")
 LOG_LIMIT = 1024 * 1024
 PLACEHOLDER = "REPLACE_ME"
@@ -1139,11 +1140,14 @@ CHECKLIST_FORK = (
 def finished_workflow(waiting_on):
     if not isinstance(waiting_on, str):
         return ""
-    for handle in WORKFLOW_HANDLE.findall(waiting_on):
-        if next(glob.iglob(os.path.join(PROJECTS, "*", "*", "workflows",
-                                        handle + ".json")), None):
-            return handle
-    return ""
+    handles = WORKFLOW_HANDLE.findall(waiting_on)
+    if not handles:
+        return ""
+    for handle in handles:
+        if not next(glob.iglob(os.path.join(PROJECTS, "*", "*", "workflows",
+                                            handle + ".json")), None):
+            return ""
+    return ", ".join(handles)
 
 
 def checklist_finished(page):
@@ -1153,19 +1157,18 @@ def checklist_finished(page):
     dead = []
     for ident in sorted(waiting):
         handle = finished_workflow(waiting[ident])
-        if not handle:
-            return ""
-        dead.append("%s (%s)" % (handle, ident))
+        if handle:
+            dead.append("%s (%s)" % (handle, ident))
     return ", ".join(dead)
 
 
 def checklist_reason(page):
     stops = page.get("stops")
-    if page.get("verdict") == "stalled":
-        return "nothing is in flight"
     finished = checklist_finished(page)
     if finished:
-        return ("everything it says is in flight has finished — %s" % finished)
+        return ("an item it says is in flight has finished — %s" % finished)
+    if page.get("verdict") == "stalled":
+        return "nothing is in flight"
     if isinstance(stops, int) and stops >= CHECKLIST_STALE_STOPS:
         return ("it has not been written since %d turns ended"
                 % CHECKLIST_STALE_STOPS)
@@ -1664,7 +1667,7 @@ def cmd_checklist_status(args):
             print("in flight: %s" % ", ".join(in_flight))
         finished = checklist_finished(page)
         if finished:
-            print("but everything in flight has finished: %s" % finished)
+            print("but these have finished: %s" % finished)
 
     here = branch_label(os.getcwd())
     default = default_branch_label(os.getcwd())
