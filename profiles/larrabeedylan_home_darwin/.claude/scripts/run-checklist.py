@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import glob
 import html
 import json
 import os
@@ -38,6 +39,12 @@ EXPIRES = "30d"
 
 SESSIONS = os.path.join(os.path.expanduser("~"), ".claude", "notify-state", "sessions")
 SESSION_KEYS = ("CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID")
+
+PROJECTS = os.environ.get(
+    "CLAUDE_PROJECTS",
+    os.path.join(os.path.expanduser("~"), ".claude", "projects"),
+)
+WORKFLOW_HANDLE = re.compile(r"\bwf_[A-Za-z0-9][A-Za-z0-9-]*")
 
 STATE_LABEL = {
     "pending": "pending",
@@ -288,18 +295,48 @@ def canonical(document, path):
     return {"run": run, "stages": stages, "items": items}
 
 
+def finished_workflow(waiting_on):
+    for handle in WORKFLOW_HANDLE.findall(waiting_on or ""):
+        if next(glob.iglob(os.path.join(PROJECTS, "*", "*", "workflows",
+                                        handle + ".json")), None):
+            return handle
+    return ""
+
+
+def finished_clause(dead):
+    return "; ".join("%s says it is waiting on %s, which has finished"
+                     % (entry["obligation"], handle) for entry, handle in dead)
+
+
 def standing(items):
-    in_flight = [entry for entry in items if entry["state"] == "in-flight"]
     outstanding = [entry for entry in items if entry["state"] in OPEN_STATES]
     if not outstanding:
         return "complete", "Every item is done or skipped.", []
-    if in_flight:
-        return "armed", "Waiting on %s." % "; ".join(
-            "%s — %s" % (entry["obligation"], entry["waiting_on"]) for entry in in_flight
-        ), in_flight
+    live, dead = [], []
+    for entry in items:
+        if entry["state"] != "in-flight":
+            continue
+        handle = finished_workflow(entry["waiting_on"])
+        if handle:
+            dead.append((entry, handle))
+        else:
+            live.append(entry)
+    if live:
+        sentence = "Waiting on %s." % "; ".join(
+            "%s — %s" % (entry["obligation"], entry["waiting_on"]) for entry in live
+        )
+        if dead:
+            sentence += " Stale: %s." % finished_clause(dead)
+        return "armed", sentence, live
+    plural = "" if len(outstanding) == 1 else "s"
+    if dead:
+        return ("stalled",
+                "%d item%s outstanding and nothing is in flight: %s."
+                % (len(outstanding), plural, finished_clause(dead)),
+                [])
     return ("stalled",
             "%d item%s outstanding and nothing is in flight."
-            % (len(outstanding), "" if len(outstanding) == 1 else "s"),
+            % (len(outstanding), plural),
             [])
 
 
@@ -382,6 +419,8 @@ def mark_outstanding(document):
             "verdict": verdict,
             "open": [entry["id"] for entry in items if entry["state"] in OPEN_STATES],
             "in_flight": [entry["id"] for entry in in_flight],
+            "in_flight_on": dict((entry["id"], entry["waiting_on"])
+                                 for entry in in_flight),
         }
 
     if pages:
@@ -1326,9 +1365,10 @@ what it guarantees, and what each one is written against:
   tick refuses to put implement, commit, describe or open in flight or done
   while plan is still pending, because the plan gate is armed only by
   complying with it: a run that never publishes a plan sets no gate marker
-  for the Stop hook to hold on, and standing() reads ANY in-flight item as
-  healthy, so plan can sit open for a whole run behind a watcher whose
-  per-poll reconcile keeps resetting the staleness count. a run judged a
+  for the Stop hook to hold on, and standing() reads an in-flight item whose
+  waiting_on names nothing checkable as healthy, so plan can sit open for a
+  whole run behind a watcher whose per-poll reconcile keeps resetting the
+  staleness count. a run judged a
   one-line change too small for a plan and shipped it, which is the judgement
   this refusal takes away. the way through is plan=done, or
   plan=skipped:<reason> - and canonical already requires that reason, so a
@@ -1467,6 +1507,17 @@ what it guarantees, and what each one is written against:
   "nothing armed" is computed from the items, never asserted: outstanding work
   with no item in flight renders as an alarm, which is what makes autopilot's
   rule checkable rather than aspirational
+
+  an in-flight item whose waiting_on names a workflow that has finished does
+  not count as armed. the workflow's state file is written once, when it ends,
+  so the file existing is positive evidence that the thing is dead - absent is
+  unknown and changes nothing, which is why a waiting_on naming a Monitor is
+  left alone rather than guessed at. the item is NOT promoted: a finished
+  workflow does not mean its findings were worked, so the obligation stays
+  in-flight and only stops counting. the verdict goes stalled only when EVERY
+  in-flight item is dead, because a stale review beside a live pipeline
+  monitor is a healthy run and a gate that fires on those is a gate people
+  switch off. the dead handle is named in the sentence either way
 
   every render carries an updated-at stamp, so a refresh proves the page is
   live rather than a frozen copy. it carries the same instant as a number

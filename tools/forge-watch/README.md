@@ -26,9 +26,9 @@ the whole protection, and it is cheaper than every alternative — see autopilot
 
 ## What it emits
 
-Every line is an event, and every line is emitted **once**. A state that has not changed
-is not repeated, because a `persistent: true` monitor that reports the same thing every 60
-seconds is stopped by the harness for producing too many events.
+Every line is an event, and every line is emitted **once per commit**. A state that has not
+changed is not repeated, because a `persistent: true` monitor that reports the same thing
+every 60 seconds is stopped by the harness for producing too many events.
 
 | Line | When |
 | --- | --- |
@@ -38,15 +38,43 @@ seconds is stopped by the harness for producing too many events.
 | `CHECK <name> <conclusion>` | a check reaches a terminal conclusion |
 | `WAITING n of m check(s) still running` | checks exist and some are pending |
 | `CHECKS none reported yet` | the head commit has no checks attached yet |
+| `CHECKS all n check(s) complete and green` | every check on this commit passed |
+| `CHECKS finished with failures: …` | every check finished and at least one did not pass |
 | `POLL ERROR …` | one poll failed, carrying the command's stderr |
-| `TERMINAL …` | merged, closed, every check finished, the poll budget ran out, or the watch gave up |
+| `TERMINAL …` | merged, closed, the poll budget ran out, or the watch gave up |
 
 It exits `0` on a terminal state and `1` when it gave up or `gh` is absent. A suggested
 `Monitor` filter:
 
 ```
-grep -E --line-buffered "TERMINAL|POLL ERROR|REVIEW |THREADS unresolved=[1-9]"
+grep -E --line-buffered "TERMINAL|CHECKS |POLL ERROR|REVIEW |THREADS unresolved=[1-9]"
 ```
+
+`CHECKS ` is in that filter and not optional: it is how the run hears that CI settled, now
+that settling is not an exit.
+
+## Checks settling is not a terminal state
+
+Only the request's own end states end the watch — `merged`, `closed`, the poll budget, and
+`MAX_ERRORS` consecutive failed polls. Every check going green does **not**, because green
+on an open pull request is the ordinary mid-run condition of one waiting on a review
+verdict, a merge gate, or another push.
+
+OLY-260 is what that cost. The watch exited the moment CI passed, and a review round is
+*expected* to push again — autopilot routes every confirmed finding through `fix-feedback`
+and then pushes — so `green → push → green` is the designed happy path and the watch was
+guaranteed to be gone before the second push. Nothing re-armed it. One run sat for an hour
+with its pull request approved, then conflicted, and nothing watching it.
+
+Exiting bought nothing, which is the part worth understanding: the `Monitor` tool turns
+**every stdout line** into an event, so the run is woken by the green line whether or not
+the process then ends. Reporting and exiting were never the same action.
+
+That made the dedup map outlive a commit for the first time, and `say_once` had to change
+with it. Its key is now the head SHA plus the text, so a check that failed, was fixed and
+failed again on the new commit is reported again instead of being swallowed as "already
+said". Keyed on the text alone, the watch would have stayed alive and gone quiet — which is
+the one failure this tool exists to prevent, arriving by the opposite route.
 
 ## Why it uses only `gh`
 
