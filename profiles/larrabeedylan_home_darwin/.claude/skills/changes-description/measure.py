@@ -1,5 +1,6 @@
 import re, sys
-lines = open(sys.argv[1]).read().split('\n')
+with open(sys.argv[1], encoding='utf-8') as handle:
+    lines = handle.read().split('\n')
 diff_lines, files = int(sys.argv[2]), int(sys.argv[3])
 size = 'large' if diff_lines > 1200 or files > 12 else 'medium' if diff_lines > 300 or files > 4 else 'small'
 total, summary_cap, bullet_cap, changes_cap = {
