@@ -92,6 +92,9 @@ JQ='.data.repository.pullRequest as $pr
    | join("\u001f"))'
 
 declare -A SAID=()
+HEAD_KEY=""
+SETTLED=""
+ROUND=0
 polls=0
 errors=0
 
@@ -124,8 +127,9 @@ sync_checklist() {
 }
 
 say_once() {
-  [[ -n "${SAID[$1]:-}" ]] && return 0
-  SAID[$1]=1
+  local key="$HEAD_KEY|$1"
+  [[ -n "${SAID[$key]:-}" ]] && return 0
+  SAID[$key]=1
   say "$1"
 }
 
@@ -168,6 +172,17 @@ poll() {
     return 1
   fi
 
+  local restarted=0
+  while IFS=$'\037' read -r kind _ phase _; do
+    [[ "$kind" == "CHECK" ]] || continue
+    still_running "$phase" && restarted=1
+  done <<<"$raw"
+  if [[ "$SETTLED" == "$head" && $restarted -eq 1 ]]; then
+    ROUND=$((ROUND + 1))
+    SETTLED=""
+  fi
+  HEAD_KEY="$head#$ROUND"
+
   say_once "STATUS state=$state merged=$merged review=$decision head=$head"
   [[ "$decision" != "NONE" ]] && say_once "REVIEW decision=$decision"
   [[ "${unresolved:-0}" != "0" ]] && say_once "THREADS unresolved=$unresolved"
@@ -189,6 +204,7 @@ poll() {
     return 0
   fi
   if [[ "$state" == "CLOSED" ]]; then
+    sync_checklist "$state" "$merged" "$decision" "${unresolved:-0}" "$pending" "${#failed[@]}" "$checks" "${body64:-}"
     say "TERMINAL closed without merging"
     return 0
   fi
@@ -205,11 +221,12 @@ poll() {
   sync_checklist "$state" "$merged" "$decision" "${unresolved:-0}" "$pending" "${#failed[@]}" "$checks" "${body64:-}"
 
   if [[ ${#failed[@]} -gt 0 ]]; then
-    say "TERMINAL checks finished with failures: ${failed[*]}"
+    say_once "CHECKS finished with failures: ${failed[*]}"
   else
-    say "TERMINAL all $checks check(s) complete and green"
+    say_once "CHECKS all $checks check(s) complete and green"
   fi
-  return 0
+  SETTLED="$head"
+  return 2
 }
 
 while :; do

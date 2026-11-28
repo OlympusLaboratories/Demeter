@@ -77,6 +77,15 @@ the run checklist gate, checked over every profile copy:
     no marker at all                      never blocks
     the reason given                      names the open items and why it held
 
+  notify.py re-judges the handles rather than trusting the verdict
+    in flight on a finished workflow      blocks the Stop, naming handle and item
+    that hold                             is spent, like every other one
+    a live sibling in flight              never blocks
+    a handle with no state file           never blocks - absence is not evidence
+    a waiting_on naming a Monitor         never blocks - nothing can observe one
+    a marker predating the field          never blocks
+    a malformed or non-string field       never blocks
+
   notify.py catches a run that forked to a second branch
     the branch the marker records         never blocks
     a second branch                       blocks once, naming both branches
@@ -287,6 +296,142 @@ def check_hook(suite, profile, directory):
              bool(held) and "--checklist-clear --force" in held, held)
     suite.ok("%s: the hold names --checklist-status" % tag,
              bool(held) and "--checklist-status" in held, held)
+
+
+DEAD_HANDLE = "wf_deadbeef-111"
+LIVE_HANDLE = "wf_nosuchrun-999"
+SEAM_HANDLE = "wf_seam0001-aaa"
+
+
+def check_finished_flight(suite, profile, directory):
+    """A turn ending behind a finished workflow is held, without a write first.
+
+    standing() already turns this into verdict "stalled", but only when
+    something writes the marker. In the run that produced this, nothing did:
+    the swarm finished, six findings were worked, two commits were pushed, and
+    the turn ended with the page still reading review=in-flight. So the hook
+    re-judges the handles the writer recorded rather than trusting the verdict
+    it was handed.
+    """
+    hook, sessions = load_hook(profile, directory)
+    tag = profile
+    projects = os.path.join(directory, profile, "projects")
+    finished = os.path.join(projects, "-slug", "session", "workflows")
+    os.makedirs(finished, exist_ok=True)
+    with open(os.path.join(finished, DEAD_HANDLE + ".json"), "w") as handle:
+        json.dump({"runId": DEAD_HANDLE, "status": "completed"}, handle)
+    hook.PROJECTS = projects
+
+    put(sessions, marker(in_flight_on={"implement": "workflow " + DEAD_HANDLE}))
+    held = hook.checklist_gate(stop())
+    suite.ok("%s: a finished workflow holds the turn end" % tag, bool(held), held)
+    suite.ok("%s: the hold names the finished handle" % tag,
+             bool(held) and DEAD_HANDLE in held, held)
+    suite.ok("%s: the hold names the item it was in flight for" % tag,
+             bool(held) and "implement" in held, held)
+    suite.ok("%s: and it is spent, like every other hold" % tag,
+             hook.checklist_gate(stop()) is None)
+
+    put(sessions, marker(in_flight=["implement", "pipeline"],
+                         in_flight_on={"implement": "workflow " + DEAD_HANDLE,
+                                       "pipeline": "a Monitor on the pipeline"}))
+    held = hook.checklist_gate(stop())
+    suite.ok("%s: a live sibling does not mask a finished workflow" % tag,
+             bool(held) and DEAD_HANDLE in held, held)
+
+    put(sessions, marker(in_flight=["implement"],
+                         in_flight_on={"implement": "workflow %s and workflow %s"
+                                                    % (DEAD_HANDLE, LIVE_HANDLE)}))
+    suite.ok("%s: an item still waiting on a live workflow never holds" % tag,
+             hook.checklist_gate(stop()) is None)
+
+    put(sessions, marker(in_flight_on={
+        "implement": "reworking the findings from " + DEAD_HANDLE}))
+    suite.ok("%s: a handle merely mentioned in the prose never holds" % tag,
+             hook.checklist_gate(stop()) is None)
+
+    status, said = captured(lambda: hook.cmd_checklist_status([SESSION]))
+    suite.ok("%s: and --checklist-status does not call it finished either" % tag,
+             status == 0 and DEAD_HANDLE not in said, said)
+
+    put(sessions, marker(in_flight_on={"implement": "workflow " + DEAD_HANDLE}))
+    status, said = captured(lambda: hook.cmd_checklist_status([SESSION]))
+    suite.ok("%s: --checklist-status reports a finished handle" % tag,
+             status == 0 and DEAD_HANDLE in said, said)
+
+    put(sessions, marker(in_flight_on={"implement": "workflow " + LIVE_HANDLE}))
+    suite.ok("%s: a handle with no state file is not evidence of death" % tag,
+             hook.checklist_gate(stop()) is None)
+
+    put(sessions, marker(in_flight_on={"implement": "a Monitor on the pipeline"}))
+    suite.ok("%s: a Monitor cannot be observed, so it never holds" % tag,
+             hook.checklist_gate(stop()) is None)
+
+    put(sessions, marker())
+    suite.ok("%s: a marker predating the field never holds" % tag,
+             hook.checklist_gate(stop()) is None)
+
+    put(sessions, marker(in_flight_on=[]))
+    suite.ok("%s: a malformed field never holds" % tag,
+             hook.checklist_gate(stop()) is None)
+
+    put(sessions, marker(in_flight_on={"implement": None}))
+    suite.ok("%s: a non-string waiting_on never holds" % tag,
+             hook.checklist_gate(stop()) is None)
+
+    put(sessions, marker(verdict="stalled", in_flight=[], in_flight_on={}))
+    held = hook.checklist_gate(stop())
+    suite.ok("%s: a stalled verdict still reports nothing in flight" % tag,
+             bool(held) and "nothing is in flight" in held, held)
+
+    check_writer_seam(suite, profile, directory)
+
+
+def check_writer_seam(suite, profile, directory):
+    """The writer's marker and the hook's hold must agree on one key.
+
+    The hook's tests build markers by hand and the writer's tests read the
+    rendered page, so nothing joined the two: renaming in_flight_on on either
+    side left every assertion passing and the hold silently dead. This drives
+    the real writer, then hands its own marker to the real hook.
+    """
+    tag = profile
+    work = os.path.join(directory, profile, "seam")
+    home = os.path.join(work, "home")
+    sessions = os.path.join(home, ".claude", "notify-state", "sessions")
+    os.makedirs(sessions, exist_ok=True)
+    store = os.path.join(work, "projects", "-slug", "sess", "workflows")
+    os.makedirs(store, exist_ok=True)
+    with open(os.path.join(store, SEAM_HANDLE + ".json"), "w") as handle:
+        json.dump({"runId": SEAM_HANDLE, "status": "completed"}, handle)
+    projects = os.path.join(work, "projects")
+    env = {"HOME": home, "CLAUDE_CODE_SESSION_ID": SESSION,
+           "CLAUDE_PROJECTS": projects}
+
+    made = run_checklist(profile, work, [
+        "template", "--title", "T", "--repo", "R", "--branch", "b",
+        "--branch-mode", "new",
+    ], env)
+    suite.ok("%s: seam template exits 0" % tag, made.returncode == 0, made.stderr)
+    items = os.path.join(work, "items.json")
+    with open(items, "w") as handle:
+        handle.write(made.stdout)
+
+    ticked = run_checklist(profile, work, [
+        "tick", items, "plan=done",
+        "implement=in-flight:workflow " + SEAM_HANDLE,
+    ], env)
+    suite.ok("%s: seam tick exits 0" % tag, ticked.returncode == 0, ticked.stderr)
+    written = tracked(get(sessions))
+    suite.ok("%s: the writer records a dead item's waiting_on too" % tag,
+             written.get("in_flight_on", {}).get("implement")
+             == "workflow " + SEAM_HANDLE, written)
+
+    hook, _ = load_hook(profile, os.path.join(work, "hook"))
+    hook.PROJECTS = projects
+    reason = hook.checklist_reason(written)
+    suite.ok("%s: and the hook holds on the marker the writer wrote" % tag,
+             SEAM_HANDLE in reason, reason)
 
 
 def check_fork(suite, profile, directory):
@@ -809,6 +954,8 @@ def check_writer(suite, profile, work):
              pending.get("branch") == "b", pending)
     suite.ok("%s: a fresh marker has no stops" % tag, pending.get("stops") == 0, pending)
     suite.ok("%s: a fresh marker is not held" % tag, "held" not in pending, pending)
+    suite.ok("%s: the marker records what each in-flight item waits on" % tag,
+             pending.get("in_flight_on") == {"implement": "the plan"}, pending)
     suite.ok("%s: the writer leaves armed_at alone" % tag, state.get("armed_at") == 1234.5, state)
     suite.ok("%s: the writer leaves the thread alone" % tag, state.get("thread") == "T1", state)
     suite.ok("%s: the writer leaves last_kind alone" % tag,
@@ -831,6 +978,16 @@ def check_writer(suite, profile, work):
     suite.ok("%s: a later tick resets the stop count" % tag, pending.get("stops") == 0, pending)
     suite.ok("%s: a later tick clears the hold" % tag, "held" not in pending, pending)
 
+    with open(os.path.join(sessions, SESSION + ".json"), "w") as handle:
+        json.dump({"checklist_pending": pages(dict(pending, stops=2, held=1.0))},
+                  handle)
+    run_checklist(profile, work, ["tick", items, "implement=done"], env)
+    quiet = tracked(get(sessions))
+    suite.ok("%s: a write that changes nothing keeps the stop count" % tag,
+             quiet.get("stops") == 2, quiet)
+    suite.ok("%s: and keeps the spent hold, so it cannot re-arm every poll" % tag,
+             quiet.get("held") == 1.0, quiet)
+
     legacy = os.path.join(sessions, SESSION + ".json")
     with open(legacy, "w") as handle:
         json.dump({"checklist_pending": dict(pending, stops=9, held=1.0)}, handle)
@@ -839,7 +996,8 @@ def check_writer(suite, profile, work):
     suite.ok("%s: a write upgrades a flat marker left by the previous version" % tag,
              list((state.get("checklist_pending") or {})) == ["b"], state)
     suite.ok("%s: without stranding it as a second page" % tag,
-             tracked(state).get("stops") == 0, state)
+             len(state.get("checklist_pending") or {}) == 1
+             and "implement" not in tracked(state).get("open", []), state)
 
     second = os.path.join(work, "second.json")
     reseeded = run_checklist(profile, work, [
@@ -1387,6 +1545,8 @@ def main():
             check_fork(suite, profile, os.path.join(directory, "fork"))
             check_several_pages(suite, profile, os.path.join(directory, "pages"))
             check_escape_hatch(suite, profile, os.path.join(directory, "hatch"))
+            check_finished_flight(suite, profile,
+                                  os.path.join(directory, "finished"))
             work = os.path.join(directory, profile, "writer")
             os.makedirs(work, exist_ok=True)
             check_writer(suite, profile, work)

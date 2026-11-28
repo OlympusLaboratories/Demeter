@@ -82,6 +82,12 @@ run-checklist.py, checked over every profile copy:
   every item pending                          the page says nothing is armed
   the page icon                               matches publish-artifact.sh ICON_TASKS
   one item in flight                          the page says what it is waiting on
+  in flight on a finished workflow            the page says nothing is armed
+  that, beside a live Monitor                 stays armed, and reports the stale one
+  in flight on an unfindable handle           stays armed - absence is not evidence
+  in flight on a Monitor                      stays armed - nothing can observe one
+  one finished handle among several           stays armed - the item still waits
+  a handle only mentioned in the prose        stays armed - "workflow <id>" is the form
   every item done or skipped                  the page says complete
   a "</script>" in an item                    is escaped, and still round-trips
   an obligation carrying HTML                 is escaped in the table
@@ -654,10 +660,87 @@ def check_profile(suite, profile, work):
     check_plan_first(suite, tag, script, work, full.stdout, stacked.stdout)
     check_ledger_first(suite, tag, script, work, full.stdout, stacked.stdout)
     check_tick(suite, tag, script, work, full.stdout)
+    check_finished_handle(suite, tag, script, work)
     check_publish(suite, tag, script, work, seed)
 
 
 GATED = ("implement=in-flight:editing", "commit=done", "describe=done", "open=done")
+
+
+DEAD_HANDLE = "wf_deadbeef-111"
+LIVE_HANDLE = "wf_nosuchrun-999"
+
+
+def check_finished_handle(suite, tag, script, work):
+    """An in-flight item whose workflow has finished does not count as armed.
+
+    The workflow state file is written once, when the run ends, so the file
+    existing is the death certificate and its absence says nothing. That
+    asymmetry is the whole design: a handle nobody can find, and a waiting_on
+    naming a Monitor, both leave the verdict exactly as it was.
+    """
+    projects = os.path.join(work, "projects", "-slug", "session", "workflows")
+    os.makedirs(projects, exist_ok=True)
+    write(os.path.join(projects, DEAD_HANDLE + ".json"),
+          json.dumps({"runId": DEAD_HANDLE, "status": "completed"}))
+    environment = dict(os.environ,
+                       CLAUDE_PROJECTS=os.path.join(work, "projects"))
+
+    def verdict(label, items):
+        page = os.path.join(work, "handle-%s.html" % label)
+        finished = run(script, "render",
+                       write(os.path.join(work, "handle-%s.json" % label),
+                             document(items)),
+                       page, "--stamp", "S", env=environment)
+        suite.exits("%s render %s" % (tag, label), 0, finished)
+        return open(page, encoding="utf-8").read()
+
+    def flight(ident, waiting):
+        return {"id": ident, "obligation": ident.title(), "skill": "",
+                "target": "", "waiting_on": waiting, "state": "in-flight",
+                "note": "", "link": "", "stage": ""}
+
+    def pending(ident):
+        return {"id": ident, "obligation": ident.title(), "skill": "",
+                "target": "", "waiting_on": "", "state": "pending",
+                "note": "", "link": "", "stage": ""}
+
+    body = verdict("dead", [flight("review", "workflow " + DEAD_HANDLE),
+                            pending("merge")])
+    suite.ok("%s a finished workflow is not armed" % tag,
+             "Nothing armed" in body and "nothing is in flight" in body, body[:400])
+    suite.ok("%s and the finished handle is named" % tag,
+             DEAD_HANDLE in body and "which has finished" in body, body[:400])
+
+    body = verdict("mixed", [flight("review", "workflow " + DEAD_HANDLE),
+                             flight("pipeline", "a Monitor on the pipeline")])
+    suite.ok("%s a live sibling keeps the run armed" % tag,
+             "Armed" in body and "Nothing armed" not in body, body[:400])
+    suite.ok("%s and the stale one is still reported" % tag,
+             DEAD_HANDLE in body and "Stale" in body, body[:400])
+
+    body = verdict("unknown", [flight("review", "workflow " + LIVE_HANDLE),
+                               pending("merge")])
+    suite.ok("%s a handle with no state file is left armed" % tag,
+             "Armed" in body and "Nothing armed" not in body, body[:400])
+    suite.ok("%s and is never called finished" % tag,
+             "which has finished" not in body, body[:400])
+
+    body = verdict("monitor", [flight("pipeline", "a Monitor on the pipeline"),
+                               pending("merge")])
+    suite.ok("%s a Monitor is unobservable, so it stays armed" % tag,
+             "Armed" in body and "which has finished" not in body, body[:400])
+
+    body = verdict("both", [flight("review", "workflow %s and workflow %s"
+                                   % (DEAD_HANDLE, LIVE_HANDLE)),
+                            pending("merge")])
+    suite.ok("%s one finished handle among several is not a dead item" % tag,
+             "Armed" in body and "which has finished" not in body, body[:400])
+
+    body = verdict("prose", [flight("review", "reworking findings from "
+                                    + DEAD_HANDLE), pending("merge")])
+    suite.ok("%s a handle merely mentioned is not what the item awaits" % tag,
+             "Armed" in body and "which has finished" not in body, body[:400])
 
 
 def check_plan_first(suite, tag, script, work, seed_text, stack_text):
