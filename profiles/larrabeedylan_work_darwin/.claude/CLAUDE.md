@@ -48,8 +48,17 @@ agent back to its session drawn in green, so a swarm is something to watch rathe
 something opaque. Exploring sequentially to avoid spawning buys nothing in exchange.
 
 This covers the Agent tool only. The **Workflow** tool is a different scale — it can launch
-dozens of agents in one run — so it keeps its own opt-in and should still be offered rather
-than assumed.
+dozens of agents in one run, roughly 4M subagent tokens and a quarter of a session window —
+so it keeps its own opt-in and must be offered rather than assumed.
+
+A flag that authorises a swarm authorises **one**. `--review true` is one `review-code` run,
+not a standing licence to re-run it. Where a skill says a re-run is "justified" under some
+condition — `autopilot` Step 5b's redesign clause, `review-code` Step 6's higher-scale offer
+— that is permission to *offer* the second pass, never to decide it: the parameter is the
+budget decision and the budget is not mine. Read the mechanism myself, then say in one line
+that a second pass is available and let the user answer. Asking costs a line; launching costs
+the window. This is narrower than autopilot's "trust your judgment for everything after the
+code is written" — budget is explicitly not one of those calls.
 
 Two things a spawned agent does not inherit, so put them in its prompt:
 
