@@ -15,8 +15,10 @@ STATES = ("pending", "in-flight", "done", "skipped")
 OPEN_STATES = ("pending", "in-flight")
 PLAN_ITEM = "plan"
 PLAN_DEPENDENT = ("implement", "commit", "describe", "open")
-PLAN_CLEARED = ("done", "skipped")
-PLAN_STARTED = ("in-flight", "done")
+GATE_CLEARED = ("done", "skipped")
+GATE_STARTED = ("in-flight", "done")
+LEDGER_ITEM = "ledger"
+LEDGER_DEPENDENT = ("merge", "ready")
 ITEM_FIELDS = ("id", "obligation", "skill", "target", "waiting_on", "state", "note",
                "link", "stage")
 STAGE_FIELDS = ("id", "label", "branch", "change_request", "after")
@@ -74,6 +76,11 @@ def base_id(ident):
     return ident.split("@", 1)[0]
 
 
+def id_suffix(ident):
+    head, sep, tail = ident.partition("@")
+    return sep + tail if sep else ""
+
+
 def request_items(options, branch, suffix, belongs_to):
     request = "the %s" % (options.request_name or "change request")
 
@@ -98,6 +105,8 @@ def request_items(options, branch, suffix, belongs_to):
     if options.diagram:
         items.append(member("diagram", "Attach the call-flow diagram",
                             "changes-diagram", request))
+    items.append(member("ledger", "Publish the decision record in the description",
+                        "autopilot", request))
     if options.merge:
         items.append(member("merge", "Merge %s" % request, "autopilot", request))
     elif options.iac:
@@ -107,8 +116,6 @@ def request_items(options, branch, suffix, belongs_to):
     else:
         items.append(member("ready", "Hand over a ready %s without merging" % request,
                             "autopilot", request))
-    items.append(member("ledger", "Append the decision record to the description",
-                        "autopilot", request))
     return items
 
 
@@ -927,16 +934,40 @@ PLAN_REFUSED = (
 
 def plan_first(items):
     plan = [entry for entry in items if base_id(entry["id"]) == PLAN_ITEM]
-    if not plan or any(entry["state"] in PLAN_CLEARED for entry in plan):
+    if not plan or any(entry["state"] in GATE_CLEARED for entry in plan):
         return
     started = [entry for entry in items
                if base_id(entry["id"]) in PLAN_DEPENDENT
-               and entry["state"] in PLAN_STARTED]
+               and entry["state"] in GATE_STARTED]
     if not started:
         return
     raise ValueError(PLAN_REFUSED % (
         plan[0]["state"],
         ", ".join("%s=%s" % (entry["id"], entry["state"]) for entry in started)))
+
+
+LEDGER_REFUSED = (
+    "the decision record reaches a reader only while the change request is"
+    " open: %s is pending, so %s cannot be in flight or done. Tick %s=done"
+    " once the fold is in the description, or %s=skipped:<reason> when the"
+    " ledger is empty - a reason is required and lands on the page. Either"
+    " can go in this same command."
+)
+
+
+def ledger_first(items):
+    by_id = {entry["id"]: entry for entry in items}
+    for entry in items:
+        if base_id(entry["id"]) not in LEDGER_DEPENDENT:
+            continue
+        if entry["state"] not in GATE_STARTED:
+            continue
+        ledger = by_id.get(LEDGER_ITEM + id_suffix(entry["id"]))
+        if ledger is None or ledger["state"] in GATE_CLEARED:
+            continue
+        raise ValueError(LEDGER_REFUSED % (
+            ledger["id"], "%s=%s" % (entry["id"], entry["state"]),
+            ledger["id"], ledger["id"]))
 
 
 def apply_ticks(document, ticks):
@@ -964,6 +995,7 @@ def apply_ticks(document, ticks):
             if text:
                 entry["note"] = text
     plan_first(document["items"])
+    ledger_first(document["items"])
     return document
 
 
@@ -1304,6 +1336,23 @@ what it guarantees, and what each one is written against:
   both can go in the same command as the tick they unblock, which is the
   shape the fix skills already prescribe, and reconcile writes item states
   directly rather than through this path, so a watcher is never wedged by it
+
+  tick refuses to put merge or ready in flight or done while the paired
+  ledger item is still pending, because the decision record reaches a reader
+  only while the change request is open: the merge closes it and the branch
+  delete finishes the job, so a fold written afterwards has been delivered to
+  nobody. the way through is ledger=done once the fold is in the description,
+  or ledger=skipped:<reason> for a run that made no unreviewed calls - the
+  state Step 11.4 owes that item anyway. the ledger item is paired by SUFFIX,
+  so a stack's merge@2 is gated by ledger@2 and never by another member's,
+  each member owning its own record and its own merge. this refusal shares
+  apply_ticks with the plan gate for the same reason: reconcile writes states
+  directly, so a watcher reporting a merge that genuinely happened cannot be
+  wedged by a refusal it has no way to answer
+
+  the ledger item sits ahead of merge and ready in the seeded order, because
+  a page listing the record after the merge describes an order the run no
+  longer follows - the same reason the diagram item sits where it does
 
   tick clears waiting_on when an item leaves in-flight, so a finished item
   cannot keep advertising a blocker that is gone

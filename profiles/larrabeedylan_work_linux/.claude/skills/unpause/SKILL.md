@@ -119,8 +119,8 @@ Resume at the recorded `next_action`, with the Step 5 diff overriding it whereve
 Two things a resumed run must not do twice:
 
 - **Re-post an infrastructure apply comment.** It is posted once and idempotently. Re-read the markers per directory first; a directory that already reported its apply is done, and re-posting triggers a second apply. **Re-read `--merge` before any of that.** On `--merge false` the apply is held outright, so there is no comment to re-post and none to post for the first time — idempotency is the wrong guard here, because a run paused before it reached the gate has no marker anywhere and every per-directory check passes. Confirm the flag, then the markers.
-- **Re-publish the diagram or the decision ledger.** The file records whether each already happened. Appending a second collapsed fold to the description is the visible version of this mistake; a second apply is the expensive one.
-- **Mint a second run checklist.** The page is updated in place against the recorded identity, and the description already carries its link. Re-publishing is the same class of mistake as the second fold, with the user watching the wrong page afterwards.
+- **Re-publish the diagram, or mint a second decision fold.** The file records whether each already happened. A second apply is the expensive version of this mistake. The decision fold is the safe one: a refresh finds the existing `<details>` by its summary and replaces it, so a resumed run that writes the record again updates it rather than duplicating it — which is what makes carrying on with the ledger from the state file the right move rather than a risk.
+- **Mint a second run checklist.** The page is updated in place against the recorded identity, and the description already carries its link. Re-publishing mints a second link and freezes the one the user is holding, which is the worst of these because nothing reports it.
 
 The decision ledger continues from the text in the state file. Decisions made before the pause are already in it.
 

@@ -53,6 +53,17 @@ run-checklist.py, checked over every profile copy:
                                               fix skills prescribe
   tick plan=skipped:<reason> <gated>=...      exits 0 - a waiver the user gave is
                                               recorded on the page, never assumed
+  template --merge / --merge absent           the ledger item sits ahead of the merge,
+                                              and ahead of the ready hand-over
+  tick merge/ready while the ledger is        exits non-zero, names the ledger, and
+    still pending                             leaves the items file untouched
+  tick ledger=done merge=in-flight            exits 0 in ONE command, and so does
+                                              ledger=skipped:<reason> for an empty one
+  tick merge@2 while ledger@2 is pending      exits non-zero - a stack's record is
+                                              paired by suffix, so clearing ledger@2
+                                              never releases merge@1
+  tick pipeline while the ledger is pending   exits 0 - the refusal is the record's
+                                              dependents and not an ordering rule
   tick --run <field>=<value>                  sets a run field
   tick --run with an unknown field            exits non-zero
   tick --publish                              publishes as an update
@@ -248,12 +259,18 @@ def check_profile(suite, profile, work):
     suite.ok("%s the diagram comes after the apply gate" % tag,
              full_ids.index("apply") < full_ids.index("diagram"),
              "got %s" % full_ids)
+    suite.ok("%s the decision record comes before the merge" % tag,
+             full_ids.index("ledger") < full_ids.index("merge"),
+             "got %s" % full_ids)
 
     held = run(script, "template", "--diagram")
     suite.exits("%s template --diagram without --merge" % tag, 0, held)
     held_ids = ids(held.stdout)
     suite.ok("%s the diagram comes before the ready hand-over" % tag,
              held_ids.index("diagram") < held_ids.index("ready"),
+             "got %s" % held_ids)
+    suite.ok("%s the decision record comes before the ready hand-over" % tag,
+             held_ids.index("ledger") < held_ids.index("ready"),
              "got %s" % held_ids)
 
     unapplied = run(script, "template", "--iac")
@@ -635,6 +652,7 @@ def check_profile(suite, profile, work):
 
     check_over_http(suite, tag, script, body, full.stdout)
     check_plan_first(suite, tag, script, work, full.stdout, stacked.stdout)
+    check_ledger_first(suite, tag, script, work, full.stdout, stacked.stdout)
     check_tick(suite, tag, script, work, full.stdout)
     check_publish(suite, tag, script, work, seed)
 
@@ -678,6 +696,56 @@ def check_plan_first(suite, tag, script, work, seed_text, stack_text):
     suite.exits("%s the shared plan clears every stage" % tag, 0,
                 run(script, "tick", stacked, "plan=done",
                     "implement@2=in-flight:editing"))
+
+
+def check_ledger_first(suite, tag, script, work, seed_text, stack_text):
+    path = write(os.path.join(work, "ledger-gate.json"), seed_text)
+    load = lambda: {e["id"]: e for e in json.loads(open(path).read())["items"]}
+    run(script, "tick", path, "plan=done")
+
+    for tick in ("merge=in-flight:the pipeline", "merge=done"):
+        state = tick.split("=", 1)[1].split(":", 1)[0]
+        refused = run(script, "tick", path, tick)
+        suite.ok("%s tick refuses merge=%s while the ledger is pending"
+                 % (tag, state), refused.returncode != 0, refused.stdout)
+        suite.ok("%s refusing merge=%s names the ledger item" % (tag, state),
+                 "ledger" in refused.stderr, refused.stderr)
+        suite.ok("%s refusing merge=%s writes nothing" % (tag, state),
+                 load()["merge"]["state"] == "pending", load()["merge"]["state"])
+
+    suite.exits("%s an item the ledger does not gate still ticks" % tag, 0,
+                run(script, "tick", path, "pipeline=in-flight:CI"))
+
+    suite.exits("%s ledger=done and the merge go in one command" % tag, 0,
+                run(script, "tick", path, "ledger=done", "merge=in-flight:the queue"))
+
+    empty = write(os.path.join(work, "ledger-empty.json"), seed_text)
+    run(script, "tick", empty, "plan=done")
+    suite.ok("%s ledger=skipped with no reason is refused" % tag,
+             run(script, "tick", empty, "ledger=skipped").returncode != 0)
+    suite.exits("%s an empty ledger recorded as skipped clears the gate" % tag, 0,
+                run(script, "tick", empty, "ledger=skipped:no unreviewed calls",
+                    "merge=done"))
+
+    held = run(script, "template", "--branch", "b")
+    ready = write(os.path.join(work, "ledger-ready.json"), held.stdout)
+    run(script, "tick", ready, "plan=done")
+    refused = run(script, "tick", ready, "ready=done")
+    suite.ok("%s the hand-over is gated too, not only the merge" % tag,
+             refused.returncode != 0, refused.stdout)
+
+    stacked = write(os.path.join(work, "ledger-stack.json"), stack_text)
+    run(script, "tick", stacked, "plan=done")
+    member = run(script, "tick", stacked, "merge@2=done")
+    suite.ok("%s a stack member's merge is gated by its own ledger" % tag,
+             member.returncode != 0 and "ledger@2" in member.stderr, member.stderr)
+    suite.exits("%s one member's record clears only that member" % tag, 0,
+                run(script, "tick", stacked, "ledger@2=skipped:nothing recorded",
+                    "merge@2=done"))
+    sibling = run(script, "tick", stacked, "merge@1=done")
+    suite.ok("%s and never the sibling's" % tag,
+             sibling.returncode != 0 and "ledger@1" in sibling.stderr,
+             sibling.stderr)
 
 
 def check_tick(suite, tag, script, work, seed_text):
